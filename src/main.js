@@ -31,6 +31,8 @@ const {
     proxyPricePerGbUsd = null,
     blockHeavyResources = false,
     standardUserAgent = false,
+    fullChromium = false,
+    hideAutomationFlag = false,
     sessionCookies = '',
     proxyConfiguration: proxyInput = { useApifyProxy: true },
 } = input;
@@ -90,10 +92,18 @@ if (proxyInput?.useApifyProxy && !proxyUrl) {
     );
 }
 
+// Experiments for sites that treat the default headless shell as a bot:
+// - fullChromium: Chrome's full "new headless" mode (the same browser a person runs, without a window)
+//   instead of the stripped-down headless shell.
+// - hideAutomationFlag: do not set the "controlled by automation" blink flag (navigator.webdriver).
+// Neither logs in, solves challenges, or touches any other browser property.
 const browser = await chromium.launch({
     headless: true,
+    ...(fullChromium ? { channel: 'chromium' } : {}),
+    args: hideAutomationFlag ? ['--disable-blink-features=AutomationControlled'] : [],
     proxy: toPlaywrightProxy(proxyUrl),
 });
+log.info(`Browser ${browser.version()} (fullChromium=${fullChromium}, hideAutomationFlag=${hideAutomationFlag})`);
 // The proxy exit country changes the page language (Facebook came back in Romanian on one run), and
 // the text parsing is English-based, so ask for English like a normal browser configured for it.
 // Optional: headless Chromium announces itself as "HeadlessChrome" in its user agent. With

@@ -141,6 +141,18 @@
             "type": "boolean",
             "description": "Headless Chromium puts 'HeadlessChrome' in its user agent, which some sites treat as a bot. This announces the same browser version as ordinary Chrome. It changes nothing else and does not hide automation.",
             "default": false
+        },
+        "fullChromium": {
+            "title": "Use full Chrome (new headless mode)",
+            "type": "boolean",
+            "description": "Runs Chrome's full 'new headless' mode instead of the stripped-down headless shell. Experiment for TikTok, which flags the default headless shell as a bot.",
+            "default": false
+        },
+        "hideAutomationFlag": {
+            "title": "Do not set the automation flag",
+            "type": "boolean",
+            "description": "Leaves out Chromium's 'controlled by automation' flag (navigator.webdriver). Experiment for TikTok. Changes nothing else.",
+            "default": false
         }
     },
     "required": ["mode", "platform"]
