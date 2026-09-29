@@ -7,6 +7,7 @@ import { runtimeInfo } from './diagnostics.js';
 import * as facebook from './platforms/facebook.js';
 import * as instagram from './platforms/instagram.js';
 import * as tiktok from './platforms/tiktok.js';
+import { runProbes } from './probes.js';
 import { toPlaywrightProxy } from './proxy.js';
 import { runMode } from './run.js';
 import { makeRunSummary } from './schema.js';
@@ -71,6 +72,13 @@ try {
     log.exception(err, 'proxyConfiguration.newUrl() threw');
 }
 
+if (proxyInput?.useApifyProxy && !proxyUrl) {
+    throw new Error(
+        'Apify Proxy was requested but no proxy URL could be created (see the log above). Refusing to continue without it: ' +
+            'requests would go out directly from the Apify servers.',
+    );
+}
+
 const browser = await chromium.launch({
     headless: true,
     proxy: toPlaywrightProxy(proxyUrl),
@@ -85,7 +93,15 @@ if (sessionCookies) {
 const page = await context.newPage();
 
 try {
-    await runMode({ mode, mod, page, input, budget, pushData: (row) => Actor.pushData(row), rateLimitErrors });
+    if (mode === 'probe') {
+        const results = await runProbes({ context, probes: input.debugProbes });
+        await Actor.setValue('PROBE_RESULTS', JSON.stringify(results, null, 2), {
+            contentType: 'application/json; charset=utf-8',
+        });
+        log.info(`Probe run finished: ${results.length} result(s) saved to PROBE_RESULTS`);
+    } else {
+        await runMode({ mode, mod, page, input, budget, pushData: (row) => Actor.pushData(row), rateLimitErrors });
+    }
 } finally {
     await browser.close();
 }
@@ -98,7 +114,10 @@ const summary = makeRunSummary({
     budget: budget.summary(),
     errors: rateLimitErrors,
 });
-await Actor.setValue('OUTPUT', { ...summary, runtime: runtimeInfo() });
+await Actor.setValue('OUTPUT', {
+    ...summary,
+    runtime: { ...runtimeInfo(), proxyUsed: Boolean(proxyUrl), proxyGroups: proxyConfiguration?.groups ?? null },
+});
 log.info('Run summary', summary);
 
 await Actor.exit();

@@ -7,8 +7,13 @@
             "title": "Mode",
             "type": "string",
             "editor": "select",
-            "enum": ["profile", "search", "comments"],
-            "enumTitles": ["A - Profile lookup", "B - Keyword/search discovery", "C - Comment retrieval"],
+            "enum": ["profile", "search", "comments", "probe"],
+            "enumTitles": [
+                "A - Profile lookup",
+                "B - Keyword/search discovery",
+                "C - Comment retrieval",
+                "Diagnostic probe (fetch a few public URLs and report)"
+            ],
             "description": "A: look up known usernames. B: discover posts/creators by keyword. C: pull comments for known post URLs. To get comments alongside A or B in one run, use that mode and set fetchComments=true instead of running C separately.",
             "default": "profile"
         },
@@ -97,6 +102,13 @@
                 "useApifyProxy": true
             },
             "description": "Proxy configuration to use for requests."
+        },
+        "debugProbes": {
+            "title": "Diagnostic probes (mode = probe only)",
+            "type": "array",
+            "description": "Up to 12 items like {\"url\": \"https://www.tiktok.com/@nasa\", \"type\": \"page\"} or {\"url\": \"https://www.instagram.com/api/v1/...\", \"type\": \"fetch\", \"headers\": {\"x-ig-app-id\": \"...\"}}. HTTPS GET on instagram/facebook/tiktok hosts only. Results are saved to the PROBE_RESULTS record. Reports what comes back, including login walls; it does not try to get past them.",
+            "editor": "json",
+            "default": []
         }
     },
     "required": ["mode", "platform"]
