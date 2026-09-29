@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 
 import { BudgetTracker } from './budget.js';
 import { parseCookieHeader } from './cookies.js';
+import { CostTracker } from './cost.js';
 import { runtimeInfo } from './diagnostics.js';
 import * as facebook from './platforms/facebook.js';
 import * as instagram from './platforms/instagram.js';
@@ -26,6 +27,9 @@ const {
     mode,
     platform,
     maxItemsPerRun = 2000,
+    maxProxyMegabytes = 300,
+    proxyPricePerGbUsd = null,
+    blockHeavyResources = true,
     sessionCookies = '',
     proxyConfiguration: proxyInput = { useApifyProxy: true },
 } = input;
@@ -35,6 +39,12 @@ if (!PLATFORM_MODULES[platform]) {
 }
 const mod = PLATFORM_MODULES[platform];
 const budget = new BudgetTracker(maxItemsPerRun);
+const cost = new CostTracker({
+    budget,
+    maxProxyMegabytes: maxProxyMegabytes || null,
+    proxyPricePerGbUsd,
+    memoryMbytes: Number(process.env.ACTOR_MEMORY_MBYTES) || null,
+});
 const rateLimitErrors = [];
 const startedAt = new Date().toISOString();
 
@@ -90,6 +100,8 @@ const context = await browser.newContext({
     extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
 });
 
+await cost.attach(context, { blockHeavyResources });
+
 if (sessionCookies) {
     const cookies = parseCookieHeader(sessionCookies, PLATFORM_DOMAINS[platform]);
     if (cookies.length) await context.addCookies(cookies);
@@ -108,7 +120,23 @@ try {
         await runMode({ mode, mod, page, input, budget, pushData: (row) => Actor.pushData(row), rateLimitErrors });
     }
 } finally {
+    await cost.settle();
     await browser.close();
+}
+
+// The platform's own usage figure for this run. Best effort: it is aggregated after the run ends, so it can
+// be missing or slightly low here; the estimate in `cost` is what this run measured itself.
+let platformUsage = null;
+try {
+    if (process.env.ACTOR_RUN_ID) {
+        const run = await Actor.apifyClient.run(process.env.ACTOR_RUN_ID).get();
+        platformUsage = {
+            usageTotalUsd: run?.usageTotalUsd ?? null,
+            usageUsd: run?.usageUsd ?? null,
+        };
+    }
+} catch (err) {
+    log.debug(`Could not read platform usage: ${err.message}`);
 }
 
 const summary = makeRunSummary({
@@ -121,6 +149,7 @@ const summary = makeRunSummary({
 });
 await Actor.setValue('OUTPUT', {
     ...summary,
+    cost: cost.report({ platformUsage }),
     runtime: { ...runtimeInfo(), proxyUsed: Boolean(proxyUrl), proxyGroups: proxyConfiguration?.groups ?? null },
 });
 log.info('Run summary', summary);

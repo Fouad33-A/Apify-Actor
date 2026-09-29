@@ -31,7 +31,9 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         fetchComments = false,
         maxCommentsPerPost = 20,
         topLevelCommentsOnly = true,
+        enrichSearchAuthors = true,
     } = input;
+    const shouldContinue = () => budget.canWriteMore();
 
     async function write(recordType, row) {
         if (!budget.record(recordType)) return false;
@@ -49,6 +51,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 sourceInput,
                 maxComments: maxCommentsPerPost,
                 topLevelOnly: topLevelCommentsOnly,
+                shouldContinue,
             });
             for (const c of comments) {
                 if (!(await write('comment', c))) break;
@@ -83,6 +86,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     username,
                     sourceInput: username,
                     maxRecentPosts,
+                    shouldContinue,
                 });
                 await write('profile', profile);
                 for (const post of posts) {
@@ -121,9 +125,61 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     dateFrom: q.dateFrom || null,
                     dateTo: q.dateTo || null,
                     sourceInput: q.query,
+                    shouldContinue,
                 });
-                for (const post of results) {
-                    if (!(await write('post', post))) break;
+                // Platforms return either a plain list of posts or { posts, profiles } (the hit authors).
+                const { posts, profiles = [] } = Array.isArray(results) ? { posts: results } : results;
+                const authors = new Map();
+                for (const hit of profiles) {
+                    if (!budget.canWriteMore()) break;
+                    let row = hit;
+                    if (enrichSearchAuthors && hit.username) {
+                        try {
+                            const { profile } = await mod.lookupProfile({
+                                page,
+                                username: hit.username,
+                                sourceInput: q.query,
+                                maxRecentPosts: 0,
+                                shouldContinue,
+                            });
+                            if (profile.status === 'found' || profile.status === 'private') row = profile;
+                            else {
+                                row = {
+                                    ...hit,
+                                    statusDetail: `${hit.statusDetail} Profile page lookup gave status "${profile.status}".`,
+                                };
+                            }
+                        } catch (err) {
+                            if (err instanceof RateLimitError) {
+                                rateLimitErrors.push(err.toRecord());
+                                log.warning(err.message);
+                                return;
+                            }
+                            row = {
+                                ...hit,
+                                statusDetail: `${hit.statusDetail} Profile page lookup failed: ${reason(err)}`,
+                            };
+                        }
+                    }
+                    authors.set(hit.username, row);
+                    await write('profile', row);
+                }
+                for (const post of posts) {
+                    // Give each post its author's full profile facts when the profile page was read.
+                    const a = authors.get(post.username);
+                    const full = a && a.status === 'found' && !a.statusDetail?.startsWith('Taken from') ? a : null;
+                    const merged = full
+                        ? {
+                              ...post,
+                              displayName: full.displayName ?? post.displayName,
+                              bio: full.bio ?? post.bio,
+                              externalLinks: full.externalLinks?.length ? full.externalLinks : post.externalLinks,
+                              followerCount: full.followerCount ?? post.followerCount,
+                              followingCount: full.followingCount ?? post.followingCount,
+                              verified: full.verified ?? post.verified,
+                          }
+                        : post;
+                    if (!(await write('post', merged))) break;
                     if (fetchComments && (await collectComments(post.postUrl, q.query))) return;
                 }
             } catch (err) {

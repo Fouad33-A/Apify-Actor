@@ -1,6 +1,6 @@
 {
     "name": "verity-social-actor",
-    "version": "0.6.1",
+    "version": "0.7.0",
     "description": "Custom Apify Actor for Verity E-books creator screening across TikTok, Instagram and Facebook.",
     "type": "module",
     "main": "src/main.js",

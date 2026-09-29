@@ -80,6 +80,12 @@
             "default": true,
             "description": "If enabled, only fetch top-level comments and skip replies."
         },
+        "enrichSearchAuthors": {
+            "title": "Load each creator's profile page in search (Mode B)",
+            "type": "boolean",
+            "description": "When true, every creator found by a keyword search also gets a full profile row (bio, links, contact email, exact follower count) by opening their profile page. Costs one extra page load per creator. When false, the profile row only carries what the search result itself showed.",
+            "default": true
+        },
         "maxItemsPerRun": {
             "title": "Hard cap: max dataset items this run may write",
             "type": "integer",
@@ -106,9 +112,28 @@
         "debugProbes": {
             "title": "Diagnostic probes (mode = probe only)",
             "type": "array",
-            "description": "Up to 12 items like {\"url\": \"https://www.tiktok.com/@nasa\", \"type\": \"page\"} or {\"url\": \"...\", \"type\": \"fetch\", \"headers\": {\"x-ig-app-id\": \"...\"}}. Optional per item: \"grep\": [\"text\", ...] (snippets around matches), \"outline\": {\"selector\": \"[role=main]\", \"maxDepth\": 10, \"maxLines\": 150} (compact DOM outline), \"jsonScriptId\" + \"jsonPath\": [\"key\", ...] (extract from an embedded JSON script). HTTPS GET on instagram/facebook/tiktok hosts only. Results are saved to the PROBE_RESULTS record. Reports what comes back, including login walls; it does not try to get past them.",
+            "description": "Up to 12 items like {\"url\": \"https://www.tiktok.com/@nasa\", \"type\": \"page\"} or {\"url\": \"...\", \"type\": \"fetch\", \"headers\": {\"x-ig-app-id\": \"...\"}}. Optional per item: \"grep\": [\"text\", ...] (snippets around matches), \"outline\": {\"selector\": \"[role=main]\", \"maxDepth\": 10, \"maxLines\": 150} (compact DOM outline), \"captureUrls\": [\"/api/post/item_list\"] (records the JSON the page itself loads from matching URLs; with \"scroll\": 3 to scroll first and \"click\": \"selector\" to click once; \"captureHead\": 6000 for longer samples), \"jsonScriptId\" + \"jsonPath\": [\"key\", ...] (extract from an embedded JSON script). HTTPS GET on instagram/facebook/tiktok hosts only. Results are saved to the PROBE_RESULTS record. Reports what comes back, including login walls; it does not try to get past them.",
             "editor": "json",
             "default": []
+        },
+        "maxProxyMegabytes": {
+            "title": "Hard cap: proxy traffic (MB) this run may use",
+            "type": "integer",
+            "description": "The run stops cleanly once the browser has moved this many megabytes (residential proxy is billed per GB). Set to 0 for no cap.",
+            "default": 300,
+            "minimum": 0
+        },
+        "proxyPricePerGbUsd": {
+            "title": "Proxy price per GB (USD), for the cost report",
+            "type": "number",
+            "description": "Optional. If set, the cost report also shows estimatedProxyUsd = megabytes/1000 x this price. Leave empty to see megabytes only.",
+            "minimum": 0
+        },
+        "blockHeavyResources": {
+            "title": "Block images, video and fonts",
+            "type": "boolean",
+            "description": "Saves proxy traffic. The Actor reads text, JSON and attributes, never pixels.",
+            "default": true
         }
     },
     "required": ["mode", "platform"]

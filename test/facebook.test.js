@@ -11,6 +11,7 @@ import {
     lookupProfile,
     parseFacebookOgTitle,
     parseFacebookPostPageText,
+    parseFacebookProfileHref,
     searchPosts,
     unwrapFacebookLink,
 } from '../src/platforms/facebook.js';
@@ -202,6 +203,7 @@ describe('domExtractComments (in-page)', () => {
         expect(rows).toEqual([
             {
                 author: 'Marc Chervin',
+                authorHref: 'https://www.facebook.com/marc.chervin?comment_id=1',
                 text: 'Fortunately NASA has already shown this.',
                 isReply: false,
                 relativeTime: '20h',
@@ -209,6 +211,7 @@ describe('domExtractComments (in-page)', () => {
             },
             {
                 author: 'Jay Ford',
+                authorHref: 'https://www.facebook.com/jay.ford?comment_id=1',
                 text: 'Marc Chervin When did they catch a meteor?',
                 isReply: true,
                 relativeTime: '9h',
@@ -353,7 +356,7 @@ describe('fetchComments (full flow, synthetic pages)', () => {
     });
     const opts = { postUrl: POST, sourceInput: 'nasa', maxComments: 10, topLevelOnly: false };
 
-    it('returns comment rows with honest limits noted (relative time only, display-name commenters)', async () => {
+    it('returns comment rows with honest limits noted (relative time only) and the commenter handle', async () => {
         const rows = await withContext([{ match: /facebook\.com\/reel\/1\/$/, body: html }], ({ page }) =>
             fetchComments({ page, ...opts }),
         );
@@ -362,7 +365,9 @@ describe('fetchComments (full flow, synthetic pages)', () => {
             recordType: 'comment',
             platform: 'facebook',
             postUrl: POST,
-            commenterUsername: 'Marc Chervin',
+            commenterUsername: 'marc.chervin',
+            commenterDisplayName: 'Marc Chervin',
+            commenterProfileUrl: 'https://www.facebook.com/marc.chervin',
             commentText: 'Top level',
             likeCount: 3,
             commentDate: null,
@@ -376,7 +381,7 @@ describe('fetchComments (full flow, synthetic pages)', () => {
         const rows = await withContext([{ match: /facebook\.com\/reel\/1\/$/, body: html }], ({ page }) =>
             fetchComments({ page, ...opts, topLevelOnly: true }),
         );
-        expect(rows.map((r) => r.commenterUsername)).toEqual(['Marc Chervin']);
+        expect(rows.map((r) => r.commenterDisplayName)).toEqual(['Marc Chervin']);
     });
 
     it('respects maxComments and returns [] when no comments are visible', async () => {
@@ -521,7 +526,7 @@ describe('post-page enrichment and comment fallback (full flow)', () => {
                 topLevelOnly: true,
             }),
         );
-        expect(rows.map((r) => [r.commenterUsername, r.commentText])).toEqual([
+        expect(rows.map((r) => [r.commenterDisplayName, r.commentText])).toEqual([
             ['Marc Chervin', 'Seen on the profile'],
         ]);
     }, 60_000);
@@ -671,5 +676,29 @@ describe('robustness (regression: build 0.0.20 threw on every Page)', () => {
     it('a <style> element before the list does not throw either', async () => {
         const html = fbPage({ bio: '' }).replace('<div><ul>', '<style>.x{}</style><div><ul>');
         expect((await evaluate(html, domExtractProfile)).bio).toBeNull();
+    });
+});
+
+describe('parseFacebookProfileHref', () => {
+    it.each([
+        [
+            'https://www.facebook.com/marc.chervin?comment_id=1&__cft__[0]=x',
+            'marc.chervin',
+            'https://www.facebook.com/marc.chervin',
+        ],
+        ['https://web.facebook.com/jay.ford/?comment_id=2', 'jay.ford', 'https://www.facebook.com/jay.ford'],
+        ['/some.one?comment_id=3', 'some.one', 'https://www.facebook.com/some.one'],
+        [
+            'https://www.facebook.com/profile.php?id=1000123&comment_id=4',
+            null,
+            'https://www.facebook.com/profile.php?id=1000123',
+        ],
+        ['https://www.facebook.com/people/Jane-Doe/1000999/', null, null],
+        ['https://www.facebook.com/reel/123/?comment_id=1', null, null],
+        ['https://example.com/x', null, null],
+        [null, null, null],
+        ['::not a url::', null, null],
+    ])('%s', (href, username, profileUrl) => {
+        expect(parseFacebookProfileHref(href)).toEqual({ username, profileUrl });
     });
 });

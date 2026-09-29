@@ -155,7 +155,7 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
     }
     const URL_RE = /tiktok\.com\/@nasa$/;
 
-    it('returns a found profile from the embedded data, with no posts (not built)', async () => {
+    it('returns a found profile from the embedded data, with no posts when none were asked for', async () => {
         const { profile, posts } = await run([{ match: URL_RE, body: page({ json: detail() }) }]);
         expect(profile).toMatchObject({
             recordType: 'profile',
@@ -217,11 +217,5 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
         ]);
         expect(profile.status).toBe('private');
         expect(profile.statusDetail).toMatch(/private/i);
-    });
-});
-
-describe('unimplemented modes', () => {
-    it.each(['searchPosts', 'fetchComments'])('%s throws rather than returning empty data', async (fn) => {
-        await expect(tiktok[fn]({})).rejects.toThrow(/not yet implemented/i);
     });
 });

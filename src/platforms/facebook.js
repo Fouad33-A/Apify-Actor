@@ -253,8 +253,11 @@ export function domExtractComments({ maxComments, postPathHint = null }) {
         const key = `${lines[0]}|${text}`;
         if (!text || seen.has(key)) continue;
         seen.add(key);
+        // The commenter's profile link is the anchor whose text is their name.
+        const authorLink = [...node.querySelectorAll('a[href]')].find((a) => a.innerText.trim() === lines[0]);
         out.push({
             author: lines[0],
+            authorHref: authorLink ? authorLink.href : null,
             text,
             isReply: /^reply by /i.test(node.getAttribute('aria-label')),
             relativeTime: lines[timeIdx],
@@ -263,6 +266,42 @@ export function domExtractComments({ maxComments, postPathHint = null }) {
         if (out.length >= maxComments) break;
     }
     return out;
+}
+
+const NOT_A_HANDLE = new Set([
+    'profile.php',
+    'people',
+    'groups',
+    'watch',
+    'photo',
+    'photo.php',
+    'permalink.php',
+    'story.php',
+    'reel',
+    'share',
+    'login',
+    'l.php',
+]);
+
+// A commenter's profile link -> their @handle (vanity URL) and a clean profile URL. Accounts without a vanity
+// URL only have a numeric id: the handle stays null and the id is in the URL (never invented).
+export function parseFacebookProfileHref(href) {
+    if (!href) return { username: null, profileUrl: null };
+    let url;
+    try {
+        url = new URL(href, 'https://www.facebook.com');
+    } catch {
+        return { username: null, profileUrl: null };
+    }
+    if (!/(^|\.)facebook\.com$/i.test(url.hostname)) return { username: null, profileUrl: null };
+    const first = url.pathname.split('/').filter(Boolean)[0] ?? null;
+    if (first === 'profile.php') {
+        const id = url.searchParams.get('id');
+        return { username: null, profileUrl: id ? `https://www.facebook.com/profile.php?id=${id}` : null };
+    }
+    if (!first || !/^[A-Za-z0-9._-]+$/.test(first) || NOT_A_HANDLE.has(first.toLowerCase()))
+        return { username: null, profileUrl: null };
+    return { username: first, profileUrl: `https://www.facebook.com/${first}` };
 }
 
 // Reel/video pages put views, reactions and the FULL caption in og:title:
@@ -483,19 +522,24 @@ export async function fetchComments({ page, postUrl, sourceInput, maxComments, t
     return raw
         .filter((c) => !(topLevelOnly && c.isReply))
         .slice(0, maxComments)
-        .map((c) =>
-            makeCommentRow({
+        .map((c) => {
+            const { username, profileUrl } = parseFacebookProfileHref(c.authorHref);
+            return makeCommentRow({
                 platform: 'facebook',
                 sourceInput,
                 postUrl,
-                commenterUsername: c.author,
+                commenterUsername: username,
+                commenterDisplayName: c.author,
+                commenterProfileUrl: profileUrl,
                 commentText: c.text,
                 likeCount: c.likeCount,
                 commentDate: null,
                 isReply: c.isReply,
-                statusDetail: `Commenter is the display name; commented "${c.relativeTime}" (relative time; no exact date is exposed); anonymous visitors see only some comments`,
-            }),
-        );
+                statusDetail: `Commented "${c.relativeTime}" (relative time; no exact date is exposed); ${
+                    username ? '' : 'commenter has no public @handle (see commenterProfileUrl / commenterDisplayName); '
+                }anonymous visitors see only some comments`,
+            });
+        });
 }
 
 // Mode B (keyword search) is not built: Facebook's search results page has a different layout from a Page

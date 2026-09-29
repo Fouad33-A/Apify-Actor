@@ -79,7 +79,9 @@ export function makeCommentRow(fields) {
         scrapedAt: new Date().toISOString(),
 
         postUrl: fields.postUrl,
-        commenterUsername: fields.commenterUsername ?? null,
+        commenterUsername: fields.commenterUsername ?? null, // the @handle
+        commenterDisplayName: fields.commenterDisplayName ?? null, // the name shown next to it
+        commenterProfileUrl: fields.commenterProfileUrl ?? null, // link to the commenter's profile, when shown
         commentText: fields.commentText ?? null, // full text, unescaped
         likeCount: fields.likeCount ?? null,
         commentDate: fields.commentDate ?? null,

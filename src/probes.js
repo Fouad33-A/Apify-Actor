@@ -6,6 +6,8 @@
 // MAX_PROBES per run, a small header allowlist, truncated output. It reports login walls
 // and blocks as they are; it never tries to get past them.
 
+import { captureJson } from './capture.js';
+
 export const MAX_PROBES = 12;
 const NAV_TIMEOUT_MS = 45_000;
 const HEAD_CHARS = 6000;
@@ -147,11 +149,39 @@ function summarizePage(limits) {
     };
 }
 
+const MAX_SCROLLS = 6;
+const CAPTURE_HEAD_CHARS = 3000;
+
+// Compact description of a captured JSON body: top-level keys plus a truncated head.
+export function describeCapture(hit, headChars = CAPTURE_HEAD_CHARS) {
+    const { data } = hit;
+    return {
+        url: hit.url.slice(0, 300),
+        status: hit.status,
+        keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 40) : null,
+        head: data == null ? null : JSON.stringify(data).slice(0, headChars),
+    };
+}
+
 async function probePage(context, url, probe) {
     const page = await context.newPage();
+    const capture = probe.captureUrls?.length ? captureJson(page, probe.captureUrls.slice(0, 6)) : null;
     try {
         const response = await page.goto(url.href, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
         await page.waitForTimeout(probe.waitMs ?? 2500);
+        let clickError = null;
+        if (probe.click) {
+            try {
+                await page.click(String(probe.click), { timeout: 5000 });
+                await page.waitForTimeout(2500);
+            } catch (err) {
+                clickError = String(err?.message ?? err).split('\n')[0];
+            }
+        }
+        for (let i = 0; i < Math.min(Number(probe.scroll ?? 0), MAX_SCROLLS); i += 1) {
+            await page.mouse.wheel(0, 2500);
+            await page.waitForTimeout(1500);
+        }
         const summary = await page.evaluate(summarizePage, { jsonHead: JSON_HEAD_CHARS, text: TEXT_CHARS });
         const html = await page.content();
         const extra = {};
@@ -163,6 +193,11 @@ async function probePage(context, url, probe) {
                 maxLines: Math.min(Number(probe.outline.maxLines ?? 150), 300),
             });
         }
+        if (capture)
+            extra.captured = capture.hits
+                .slice(0, 12)
+                .map((h) => describeCapture(h, Number(probe.captureHead ?? CAPTURE_HEAD_CHARS)));
+        if (clickError) extra.clickError = clickError;
         if (probe.jsonScriptId) {
             const text = await page.evaluate((id) => {
                 const el = document.getElementById(id);
@@ -178,6 +213,7 @@ async function probePage(context, url, probe) {
             ...extra,
         };
     } finally {
+        capture?.stop();
         await page.close();
     }
 }

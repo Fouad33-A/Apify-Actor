@@ -258,6 +258,122 @@ describe('runMode: search (Mode B)', () => {
     });
 });
 
+describe('runMode: search with author profiles', () => {
+    const hitProfile = (username) => ({
+        recordType: 'profile',
+        username,
+        status: 'found',
+        statusDetail: 'Taken from the search result (no separate profile page load)',
+        bio: 'hit bio',
+        followerCount: 5,
+    });
+    const searchResult = () => ({
+        posts: [
+            { recordType: 'post', username: 'a', postUrl: 'ua', bio: 'hit bio', externalLinks: [], followerCount: 5 },
+            { recordType: 'post', username: 'b', postUrl: 'ub', bio: null, externalLinks: [], followerCount: 7 },
+        ],
+        profiles: [hitProfile('a'), hitProfile('b')],
+    });
+
+    it('reads each author profile page, writes profiles first, and gives posts the full author facts', async () => {
+        const lookupProfile = vi.fn(async ({ username }) => ({
+            profile: {
+                recordType: 'profile',
+                username,
+                status: 'found',
+                statusDetail: null,
+                bio: `full bio ${username}`,
+                externalLinks: [`https://${username}.example`],
+                followerCount: 100,
+            },
+            posts: [],
+        }));
+        const h = harness({
+            input: { searchQueries: [{ query: 'q' }] },
+            mod: { searchPosts: vi.fn(async () => searchResult()), lookupProfile },
+        });
+        await h.run('search');
+        expect(lookupProfile).toHaveBeenCalledTimes(2);
+        expect(lookupProfile).toHaveBeenCalledWith(expect.objectContaining({ username: 'a', maxRecentPosts: 0 }));
+        expect(h.pushed.map((r) => `${r.recordType}:${r.username}`)).toEqual([
+            'profile:a',
+            'profile:b',
+            'post:a',
+            'post:b',
+        ]);
+        const bPost = h.pushed.find((r) => r.recordType === 'post' && r.username === 'b');
+        expect(bPost).toMatchObject({ bio: 'full bio b', externalLinks: ['https://b.example'], followerCount: 100 });
+    });
+
+    it('keeps the search-hit profile (and says why) when the profile page lookup does not give "found"', async () => {
+        const lookupProfile = vi.fn(async ({ username }) => ({
+            profile: { recordType: 'profile', username, status: 'blocked' },
+            posts: [],
+        }));
+        const h = harness({
+            input: { searchQueries: [{ query: 'q' }] },
+            mod: { searchPosts: vi.fn(async () => searchResult()), lookupProfile },
+        });
+        await h.run('search');
+        const p = h.pushed.find((r) => r.recordType === 'profile');
+        expect(p.bio).toBe('hit bio');
+        expect(p.statusDetail).toMatch(/Taken from the search result.*status "blocked"/);
+        // post keeps its own hit-derived facts
+        expect(h.pushed.find((r) => r.recordType === 'post' && r.username === 'a').bio).toBe('hit bio');
+    });
+
+    it('a failing profile lookup is noted on the hit profile, not fatal', async () => {
+        const lookupProfile = vi.fn().mockRejectedValue(new Error('boom'));
+        const h = harness({
+            input: { searchQueries: [{ query: 'q' }] },
+            mod: { searchPosts: vi.fn(async () => searchResult()), lookupProfile },
+        });
+        await h.run('search');
+        expect(h.budget.counts).toMatchObject({ profiles: 2, posts: 2 });
+        expect(h.pushed[0].statusDetail).toMatch(/Profile page lookup failed: boom/);
+    });
+
+    it('a rate limit during author enrichment stops the run', async () => {
+        const lookupProfile = vi.fn().mockRejectedValue(new RateLimitError('tiktok', 'profile', 'x'));
+        const h = harness({
+            input: { searchQueries: [{ query: 'q' }, { query: 'r' }] },
+            mod: { searchPosts: vi.fn(async () => searchResult()), lookupProfile },
+        });
+        await h.run('search');
+        expect(h.rateLimitErrors).toHaveLength(1);
+        expect(lookupProfile).toHaveBeenCalledTimes(1);
+        expect(h.pushed).toEqual([]);
+    });
+
+    it('enrichSearchAuthors=false writes the hit profiles without loading any profile page', async () => {
+        const lookupProfile = vi.fn();
+        const h = harness({
+            input: { searchQueries: [{ query: 'q' }], enrichSearchAuthors: false },
+            mod: { searchPosts: vi.fn(async () => searchResult()), lookupProfile },
+        });
+        await h.run('search');
+        expect(lookupProfile).not.toHaveBeenCalled();
+        expect(h.budget.counts).toMatchObject({ profiles: 2, posts: 2 });
+    });
+
+    it('passes a shouldContinue callback that turns false once the run is stopped', async () => {
+        let cb;
+        const h = harness({
+            input: { searchQueries: [{ query: 'q' }] },
+            mod: {
+                searchPosts: vi.fn(async ({ shouldContinue }) => {
+                    cb = shouldContinue;
+                    return [];
+                }),
+            },
+        });
+        await h.run('search');
+        expect(cb()).toBe(true);
+        h.budget.stop('max_proxy_megabytes');
+        expect(cb()).toBe(false);
+    });
+});
+
 describe('runMode: validation', () => {
     it('throws on an unknown mode', async () => {
         const h = harness();
