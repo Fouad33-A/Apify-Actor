@@ -5,10 +5,10 @@
 // the embedded-credentials form, so it has to be split before launch.
 
 export function toPlaywrightProxy(proxyUrl) {
-  if (!proxyUrl) return undefined;
-  const u = new URL(proxyUrl);
-  const proxy = { server: `${u.protocol}//${u.host}` };
-  if (u.username) proxy.username = decodeURIComponent(u.username);
-  if (u.password) proxy.password = decodeURIComponent(u.password);
-  return proxy;
+    if (!proxyUrl) return undefined;
+    const u = new URL(proxyUrl);
+    const proxy = { server: `${u.protocol}//${u.host}` };
+    if (u.username) proxy.username = decodeURIComponent(u.username);
+    if (u.password) proxy.password = decodeURIComponent(u.password);
+    return proxy;
 }

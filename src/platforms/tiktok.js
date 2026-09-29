@@ -14,13 +14,13 @@
 // specifically needs.
 
 export async function lookupProfile() {
-  throw new Error("TikTok Mode A not yet implemented - pending live validation, see README");
+    throw new Error('TikTok Mode A not yet implemented - pending live validation, see README');
 }
 
 export async function searchPosts() {
-  throw new Error("TikTok Mode B not yet implemented - pending live validation, see README");
+    throw new Error('TikTok Mode B not yet implemented - pending live validation, see README');
 }
 
 export async function fetchComments() {
-  throw new Error("TikTok Mode C not yet implemented - pending live validation, see README");
+    throw new Error('TikTok Mode C not yet implemented - pending live validation, see README');
 }

@@ -69,7 +69,6 @@ This code is a JavaScript script that uses Cheerio to scrape data from a website
 
 [How to create Apify Actors with web scraping code templates](https://www.youtube.com/watch?v=u-i-Korzf8w)
 
-
 ## Getting started
 
 For complete information [see this article](https://docs.apify.com/platform/actors/development#build-actor-at-apify-console). In short, you will:

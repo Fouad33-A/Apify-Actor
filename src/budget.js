@@ -5,34 +5,34 @@
 // what produces the per-run item-count report the requirements ask.for.
 
 export class BudgetTracker {
-  constructor(maxItemsPerRun) {
-    this.maxItemsPerRun = maxItemsPerRun;
-    this.counts = { profiles: 0, posts: 0, comments: 0, total: 0 };
-    this.stoppedOnCap = false;
-  }
-
-  canWriteMore() {
-    return this.counts.total < this.maxItemsPerRun;
-  }
-
-  record(recordType) {
-    if (!this.canWriteMore()) {
-      this.stoppedOnCap = true;
-      return false;
+    constructor(maxItemsPerRun) {
+        this.maxItemsPerRun = maxItemsPerRun;
+        this.counts = { profiles: 0, posts: 0, comments: 0, total: 0 };
+        this.stoppedOnCap = false;
     }
-    if (recordType === "profile") this.counts.profiles += 1;
-    else if (recordType === "post") this.counts.posts += 1;
-    else if (recordType === "comment") this.counts.comments += 1;
-    this.counts.total += 1;
-    if (this.counts.total >= this.maxItemsPerRun) this.stoppedOnCap = true;
-    return true;
-  }
 
-  summary() {
-    return {
-      maxItemsPerRun: this.maxItemsPerRun,
-      itemsWritten: this.counts.total,
-      stoppedOnCap: this.stoppedOnCap,
-    };
-  }
+    canWriteMore() {
+        return this.counts.total < this.maxItemsPerRun;
+    }
+
+    record(recordType) {
+        if (!this.canWriteMore()) {
+            this.stoppedOnCap = true;
+            return false;
+        }
+        if (recordType === 'profile') this.counts.profiles += 1;
+        else if (recordType === 'post') this.counts.posts += 1;
+        else if (recordType === 'comment') this.counts.comments += 1;
+        this.counts.total += 1;
+        if (this.counts.total >= this.maxItemsPerRun) this.stoppedOnCap = true;
+        return true;
+    }
+
+    summary() {
+        return {
+            maxItemsPerRun: this.maxItemsPerRun,
+            itemsWritten: this.counts.total,
+            stoppedOnCap: this.stoppedOnCap,
+        };
+    }
 }

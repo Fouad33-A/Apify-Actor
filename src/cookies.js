@@ -6,25 +6,25 @@
 // plain request header wouldn't reach.
 
 export function parseCookieHeader(header, domain) {
-  if (!header || !header.trim()) return [];
-  return header
-    .trim()
-    .replace(/^cookie:\s*/i, "")
-    .split(";")
-    .map((pair) => pair.trim())
-    .filter(Boolean)
-    .map((pair) => {
-      const eq = pair.indexOf("=");
-      if (eq === -1) return null;
-      const name = pair.slice(0, eq).trim();
-      const value = pair.slice(eq + 1).trim();
-      if (!name) return null;
-      return {
-        name,
-        value,
-        domain,
-        path: "/",
-      };
-    })
-    .filter(Boolean);
+    if (!header || !header.trim()) return [];
+    return header
+        .trim()
+        .replace(/^cookie:\s*/i, '')
+        .split(';')
+        .map((pair) => pair.trim())
+        .filter(Boolean)
+        .map((pair) => {
+            const eq = pair.indexOf('=');
+            if (eq === -1) return null;
+            const name = pair.slice(0, eq).trim();
+            const value = pair.slice(eq + 1).trim();
+            if (!name) return null;
+            return {
+                name,
+                value,
+                domain,
+                path: '/',
+            };
+        })
+        .filter(Boolean);
 }

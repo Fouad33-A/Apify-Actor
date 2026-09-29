@@ -1,118 +1,103 @@
 {
-  "title": "Verity Social Actor Input",
-  "type": "object",
-  "schemaVersion": 1,
-  "properties": {
-    "mode": {
-      "title": "Mode",
-      "type": "string",
-      "editor": "select",
-      "enum": [
-        "profile",
-        "search",
-        "comments"
-      ],
-      "enumTitles": [
-        "A - Profile lookup",
-        "B - Keyword/search discovery",
-        "C - Comment retrieval"
-      ],
-      "description": "A: look up known usernames. B: discover posts/creators by keyword. C: pull comments for known post URLs. To get comments alongside A or B in one run, use that mode and set fetchComments=true instead of running C separately.",
-      "default": "profile"
+    "title": "Verity Social Actor Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "mode": {
+            "title": "Mode",
+            "type": "string",
+            "editor": "select",
+            "enum": ["profile", "search", "comments"],
+            "enumTitles": ["A - Profile lookup", "B - Keyword/search discovery", "C - Comment retrieval"],
+            "description": "A: look up known usernames. B: discover posts/creators by keyword. C: pull comments for known post URLs. To get comments alongside A or B in one run, use that mode and set fetchComments=true instead of running C separately.",
+            "default": "profile"
+        },
+        "platform": {
+            "title": "Platform",
+            "type": "string",
+            "editor": "select",
+            "enum": ["tiktok", "instagram", "facebook"],
+            "default": "instagram",
+            "description": "Which social platform to scrape: TikTok, Instagram or Facebook."
+        },
+        "usernames": {
+            "title": "Usernames (Mode A)",
+            "type": "array",
+            "editor": "stringList",
+            "description": "Handles/usernames to look up, without @ or full URL (e.g. \"nasa\").",
+            "default": []
+        },
+        "searchQueries": {
+            "title": "Search queries (Mode B)",
+            "type": "array",
+            "editor": "json",
+            "description": "Array of {\"query\": \"etf investing\", \"sortOrder\": \"relevance|recent|liked\", \"maxResults\": 25, \"dateFrom\": \"2026-01-01\", \"dateTo\": null}.",
+            "default": []
+        },
+        "postUrls": {
+            "title": "Post URLs (Mode C, or attached to A/B results)",
+            "type": "array",
+            "editor": "stringList",
+            "description": "Direct post/video URLs to pull comments for. Only used directly in Mode C - in Mode A/B, use fetchComments instead.",
+            "default": []
+        },
+        "maxResultsPerQuery": {
+            "title": "Max results per search query (Mode B default)",
+            "type": "integer",
+            "default": 25,
+            "minimum": 1,
+            "description": "Maximum number of results to return per search query (Mode B)."
+        },
+        "maxRecentPosts": {
+            "title": "Max recent posts per profile (Mode A)",
+            "type": "integer",
+            "default": 25,
+            "minimum": 0,
+            "description": "Maximum number of recent posts to fetch per profile (Mode A)."
+        },
+        "fetchComments": {
+            "title": "Also fetch comments (combined mode)",
+            "type": "boolean",
+            "description": "When true in Mode A or B, comment rows are fetched for every post returned and joined into the same dataset - no second run needed.",
+            "default": false
+        },
+        "maxCommentsPerPost": {
+            "title": "Max comments per post",
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum number of comments to fetch per post (Mode C)."
+        },
+        "topLevelCommentsOnly": {
+            "title": "Top-level comments only (exclude replies)",
+            "type": "boolean",
+            "default": true,
+            "description": "If enabled, only fetch top-level comments and skip replies."
+        },
+        "maxItemsPerRun": {
+            "title": "Hard cap: max dataset items this run may write",
+            "type": "integer",
+            "description": "Internal safety net in addition to the Actor run own maxItems/maxTotalChargeUsd call options.",
+            "default": 2000,
+            "minimum": 1
+        },
+        "sessionCookies": {
+            "title": "Login session cookie header (this platform only)",
+            "type": "string",
+            "editor": "textfield",
+            "isSecret": true,
+            "description": "Session cookie header for the selected platform, exported from a real logged-in browser session. Never a password."
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "editor": "proxy",
+            "default": {
+                "useApifyProxy": true
+            },
+            "description": "Proxy configuration to use for requests."
+        }
     },
-    "platform": {
-      "title": "Platform",
-      "type": "string",
-      "editor": "select",
-      "enum": [
-        "tiktok",
-        "instagram",
-        "facebook"
-      ],
-      "default": "instagram",
-      "description": "Which social platform to scrape: TikTok, Instagram or Facebook."
-    },
-    "usernames": {
-      "title": "Usernames (Mode A)",
-      "type": "array",
-      "editor": "stringList",
-      "description": "Handles/usernames to look up, without @ or full URL (e.g. \"nasa\").",
-      "default": []
-    },
-    "searchQueries": {
-      "title": "Search queries (Mode B)",
-      "type": "array",
-      "editor": "json",
-      "description": "Array of {\"query\": \"etf investing\", \"sortOrder\": \"relevance|recent|liked\", \"maxResults\": 25, \"dateFrom\": \"2026-01-01\", \"dateTo\": null}.",
-      "default": []
-    },
-    "postUrls": {
-      "title": "Post URLs (Mode C, or attached to A/B results)",
-      "type": "array",
-      "editor": "stringList",
-      "description": "Direct post/video URLs to pull comments for. Only used directly in Mode C - in Mode A/B, use fetchComments instead.",
-      "default": []
-    },
-    "maxResultsPerQuery": {
-      "title": "Max results per search query (Mode B default)",
-      "type": "integer",
-      "default": 25,
-      "minimum": 1,
-      "description": "Maximum number of results to return per search query (Mode B)."
-    },
-    "maxRecentPosts": {
-      "title": "Max recent posts per profile (Mode A)",
-      "type": "integer",
-      "default": 25,
-      "minimum": 0,
-      "description": "Maximum number of recent posts to fetch per profile (Mode A)."
-    },
-    "fetchComments": {
-      "title": "Also fetch comments (combined mode)",
-      "type": "boolean",
-      "description": "When true in Mode A or B, comment rows are fetched for every post returned and joined into the same dataset - no second run needed.",
-      "default": false
-    },
-    "maxCommentsPerPost": {
-      "title": "Max comments per post",
-      "type": "integer",
-      "default": 20,
-      "minimum": 1,
-      "maximum": 100,
-      "description": "Maximum number of comments to fetch per post (Mode C)."
-    },
-    "topLevelCommentsOnly": {
-      "title": "Top-level comments only (exclude replies)",
-      "type": "boolean",
-      "default": true,
-      "description": "If enabled, only fetch top-level comments and skip replies."
-    },
-    "maxItemsPerRun": {
-      "title": "Hard cap: max dataset items this run may write",
-      "type": "integer",
-      "description": "Internal safety net in addition to the Actor run own maxItems/maxTotalChargeUsd call options.",
-      "default": 2000,
-      "minimum": 1
-    },
-    "sessionCookies": {
-      "title": "Login session cookie header (this platform only)",
-      "type": "string",
-      "editor": "textfield",
-      "isSecret": true,
-      "description": "Session cookie header for the selected platform, exported from a real logged-in browser session. Never a password."
-    },
-    "proxyConfiguration": {
-      "title": "Proxy configuration",
-      "type": "object",
-      "editor": "proxy",
-      "default": {
-        "useApifyProxy": true
-      },
-      "description": "Proxy configuration to use for requests."
-    }
-  },
-  "required": [
-    "mode",
-    "platform"
-  ]
+    "required": ["mode", "platform"]
 }
