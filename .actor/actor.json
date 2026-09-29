@@ -1,0 +1,10 @@
+{
+  "actorSpecification": 1,
+  "name": "verity-social-actor",
+  "title": "Verity Social Actor (TikTok / Instagram / Facebook)",
+  "description": "Profile lookup, keyword/search discovery, and comment retrieval across TikTok, Instagram and Facebook for Verity E-books creator screening. Returns raw data only - no scoring or matching.",
+  "version": "0.1",
+  "buildTag": "latest",
+  "input": "./input_schema.json",
+  "dockerfile": "../Dockerfile"
+}
