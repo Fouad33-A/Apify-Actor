@@ -91,8 +91,9 @@ export function domExtractProfile() {
             anchor = anchor.parentElement;
         }
         const candidate = anchor.previousElementSibling;
-        // The bio is a <span>; the heading before it ("Intro") is a <div>, so a Page without a bio yields null.
-        const before = candidate && candidate.tagName === 'SPAN' ? candidate : null;
+        // The bio may be a <span> or a wrapper <div> around one. The heading before it is "Intro", so a Page
+        // with no bio (whose nearest earlier sibling is that heading) yields null.
+        const before = candidate && !/^intro$/i.test(candidate.innerText.trim()) ? candidate : null;
         const bioText = before ? before.innerText.trim() : '';
         bio = bioText || null;
 
@@ -225,10 +226,16 @@ export function domExtractComments({ maxComments, postPathHint = null }) {
     const out = [];
     const seen = new Set();
     for (const node of nodes) {
-        const lines = node.innerText
+        const allLines = node.innerText
             .split('\n')
             .map((l) => l.trim())
             .filter(Boolean);
+        // Badges ("Author", "Top fan", ...) can precede the commenter's name; they are not part of it.
+        const badgeRe = /^(author|top fan|top contributor|rising fan|new fan|admin|moderator)$/i;
+        const lines = allLines
+            .slice(0, 3)
+            .filter((l) => !badgeRe.test(l))
+            .concat(allLines.slice(3));
         if (lines.length < 3) continue;
         let timeIdx = -1;
         for (let i = lines.length - 1; i >= 1; i -= 1) {
@@ -266,6 +273,45 @@ export function parseFacebookOgTitle(title) {
     if (parts.length > 1) parts.pop(); // trailing "| <Page name>"
     const caption = parts.join(' | ').trim();
     return { viewCount: parseAbbrevCount(m[1]), reactions: parseAbbrevCount(m[2]), caption: caption || null };
+}
+
+// A post page shows, in visible text: "<time>", "·", the FULL caption, "All reactions:", the reaction total,
+// then labelled "22 comments" / "60 shares". A post without a caption has nothing between "·" and "All reactions:".
+// Anything absent stays null.
+export function parseFacebookPostPageText(text) {
+    const empty = { caption: null, reactions: null, commentCount: null, shareCount: null };
+    if (!text) return empty;
+    const lines = String(text)
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    const allIdx = lines.findIndex((l) => /^all reactions:?$/i.test(l));
+    if (allIdx === -1) return empty;
+
+    let dot = -1;
+    for (let i = allIdx - 1; i >= 0; i -= 1) {
+        if (lines[i] === '·') {
+            dot = i;
+            break;
+        }
+    }
+    const caption =
+        dot === -1
+            ? null
+            : lines
+                  .slice(dot + 1, allIdx)
+                  .join('\n')
+                  .trim() || null;
+
+    let commentCount = null;
+    let shareCount = null;
+    for (const l of lines.slice(allIdx + 1, allIdx + 6)) {
+        const c = l.match(/^([\d.,]+\s*[KMB]?)\s+comments?$/i);
+        const sh = l.match(/^([\d.,]+\s*[KMB]?)\s+shares?$/i);
+        if (c) commentCount = parseAbbrevCount(c[1]);
+        if (sh) shareCount = parseAbbrevCount(sh[1]);
+    }
+    return { caption, reactions: parseAbbrevCount(lines[allIdx + 1]), commentCount, shareCount };
 }
 
 export async function lookupProfile({ page, username, sourceInput, maxRecentPosts }) {
@@ -315,34 +361,42 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
 
         const rawPosts = maxRecentPosts > 0 ? await page.evaluate(domExtractPosts, maxRecentPosts) : [];
 
-        // The post page's own metadata is more complete than the truncated card on the Page.
+        // The post page is more complete than the truncated card on the Page: full caption, labelled
+        // comment/share counts (reels put views, reactions and the caption in og:title instead).
         for (const p of rawPosts) {
             try {
                 await page.goto(p.postUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-                await page.waitForTimeout(1200);
+                await page.waitForTimeout(2500);
                 await assertNotRateLimited(page, 'facebook', 'post');
-                const ogTitle = await page.evaluate(() => {
+                const { ogTitle, text } = await page.evaluate(() => {
                     const el = document.querySelector('meta[property="og:title"]');
-                    return el ? el.content : null;
+                    return { ogTitle: el ? el.content : null, text: document.body ? document.body.innerText : '' };
                 });
                 const og = parseFacebookOgTitle(ogTitle);
-                if (og.caption) {
-                    p.caption = og.caption;
+                const pg = parseFacebookPostPageText(text);
+                const caption = og.caption ?? pg.caption;
+                if (caption) {
+                    p.caption = caption;
                     p.captionTruncated = false;
                 }
-                if (og.reactions != null) p.reactions = og.reactions;
+                p.reactions = og.reactions ?? pg.reactions ?? p.reactions;
                 p.viewCount = og.viewCount;
+                p.commentCount = pg.commentCount;
+                p.shareCount = pg.shareCount;
+                p.enriched = true;
             } catch (err) {
                 if (err?.name === 'RateLimitError') throw err;
                 // keep what the Page card showed
             }
         }
+
         const posts = rawPosts.map((p) => {
             const notes = [
                 'Anonymous visitors see only the latest post(s)',
                 p.relativeTime ? `posted "${p.relativeTime}" (relative time; no exact date is exposed)` : null,
                 p.captionTruncated ? 'caption is truncated ("See more")' : null,
                 p.reactions != null ? 'likeCount is the total reactions, rounded as displayed' : null,
+                p.commentCount != null || p.shareCount != null ? 'comment/share counts are from the post page' : null,
             ].filter(Boolean);
             return makePostRow({
                 platform: 'facebook',
@@ -358,8 +412,9 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                 caption: p.caption,
                 publishDate: null,
                 likeCount: p.reactions,
-                commentCount: null, // the number is shown but its label is not, so it is not guessed
-                shareCount: null,
+                // On the Page card the numbers have no labels, so they are only used when the post page labels them.
+                commentCount: p.commentCount ?? null,
+                shareCount: p.shareCount ?? null,
                 viewCount: p.viewCount ?? null,
                 isSponsored: null,
                 statusDetail: notes.join('; '),

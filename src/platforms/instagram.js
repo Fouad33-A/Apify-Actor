@@ -174,61 +174,48 @@ export function domExtractProfile() {
     const followerCount = exactCount(statValues.followers);
     const followingCount = exactCount(statValues.following);
 
-    // Current layout (seen live 2026-09-29): right after the stats <ul> comes a block holding
-    //   <span>Display name</span>, <a href="threads.com/@user">user</a>,
-    //   <div role="button"><span>bio</span></div>, <div><span>link text</span></div>.
-    // Wrapper divs are skipped by descending single-child chains.
-    const descend = (el) => {
-        let e = el;
-        while (
-            e &&
-            e.children.length === 1 &&
-            ![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
-        ) {
-            [e] = e.children;
-        }
-        return e;
-    };
-    let info = null;
-    const statsUl = header.querySelector('ul');
-    if (statsUl) {
-        let anchor = statsUl;
-        while (anchor !== header && !anchor.nextElementSibling) anchor = anchor.parentElement;
-        info = anchor !== header ? descend(anchor.nextElementSibling) : null;
+    // Current layout (seen live 2026-09-29): AFTER the stats come the display name, a Threads link that
+    // repeats the username, the bio, then a link line ("www.nasa.gov and 4 more"); the story highlights
+    // (a role=menu block) follow. Older layouts put the display name BEFORE the stats. Parsed from the
+    // visible lines so tag nesting does not matter.
+    const menu = header.querySelector('[role="menu"]');
+    const menuLines = menu
+        ? menu.innerText
+              .split('\n')
+              .map((l) => l.trim())
+              .filter(Boolean)
+        : [];
+    let cutAt = rawLines.length;
+    if (menuLines.length) {
+        const j = rawLines.findIndex((l, i) => i > lastStat && l === menuLines[0]);
+        if (j !== -1) cutAt = j;
     }
-    const kids = info ? [...info.children] : [];
-    const nameEl = kids.find((k) => k.tagName === 'SPAN');
-    const bioEl = kids.find((k) => k.getAttribute('role') === 'button');
-    const linkEl = kids.filter((k) => k.tagName === 'DIV' && !k.getAttribute('role')).pop();
+    const after = rawLines.slice(lastStat + 1, cutAt);
+    const isLinkLine = (l) => /\sand\s\d+\smore$/i.test(l) || /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(l);
+    const controlWords = new Set([
+        'follow',
+        'following',
+        'message',
+        'edit profile',
+        'contact',
+        'call',
+        'email',
+        'directions',
+        'view shop',
+    ]);
 
-    let bio;
-    if (nameEl) {
-        fullName = nameEl.innerText.trim() || null;
-        bio = bioEl ? bioEl.innerText.trim() || null : null;
-    } else {
-        // Bio: everything between the last stat line and either the external-link
-        // line ("...and N more") or a known button/control word.
-        const controlWords = new Set([
-            'follow',
-            'following',
-            'message',
-            'edit profile',
-            'contact',
-            'call',
-            'email',
-            'directions',
-            'view shop',
-        ]);
-        const bioLines = [];
-        for (let i = lastStat + 1; i < rawLines.length; i++) {
-            const l = rawLines[i];
-            if (/\sand\s\d+\smore$/i.test(l)) break;
-            if (controlWords.has(l.toLowerCase())) break;
-            if (l === usernameLine) break; // story-highlight owner tag repeats the username
-            bioLines.push(l);
-        }
-        bio = bioLines.length ? bioLines.join('\n') : null;
+    let rest = after;
+    if (fullName === null) {
+        // display name comes right after the stats; skip the repeated username line
+        fullName = rest[0] ?? null;
+        rest = rest.slice(1);
+        if (rest[0] === usernameLine) rest = rest.slice(1);
     }
+    const linkLine = rest.length && isLinkLine(rest[rest.length - 1]) ? rest[rest.length - 1] : null;
+    const bioLines = (linkLine ? rest.slice(0, -1) : rest).filter(
+        (l) => l !== usernameLine && !controlWords.has(l.toLowerCase()),
+    );
+    const bio = bioLines.length ? bioLines.join('\n') : null;
 
     // External link(s): real anchors first (excluding Instagram/Threads' own
     // domains), falling back to the visible "domain.com and N more" text.
@@ -248,8 +235,8 @@ export function domExtractProfile() {
             if (domainMatch) externalLinks.push(domainMatch[1]);
         }
     }
-    if (externalLinks.length === 0 && linkEl) {
-        const m = linkEl.innerText.trim().match(/^(\S+?)(?:\s+and\s+\d+\s+more)?$/);
+    if (externalLinks.length === 0 && linkLine) {
+        const m = linkLine.match(/^(\S+?)(?:\s+and\s+\d+\s+more)?$/);
         if (m && m[1].includes('.')) externalLinks.push(m[1]);
     }
 

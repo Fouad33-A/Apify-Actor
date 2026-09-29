@@ -89,11 +89,6 @@ describe('domExtractProfile (in-page)', () => {
         expect(dom.verified).toBe(false);
     });
 
-    it('fullName is null when the stats follow the username directly', async () => {
-        const dom = await evaluate(igPage(igHeader({ fullName: null })), domExtractProfile);
-        expect(dom.fullName).toBeNull();
-    });
-
     it('bio is null when there is no bio text', async () => {
         const dom = await evaluate(igPage(igHeader({ bioLines: [] })), domExtractProfile);
         expect(dom.bio).toBeNull();

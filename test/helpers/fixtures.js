@@ -58,8 +58,8 @@ export function igHeaderReal({
         <a role="link" href="#" style="display:block"><span><span>${following}</span> following</span></a>
       </ul>
       <div><div>
-        <span>${esc(fullName)}</span>
-        <a role="link" href="https://www.threads.com/@${username}?xmt=x"><span>${esc(username)}</span></a>
+        <span style="display:block">${esc(fullName)}</span>
+        <a role="link" href="https://www.threads.com/@${username}?xmt=x" style="display:block"><span>${esc(username)}</span></a>
         ${bio ? `<div role="button"><span>${esc(bio)}</span></div>` : ''}
         ${linkLine ? `<div><span>${esc(linkLine)}</span></div>` : ''}
       </div></div>
@@ -140,9 +140,9 @@ export function igEmbedPage(context) {
 // Mirrors the structure of a real Page captured by a live DOM outline (2026-09-29): <h1>, follower/following
 // links with <strong> counts, an Intro <span>bio</span> + <ul> (category button, email text, l.php links),
 // and [role=article] posts with nested comment articles. Still synthetic content, real shape.
-export const fbComment = ({ author, text, ago = '20h', likes = null, reply = false, to = 'Someone' }) =>
+export const fbComment = ({ author, text, ago = '20h', likes = null, reply = false, to = 'Someone', badge = null }) =>
     `<div role="article" aria-label="${reply ? `Reply by ${author} to ${to}'s comment ${ago} ago` : `Comment by ${author} ${ago} ago`}">
-        <div><div><div><a role="link" href="https://www.facebook.com/${author.replace(/\s/g, '.').toLowerCase()}?comment_id=1">${esc(author)}</a>
+        <div><div>${badge ? `<div>${badge}</div>` : ''}<div><a role="link" href="https://www.facebook.com/${author.replace(/\s/g, '.').toLowerCase()}?comment_id=1">${esc(author)}</a>
         <div>${esc(text)}</div></div>
         <div><a role="link" href="https://www.facebook.com/reel/1/?comment_id=1">${ago}</a>${likes ? `<div role="button" aria-label="${likes} reactions">${likes}</div>` : ''}</div></div></div>
     </div>`;

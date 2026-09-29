@@ -10,6 +10,7 @@ import {
     fetchComments,
     lookupProfile,
     parseFacebookOgTitle,
+    parseFacebookPostPageText,
     searchPosts,
     unwrapFacebookLink,
 } from '../src/platforms/facebook.js';
@@ -543,5 +544,115 @@ describe('post-page enrichment and comment fallback (full flow)', () => {
         await context.close();
         expect(rows).toEqual([]);
         expect(seen.some((u) => /facebook\.com\/NASA/.test(u))).toBe(false);
+    }, 60_000);
+});
+
+// Text shaped like a real logged-out post page (captured 2026-09-29); wording is paraphrased.
+const POST_PAGE_TEXT = `Log In
+Forgot Account?
+Some Page's Post
+Some Page
+ 
+8 hours ago
+8h
+ 
+·
+The full caption, first paragraph. It is long and complete.
+Second line of the caption: https://example.org/x
+All reactions:
+1.1K
+22 comments
+60 shares
+Like
+Comment
+Most relevant
+Kenneth Lindsey
+Nice one
+7h`;
+
+describe('parseFacebookPostPageText', () => {
+    it('reads the full caption, reactions and the labelled comment/share counts', () => {
+        expect(parseFacebookPostPageText(POST_PAGE_TEXT)).toEqual({
+            caption:
+                'The full caption, first paragraph. It is long and complete.\nSecond line of the caption: https://example.org/x',
+            reactions: 1100,
+            commentCount: 22,
+            shareCount: 60,
+        });
+    });
+
+    it('a post with no caption has a null caption (nothing between the dot and "All reactions:")', () => {
+        const text = 'Some Page\n \n4 hours ago\n4h\n \n·\n \nAll reactions:\n291K\n10.1K\n2.8K\nLike\nComment';
+        expect(parseFacebookPostPageText(text)).toEqual({
+            caption: null,
+            reactions: 291_000,
+            commentCount: null,
+            shareCount: null,
+        });
+    });
+
+    it('unlabelled numbers are NOT taken as comment/share counts', () => {
+        const r = parseFacebookPostPageText('x\n·\ncap\nAll reactions:\n1.8K\n92\n159\nLike');
+        expect(r.commentCount).toBeNull();
+        expect(r.shareCount).toBeNull();
+    });
+
+    it.each([[null], [''], ['no reactions label here']])('%j -> all null', (t) => {
+        expect(parseFacebookPostPageText(t)).toEqual({
+            caption: null,
+            reactions: null,
+            commentCount: null,
+            shareCount: null,
+        });
+    });
+});
+
+describe('comment badges and post-page enrichment', () => {
+    it('a leading "Author" badge is not taken as the commenter name', async () => {
+        const html = fbPage({
+            posts: [
+                fbPost({
+                    comments: [
+                        fbComment({
+                            author: "NASA's Kennedy Space Center",
+                            text: 'Learn more: https://go.nasa.gov/x',
+                            badge: 'Author',
+                        }),
+                    ],
+                }),
+            ],
+        });
+        const [c] = await evaluate(html, domExtractComments, { maxComments: 5 });
+        expect(c.author).toBe("NASA's Kennedy Space Center");
+        expect(c.text).toBe('Learn more: https://go.nasa.gov/x');
+    });
+
+    it('a regular (non-reel) post uses the post page for the full caption and labelled counts', async () => {
+        const postUrl = 'https://www.facebook.com/natgeo/posts/pfbid0ABC';
+        const routes = [
+            {
+                match: /facebook\.com\/NASA$/,
+                body: fbPage({
+                    posts: [fbPost({ url: postUrl, caption: 'Truncated card text here', truncated: true })],
+                }),
+            },
+            {
+                match: /posts\/pfbid0ABC$/,
+                body: `<html><head><meta property="og:title" content="National Geographic"></head><body><pre>${POST_PAGE_TEXT}</pre></body></html>`,
+            },
+        ];
+        const { posts } = await withContext(routes, ({ page }) =>
+            lookupProfile({ page, username: 'NASA', sourceInput: 'NASA', maxRecentPosts: 3 }),
+        );
+        expect(posts).toHaveLength(1);
+        expect(posts[0]).toMatchObject({
+            caption:
+                'The full caption, first paragraph. It is long and complete.\nSecond line of the caption: https://example.org/x',
+            likeCount: 1100,
+            commentCount: 22,
+            shareCount: 60,
+        });
+        expect(posts[0].statusDetail).toMatch(/comment\/share counts are from the post page/);
+        expect(posts[0].statusDetail).not.toMatch(/caption is truncated/);
     }, 60_000);
 });
