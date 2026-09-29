@@ -131,7 +131,7 @@ export function domExtractProfile() {
     const lastStat = Math.max(...statIdxs);
 
     const usernameLine = rawLines[0];
-    const fullName = firstStat > 1 ? rawLines.slice(1, firstStat).join(' ').trim() || null : null;
+    let fullName = firstStat > 1 ? rawLines.slice(1, firstStat).join(' ').trim() || null : null;
 
     const statValues = {};
     for (const i of statIdxs) {
@@ -167,32 +167,68 @@ export function domExtractProfile() {
         return parseAbbrev(displayText);
     }
 
-    const postCount = exactCount(statValues.posts);
+    // The header carries no posts stat on the current layout; the page metadata does ("4,937 Posts").
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    const ogPosts = ogDesc ? (ogDesc.content.match(/([\d,]+)\s+Posts/i) || [])[1] : null;
+    const postCount = exactCount(statValues.posts) ?? (ogPosts ? parseInt(ogPosts.replace(/,/g, ''), 10) : null);
     const followerCount = exactCount(statValues.followers);
     const followingCount = exactCount(statValues.following);
 
-    // Bio: everything between the last stat line and either the external-link
-    // line ("...and N more") or a known button/control word.
-    const controlWords = new Set([
-        'follow',
-        'following',
-        'message',
-        'edit profile',
-        'contact',
-        'call',
-        'email',
-        'directions',
-        'view shop',
-    ]);
-    const bioLines = [];
-    for (let i = lastStat + 1; i < rawLines.length; i++) {
-        const l = rawLines[i];
-        if (/\sand\s\d+\smore$/i.test(l)) break;
-        if (controlWords.has(l.toLowerCase())) break;
-        if (l === usernameLine) break; // story-highlight owner tag repeats the username
-        bioLines.push(l);
+    // Current layout (seen live 2026-09-29): right after the stats <ul> comes a block holding
+    //   <span>Display name</span>, <a href="threads.com/@user">user</a>,
+    //   <div role="button"><span>bio</span></div>, <div><span>link text</span></div>.
+    // Wrapper divs are skipped by descending single-child chains.
+    const descend = (el) => {
+        let e = el;
+        while (
+            e &&
+            e.children.length === 1 &&
+            ![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
+        ) {
+            [e] = e.children;
+        }
+        return e;
+    };
+    let info = null;
+    const statsUl = header.querySelector('ul');
+    if (statsUl) {
+        let anchor = statsUl;
+        while (anchor !== header && !anchor.nextElementSibling) anchor = anchor.parentElement;
+        info = anchor !== header ? descend(anchor.nextElementSibling) : null;
     }
-    const bio = bioLines.length ? bioLines.join('\n') : null;
+    const kids = info ? [...info.children] : [];
+    const nameEl = kids.find((k) => k.tagName === 'SPAN');
+    const bioEl = kids.find((k) => k.getAttribute('role') === 'button');
+    const linkEl = kids.filter((k) => k.tagName === 'DIV' && !k.getAttribute('role')).pop();
+
+    let bio;
+    if (nameEl) {
+        fullName = nameEl.innerText.trim() || null;
+        bio = bioEl ? bioEl.innerText.trim() || null : null;
+    } else {
+        // Bio: everything between the last stat line and either the external-link
+        // line ("...and N more") or a known button/control word.
+        const controlWords = new Set([
+            'follow',
+            'following',
+            'message',
+            'edit profile',
+            'contact',
+            'call',
+            'email',
+            'directions',
+            'view shop',
+        ]);
+        const bioLines = [];
+        for (let i = lastStat + 1; i < rawLines.length; i++) {
+            const l = rawLines[i];
+            if (/\sand\s\d+\smore$/i.test(l)) break;
+            if (controlWords.has(l.toLowerCase())) break;
+            if (l === usernameLine) break; // story-highlight owner tag repeats the username
+            bioLines.push(l);
+        }
+        bio = bioLines.length ? bioLines.join('\n') : null;
+    }
 
     // External link(s): real anchors first (excluding Instagram/Threads' own
     // domains), falling back to the visible "domain.com and N more" text.
@@ -211,6 +247,10 @@ export function domExtractProfile() {
             const domainMatch = moreLine.match(/^(\S+)/);
             if (domainMatch) externalLinks.push(domainMatch[1]);
         }
+    }
+    if (externalLinks.length === 0 && linkEl) {
+        const m = linkEl.innerText.trim().match(/^(\S+?)(?:\s+and\s+\d+\s+more)?$/);
+        if (m && m[1].includes('.')) externalLinks.push(m[1]);
     }
 
     const verified = !!header.querySelector('svg[aria-label="Verified"]');
@@ -254,7 +294,7 @@ export function domExtractProfile() {
 //   '1,234 likes, 56 comments - nasa on September 10, 2026: "The caption."'
 // Anything that cannot be read stays null (some posts hide likes; the format can change).
 export function parsePostDescription(text) {
-    if (!text) return { likeCount: null, commentCount: null, caption: null };
+    if (!text) return { likeCount: null, commentCount: null, caption: null, rounded: false };
     const likes = text.match(/([\d.,]+\s*[KMB]?)\s+likes?\b/i)?.[1] ?? null;
     const comments = text.match(/([\d.,]+\s*[KMB]?)\s+comments?\b/i)?.[1] ?? null;
     const caption = text.match(/\son\s[^:"]+:\s*"([\s\S]*)"\.?\s*$/)?.[1] ?? null;
@@ -262,6 +302,7 @@ export function parsePostDescription(text) {
         likeCount: parseAbbrevCount(likes),
         commentCount: parseAbbrevCount(comments),
         caption: caption && caption.trim() ? caption.trim() : null,
+        rounded: /[KMB]/i.test(`${likes ?? ''}${comments ?? ''}`),
     };
 }
 
@@ -323,10 +364,11 @@ export function domExtractPostMetrics() {
     };
 }
 
-// Runs inside a single post's page. Each comment's shared container is
-// found by walking up 6 levels from its <time> element - verified live to
-// be the exact single-comment text boundary (see file header note). The
-// very first <time> on the page is the post's own publish time, not a
+// Runs inside a single post's page. Each comment's container is the highest
+// ancestor of its <time> element that still holds exactly one <time>: on the
+// real page (seen live 2026-09-29, logged out) the comments sit in one list
+// container, so a fixed climb (the old 6 levels) would swallow the whole list.
+// The very first <time> on the page is the post's own publish time, not a
 // comment, and is skipped.
 export function domExtractComments(maxComments) {
     const times = [...document.querySelectorAll('time')];
@@ -336,8 +378,12 @@ export function domExtractComments(maxComments) {
     const rows = [];
     for (const t of times.slice(1)) {
         let node = t;
-        for (let i = 0; i < 6 && node; i++) node = node.parentElement;
-        if (!node || seen.has(node)) continue;
+        for (let i = 0; i < 12; i++) {
+            const parent = node.parentElement;
+            if (!parent || parent.querySelectorAll('time').length !== 1) break;
+            node = parent;
+        }
+        if (seen.has(node)) continue;
         seen.add(node);
 
         const lines = node.innerText
@@ -494,6 +540,9 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                     publishDate: metrics.publishDate,
                     likeCount: metrics.likeCount ?? described.likeCount,
                     commentCount: described.commentCount,
+                    statusDetail: described.rounded
+                        ? 'likeCount/commentCount are rounded as displayed (e.g. "117K")'
+                        : null,
                     shareCount: null, // Instagram does not expose share counts
                     viewCount: metrics.viewCount,
                     isSponsored: null, // not reliably exposed in the current DOM; left honest-null rather than guessed

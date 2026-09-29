@@ -36,6 +36,59 @@ export function igHeader({
   </header>`;
 }
 
+// The REAL profile header layout (captured live 2026-09-29): stats as links with the exact count in a title,
+// then a block with display name, a Threads link repeating the username, the bio as a role=button and a link line.
+export function igHeaderReal({
+    username = 'nasa',
+    fullName = 'NASA',
+    followers = ['104M', '104,320,207'],
+    following = '89',
+    bio = 'Making the seemingly impossible, possible. \u2728',
+    linkLine = 'www.nasa.gov and 4 more',
+    verified = true,
+    ogDescription = '104M Followers, 93 Following, 4,937 Posts - See Instagram photos and videos from NASA (@nasa)',
+} = {}) {
+    return `<!doctype html><html><head>${
+        ogDescription ? `<meta property="og:description" content="${esc(ogDescription)}">` : ''
+    }</head><body><main role="main"><div>
+    <header>
+      <div><div><span>${esc(username)}</span>${verified ? '<svg aria-label="Verified" width="8" height="8"></svg>' : ''}</div></div>
+      <ul>
+        <a role="link" href="#" style="display:block"><span><span title="${followers[1]}"><span>${followers[0]}</span></span> followers</span></a>
+        <a role="link" href="#" style="display:block"><span><span>${following}</span> following</span></a>
+      </ul>
+      <div><div>
+        <span>${esc(fullName)}</span>
+        <a role="link" href="https://www.threads.com/@${username}?xmt=x"><span>${esc(username)}</span></a>
+        ${bio ? `<div role="button"><span>${esc(bio)}</span></div>` : ''}
+        ${linkLine ? `<div><span>${esc(linkLine)}</span></div>` : ''}
+      </div></div>
+      <div role="menu"><div role="presentation"><ul><a role="link" aria-label="View Roman highlight" href="/stories/highlights/1/"><div role="button"><span>Roman</span></div></a></ul></div></div>
+    </header>
+    <div><div role="button"><span>Show more posts from ${esc(username)}</span></div></div>
+  </div></main></body></html>`;
+}
+
+// Comments as on the real post page: username link, a time link, the text, Like / Reply; all comments share one list container.
+export const igCommentReal = ({
+    user,
+    ago = '1h',
+    iso = '2026-09-29T19:54:17.000Z',
+    text,
+    likes = null,
+}) => `<div><div><div>
+    <div><a role="link" href="/${user}/" style="display:block"><span>${esc(user)}</span></a><a role="link" href="/p/X/c/1/" style="display:block"><time title="Sep 29, 2026" datetime="${iso}">${ago}</time></a></div>
+    <span>${esc(text)}</span></div>
+    <div>${likes ? `<span>${likes} likes</span>` : '<span>Like</span>'}<div role="button"><span>Reply</span></div></div></div></div>`;
+
+export const igPostReal = ({ comments = [], ogDescription = null } = {}) =>
+    `<!doctype html><html><head>${
+        ogDescription ? `<meta property="og:description" content="${esc(ogDescription)}">` : ''
+    }</head><body><main role="main"><div><div><div>
+      <div><div><a role="link" href="/nasa/"><span>nasa</span></a><time title="Sep 10, 2026" datetime="2026-09-10T21:20:26.000Z">2w</time></div>
+        <span>The post caption itself.</span></div>
+    </div></div><div><div>${comments.join('')}</div></div></div></main></body></html>`;
+
 export function igGrid(posts) {
     return `<main>${posts
         .map((p) => `<a href="${p.href}">${p.alt === undefined ? '' : `<img alt="${esc(p.alt)}" src="data:,">`}</a>`)
@@ -146,9 +199,16 @@ export function fbPage({
       }</span>
     </div></div></div>
     <div><div role="tablist"><a role="tab" href="/NASA/"><span>Posts</span></a><a role="tab" href="/NASA/about"><span>About</span></a></div></div>
-    <div><div><div><div><span>Intro</span></div><div>${bio ? `<span>${esc(bio)}</span>` : ''}${introList}</div></div></div>
+    <div><div><div><div><span>Intro</span></div><div>${bio ? `<span>${esc(bio)}</span>` : ''}${introList ? `<div>${introList}</div>` : ''}</div></div></div>
       <footer role="contentinfo"><ul><li><a href="/privacy">Privacy</a></li></ul></footer>
     </div>
     <div>${posts.join('')}</div>
   </div></body></html>`;
 }
+
+// A card that is not a post: an event / "plans to go live" item (seen live as the first article on a Page).
+export const fbEventCard = () => `<div role="article"><div><div>
+    <div><span>plans to go live.</span><span>11 minutes ago</span><a role="link" aria-label="11m" href="https://www.facebook.com/events/1036015482730574/?__cft__[0]=x">11m</a></div>
+    <div><span>Thu, Oct 1 at 9:20 AM EDT</span><span>NASA's SpaceX Crew-13 Launch</span><div>11 people interested</div></div>
+    <div><div><div>All reactions:</div><span>20</span></div></div>
+  </div></div></div>`;

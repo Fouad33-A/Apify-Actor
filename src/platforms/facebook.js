@@ -19,7 +19,7 @@
 
 import { saveDiagnostics } from '../diagnostics.js';
 import { assertNotRateLimited } from '../errors.js';
-import { extractEmails, makeCommentRow, makePostRow, makeProfileRow } from '../schema.js';
+import { extractEmails, makeCommentRow, makePostRow, makeProfileRow, parseAbbrevCount } from '../schema.js';
 
 const DOMAIN = 'www.facebook.com';
 const NOT_FOUND_RE = /this (content|page) isn'?t available|page not found|the link you followed may be broken/i;
@@ -85,7 +85,14 @@ export function domExtractProfile() {
     const externalLinks = [];
     if (introList) {
         introText = introList.innerText;
-        const before = introList.previousElementSibling;
+        // Wrapper divs can sit between the bio <span> and the list (seen live), so climb until a previous sibling exists.
+        let anchor = introList;
+        while (anchor.parentElement && anchor.parentElement !== main && !anchor.previousElementSibling) {
+            anchor = anchor.parentElement;
+        }
+        const candidate = anchor.previousElementSibling;
+        // The bio is a <span>; the heading before it ("Intro") is a <div>, so a Page without a bio yields null.
+        const before = candidate && candidate.tagName === 'SPAN' ? candidate : null;
         const bioText = before ? before.innerText.trim() : '';
         bio = bioText || null;
 
@@ -142,7 +149,8 @@ export function domExtractPosts(maxPosts) {
         (a) => !a.parentElement.closest('[role="article"]'),
     );
     const out = [];
-    for (const article of articles.slice(0, maxPosts)) {
+    for (const article of articles) {
+        if (out.length >= maxPosts) break;
         const mine = (el) => el.closest('[role="article"]') === article;
 
         const links = [...article.querySelectorAll('a[href]')].filter(mine);
@@ -159,6 +167,8 @@ export function domExtractPosts(maxPosts) {
             u.hash = '';
             postUrl = u.href;
         }
+        // Cards without a post link (events, "plans to go live", ads) are not posts.
+        if (!postUrl) continue;
         const relativeTime = postAnchor
             ? postAnchor.getAttribute('aria-label') || postAnchor.innerText.trim() || null
             : null;
@@ -191,7 +201,7 @@ export function domExtractPosts(maxPosts) {
 }
 
 // Runs inside the page. Comments/replies currently rendered (aria-label "Comment by X ..." / "Reply by X ...").
-export function domExtractComments(maxComments) {
+export function domExtractComments({ maxComments, postPathHint = null }) {
     const timeRe = /^(just now|\d+\s?(s|m|mins?|h|hrs?|d|w|y|mo)|yesterday.*|[A-Z][a-z]+ \d{1,2}(, \d{4})?.*)$/i;
     const parseAbbrev = (text) => {
         const m = String(text ?? '')
@@ -201,9 +211,17 @@ export function domExtractComments(maxComments) {
         const mult = { K: 1e3, M: 1e6, B: 1e9 }[(m[2] || '').toUpperCase()] || 1;
         return Math.round(parseFloat(m[1]) * mult);
     };
-    const nodes = [...document.querySelectorAll('[role="article"][aria-label]')].filter((a) =>
-        /^(comment|reply) by /i.test(a.getAttribute('aria-label')),
-    );
+    // When a post path is given, only look inside the top-level article that links to that post.
+    const scopes = postPathHint
+        ? [...document.querySelectorAll('[role="article"]')].filter(
+              (a) =>
+                  !a.parentElement.closest('[role="article"]') &&
+                  [...a.querySelectorAll('a[href]')].some((x) => x.href.includes(postPathHint)),
+          )
+        : [document];
+    const nodes = scopes
+        .flatMap((sc) => [...sc.querySelectorAll('[role="article"][aria-label]')])
+        .filter((a) => /^(comment|reply) by /i.test(a.getAttribute('aria-label')));
     const out = [];
     const seen = new Set();
     for (const node of nodes) {
@@ -234,6 +252,20 @@ export function domExtractComments(maxComments) {
         if (out.length >= maxComments) break;
     }
     return out;
+}
+
+// Reel/video pages put views, reactions and the FULL caption in og:title:
+//   '193K views · 1.7K reactions | <caption> | <Page name>'
+// Anything unreadable stays null.
+export function parseFacebookOgTitle(title) {
+    const empty = { viewCount: null, reactions: null, caption: null };
+    if (!title) return empty;
+    const m = title.match(/^(?:([\d.,]+\s*[KMB]?)\s+views?\s*·\s*)?([\d.,]+\s*[KMB]?)\s+reactions?\s*\|\s*/i);
+    if (!m) return empty;
+    const parts = title.slice(m[0].length).split(/\s+\|\s+/);
+    if (parts.length > 1) parts.pop(); // trailing "| <Page name>"
+    const caption = parts.join(' | ').trim();
+    return { viewCount: parseAbbrevCount(m[1]), reactions: parseAbbrevCount(m[2]), caption: caption || null };
 }
 
 export async function lookupProfile({ page, username, sourceInput, maxRecentPosts }) {
@@ -282,6 +314,29 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
         });
 
         const rawPosts = maxRecentPosts > 0 ? await page.evaluate(domExtractPosts, maxRecentPosts) : [];
+
+        // The post page's own metadata is more complete than the truncated card on the Page.
+        for (const p of rawPosts) {
+            try {
+                await page.goto(p.postUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+                await page.waitForTimeout(1200);
+                await assertNotRateLimited(page, 'facebook', 'post');
+                const ogTitle = await page.evaluate(() => {
+                    const el = document.querySelector('meta[property="og:title"]');
+                    return el ? el.content : null;
+                });
+                const og = parseFacebookOgTitle(ogTitle);
+                if (og.caption) {
+                    p.caption = og.caption;
+                    p.captionTruncated = false;
+                }
+                if (og.reactions != null) p.reactions = og.reactions;
+                p.viewCount = og.viewCount;
+            } catch (err) {
+                if (err?.name === 'RateLimitError') throw err;
+                // keep what the Page card showed
+            }
+        }
         const posts = rawPosts.map((p) => {
             const notes = [
                 'Anonymous visitors see only the latest post(s)',
@@ -305,7 +360,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                 likeCount: p.reactions,
                 commentCount: null, // the number is shown but its label is not, so it is not guessed
                 shareCount: null,
-                viewCount: null,
+                viewCount: p.viewCount ?? null,
                 isSponsored: null,
                 statusDetail: notes.join('; '),
             });
@@ -336,11 +391,36 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
 // Comments an anonymous visitor can see on a post page. Facebook shows only a few without login;
 // nothing is fetched beyond what is rendered, and no exact timestamps exist (relativeTime is noted in statusDetail).
 export async function fetchComments({ page, postUrl, sourceInput, maxComments, topLevelOnly }) {
+    const cap = Math.max(maxComments * 2, maxComments);
+    let hint = null;
+    try {
+        hint = new URL(postUrl).pathname.replace(/\/$/, '') || null;
+    } catch {
+        // not a URL: no path hint
+    }
+
     await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 60_000 });
     await page.waitForTimeout(1500);
     await assertNotRateLimited(page, 'facebook', 'comments');
+    let raw = await page.evaluate(domExtractComments, { maxComments: cap });
 
-    const raw = await page.evaluate(domExtractComments, Math.max(maxComments * 2, maxComments));
+    // Anonymous post pages (reels especially) usually render no comments, but the Page's own profile shows
+    // its latest post with a few. When the source is a Page name, look there for this post's comments.
+    if (raw.length === 0 && hint && sourceInput && !/^https?:/i.test(String(sourceInput))) {
+        try {
+            await page.goto(`https://${DOMAIN}/${encodeURIComponent(sourceInput)}`, {
+                waitUntil: 'networkidle',
+                timeout: 60_000,
+            });
+            await page.waitForTimeout(1500);
+            await assertNotRateLimited(page, 'facebook', 'comments');
+            raw = await page.evaluate(domExtractComments, { maxComments: cap, postPathHint: hint });
+        } catch (err) {
+            if (err?.name === 'RateLimitError') throw err;
+            // the fallback is best-effort: no comments rather than a failed call
+        }
+    }
+
     return raw
         .filter((c) => !(topLevelOnly && c.isReply))
         .slice(0, maxComments)

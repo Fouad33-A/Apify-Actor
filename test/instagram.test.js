@@ -16,7 +16,17 @@ import {
     parsePostDescription,
 } from '../src/platforms/instagram.js';
 import { launchBrowser, serve } from './helpers/browser.js';
-import { igComment, igEmbedPage, igGrid, igHeader, igPage, igPost } from './helpers/fixtures.js';
+import {
+    igComment,
+    igCommentReal,
+    igEmbedPage,
+    igGrid,
+    igHeader,
+    igHeaderReal,
+    igPage,
+    igPost,
+    igPostReal,
+} from './helpers/fixtures.js';
 
 const setValue = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('apify', () => ({
@@ -657,6 +667,7 @@ describe('parsePostDescription', () => {
             likeCount: 1234,
             commentCount: 56,
             caption: 'The caption. Two sentences.',
+            rounded: false,
         });
     });
 
@@ -667,12 +678,22 @@ describe('parsePostDescription', () => {
         expect(parsePostDescription('5 likes, 1 comment - nasa on May 1, 2026: "Hi.".').caption).toBe('Hi.');
     });
 
+    it('flags abbreviated (rounded) counts', () => {
+        expect(parsePostDescription('117K likes, 829 comments - nasa on May 1, 2026: "x"').rounded).toBe(true);
+    });
+
     it('anything unreadable stays null, never guessed', () => {
-        expect(parsePostDescription(null)).toEqual({ likeCount: null, commentCount: null, caption: null });
+        expect(parsePostDescription(null)).toEqual({
+            likeCount: null,
+            commentCount: null,
+            caption: null,
+            rounded: false,
+        });
         expect(parsePostDescription('Something else entirely')).toEqual({
             likeCount: null,
             commentCount: null,
             caption: null,
+            rounded: false,
         });
         expect(parsePostDescription('nasa on May 1, 2026: ""').caption).toBeNull();
     });
@@ -791,4 +812,84 @@ describe('embed fallback with the real embed JSON shape (synthetic values)', () 
         expect(profile.status).toBe('private');
         expect(posts).toEqual([]);
     }, 60_000);
+});
+
+describe('domExtractProfile on the REAL header layout (synthetic content, real shape)', () => {
+    it('reads display name, bio, link, exact followers, following, verified and the posts count from metadata', async () => {
+        const dom = await evaluate(igHeaderReal(), domExtractProfile);
+        expect(dom).toMatchObject({
+            username: 'nasa',
+            fullName: 'NASA',
+            bio: 'Making the seemingly impossible, possible. \u2728',
+            followerCount: 104_320_207, // exact, from the title attribute
+            followingCount: 89,
+            postCount: 4937, // from og:description ("4,937 Posts"); the header has no posts stat
+            verified: true,
+            externalLinks: ['www.nasa.gov'],
+        });
+    });
+
+    it('the Threads link that repeats the username is not mistaken for the bio or the name', async () => {
+        const dom = await evaluate(igHeaderReal(), domExtractProfile);
+        expect(dom.bio).not.toBe('nasa');
+        expect(dom.fullName).not.toBe('nasa');
+    });
+
+    it('bio is null when the account has none', async () => {
+        expect((await evaluate(igHeaderReal({ bio: '' }), domExtractProfile)).bio).toBeNull();
+    });
+
+    it('a single link line without "and N more" is still reported', async () => {
+        const dom = await evaluate(igHeaderReal({ linkLine: 'example.org' }), domExtractProfile);
+        expect(dom.externalLinks).toEqual(['example.org']);
+    });
+
+    it('no link line means no links', async () => {
+        expect((await evaluate(igHeaderReal({ linkLine: '' }), domExtractProfile)).externalLinks).toEqual([]);
+    });
+
+    it('postCount stays null when the metadata has no posts figure', async () => {
+        expect((await evaluate(igHeaderReal({ ogDescription: null }), domExtractProfile)).postCount).toBeNull();
+    });
+});
+
+describe('domExtractComments on the REAL post layout (all comments share one list container)', () => {
+    const html = igPostReal({
+        comments: [
+            igCommentReal({
+                user: 'binte_faheem_',
+                text: "here's to the next giant leap!",
+                ago: '1h',
+                iso: '2026-09-29T19:54:17.000Z',
+            }),
+            igCommentReal({
+                user: 'sirousdior',
+                text: 'Erase the memory. Rewrite the history.',
+                ago: '3h',
+                iso: '2026-09-29T17:39:56.000Z',
+                likes: 4,
+            }),
+            igCommentReal({ user: 'naitikuuuu', text: 'Third one', ago: '4h', iso: '2026-09-29T16:00:00.000Z' }),
+        ],
+    });
+
+    it('returns one row per comment (a fixed six-level climb would merge the whole list into one)', async () => {
+        const rows = await evaluate(html, domExtractComments, 10);
+        expect(rows.map((r) => r.username)).toEqual(['binte_faheem_', 'sirousdior', 'naitikuuuu']);
+    });
+
+    it('extracts text, exact ISO datetime and like count', async () => {
+        const rows = await evaluate(html, domExtractComments, 10);
+        expect(rows[1]).toEqual({
+            username: 'sirousdior',
+            text: 'Erase the memory. Rewrite the history.',
+            likeCount: 4,
+            datetime: '2026-09-29T17:39:56.000Z',
+        });
+        expect(rows[0].likeCount).toBeNull();
+    });
+
+    it("skips the post's own time and respects maxComments", async () => {
+        expect(await evaluate(html, domExtractComments, 2)).toHaveLength(2);
+    });
 });

@@ -9,11 +9,12 @@ import {
     domExtractProfile,
     fetchComments,
     lookupProfile,
+    parseFacebookOgTitle,
     searchPosts,
     unwrapFacebookLink,
 } from '../src/platforms/facebook.js';
 import { launchBrowser, serve } from './helpers/browser.js';
-import { fbComment, fbPage, fbPost } from './helpers/fixtures.js';
+import { fbComment, fbEventCard, fbPage, fbPost } from './helpers/fixtures.js';
 
 vi.mock('apify', () => ({
     Actor: { setValue: vi.fn(async () => {}) },
@@ -196,7 +197,7 @@ describe('domExtractComments (in-page)', () => {
     });
 
     it('reads comments and replies with author, text, relative time, likes and reply flag', async () => {
-        const rows = await evaluate(html, domExtractComments, 10);
+        const rows = await evaluate(html, domExtractComments, { maxComments: 10 });
         expect(rows).toEqual([
             {
                 author: 'Marc Chervin',
@@ -216,11 +217,11 @@ describe('domExtractComments (in-page)', () => {
     });
 
     it('caps the number returned', async () => {
-        expect(await evaluate(html, domExtractComments, 1)).toHaveLength(1);
+        expect(await evaluate(html, domExtractComments, { maxComments: 1 })).toHaveLength(1);
     });
 
     it('returns [] when the page shows no comments', async () => {
-        expect(await evaluate(fbPage({ posts: [fbPost()] }), domExtractComments, 10)).toEqual([]);
+        expect(await evaluate(fbPage({ posts: [fbPost()] }), domExtractComments, { maxComments: 10 })).toEqual([]);
     });
 });
 
@@ -403,4 +404,144 @@ describe('unimplemented modes', () => {
     it('searchPosts throws rather than returning empty results', async () => {
         await expect(searchPosts()).rejects.toThrow(/not yet implemented/i);
     });
+});
+
+describe('parseFacebookOgTitle', () => {
+    it('reads views, reactions and the full caption from a reel og:title', () => {
+        expect(
+            parseFacebookOgTitle(
+                '193K views · 1.7K reactions | What happens when we detect an asteroid?\n\nFull text | https://go.nasa.gov/x | NASA - National Aeronautics and Space Administration',
+            ),
+        ).toEqual({
+            viewCount: 193_000,
+            reactions: 1700,
+            caption: 'What happens when we detect an asteroid?\n\nFull text | https://go.nasa.gov/x',
+        });
+    });
+
+    it('views are optional', () => {
+        expect(parseFacebookOgTitle('12 reactions | Hello | A Page')).toEqual({
+            viewCount: null,
+            reactions: 12,
+            caption: 'Hello',
+        });
+    });
+
+    it.each([[null], [''], ['A Page - some caption'], ['NASA']])('%j -> all null (never guessed)', (t) => {
+        expect(parseFacebookOgTitle(t)).toEqual({ viewCount: null, reactions: null, caption: null });
+    });
+});
+
+describe('real-layout regressions (synthetic content, real shape)', () => {
+    it('finds the bio even when a wrapper <div> sits between the bio <span> and the list', async () => {
+        const dom = await evaluate(fbPage(), domExtractProfile);
+        expect(dom.bio).toBe('Explore the universe and discover our home planet.');
+        expect(dom.category).toBe('Government organization');
+    });
+
+    it('an event / "plans to go live" card is not returned as a post', async () => {
+        const posts = await evaluate(fbPage({ posts: [fbEventCard(), fbPost()] }), domExtractPosts, 5);
+        expect(posts).toHaveLength(1);
+        expect(posts[0].postUrl).toBe('https://www.facebook.com/reel/28263630716612782/');
+    });
+
+    it('a page whose only article is an event card yields no posts', async () => {
+        expect(await evaluate(fbPage({ posts: [fbEventCard()] }), domExtractPosts, 5)).toEqual([]);
+    });
+
+    it('comments can be scoped to one post via its path', async () => {
+        const html = fbPage({
+            posts: [
+                fbPost({
+                    url: 'https://www.facebook.com/reel/111/',
+                    comments: [fbComment({ author: 'Only One', text: 'first post comment' })],
+                }),
+                fbPost({
+                    url: 'https://www.facebook.com/reel/222/',
+                    comments: [fbComment({ author: 'Other Two', text: 'second post comment' })],
+                }),
+            ],
+        });
+        const rows = await evaluate(html, domExtractComments, { maxComments: 10, postPathHint: '/reel/222' });
+        expect(rows.map((r) => r.author)).toEqual(['Other Two']);
+    });
+});
+
+describe('post-page enrichment and comment fallback (full flow)', () => {
+    const base = { username: 'NASA', sourceInput: 'NASA', maxRecentPosts: 3 };
+    const reel = /facebook\.com\/reel\/28263630716612782\/?$/;
+
+    it('uses the post page og:title for the full caption, views and reactions', async () => {
+        const ogTitle = '193K views · 1.7K reactions | The full untruncated caption. | NASA';
+        const routes = [
+            { match: /facebook\.com\/NASA$/, body: fbPage({ posts: [fbPost()] }) },
+            {
+                match: reel,
+                body: `<html><head><meta property="og:title" content="${ogTitle}"></head><body>x</body></html>`,
+            },
+        ];
+        const { posts } = await withContext(routes, ({ page }) => lookupProfile({ page, ...base }));
+        expect(posts).toHaveLength(1);
+        expect(posts[0]).toMatchObject({
+            caption: 'The full untruncated caption.',
+            viewCount: 193_000,
+            likeCount: 1700,
+        });
+        expect(posts[0].statusDetail).not.toMatch(/truncated/);
+    }, 60_000);
+
+    it('falls back to the Page profile for comments when the post page shows none', async () => {
+        const routes = [
+            { match: reel, body: '<html><body>no comments here</body></html>' },
+            {
+                match: /facebook\.com\/NASA$/,
+                body: fbPage({
+                    posts: [
+                        fbPost({
+                            comments: [
+                                fbComment({
+                                    author: 'Marc Chervin',
+                                    text: 'Seen on the profile',
+                                    ago: '20h',
+                                    likes: '3',
+                                }),
+                            ],
+                        }),
+                    ],
+                }),
+            },
+        ];
+        const rows = await withContext(routes, ({ page }) =>
+            fetchComments({
+                page,
+                postUrl: 'https://www.facebook.com/reel/28263630716612782/',
+                sourceInput: 'NASA',
+                maxComments: 5,
+                topLevelOnly: true,
+            }),
+        );
+        expect(rows.map((r) => [r.commenterUsername, r.commentText])).toEqual([
+            ['Marc Chervin', 'Seen on the profile'],
+        ]);
+    }, 60_000);
+
+    it('does not try the Page profile when the source is a URL (Mode C with post URLs)', async () => {
+        const seen = [];
+        const context = await browser.newContext();
+        await context.route('**/*', (route) => {
+            seen.push(route.request().url());
+            return route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>none</body></html>' });
+        });
+        const page = await context.newPage();
+        const rows = await fetchComments({
+            page,
+            postUrl: 'https://www.facebook.com/reel/1/',
+            sourceInput: 'https://www.facebook.com/reel/1/',
+            maxComments: 5,
+            topLevelOnly: true,
+        });
+        await context.close();
+        expect(rows).toEqual([]);
+        expect(seen.some((u) => /facebook\.com\/NASA/.test(u))).toBe(false);
+    }, 60_000);
 });
