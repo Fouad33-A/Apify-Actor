@@ -836,5 +836,7 @@ export async function fetchComments({ page, postUrl, sourceInput, maxComments, t
 // than the profile page) - needs its own investigation before building,
 // flagged in README as pending rather than guessed at.
 export async function searchPosts() {
-    throw new Error('Instagram Mode B (search) not yet implemented - see README pending list');
+    throw new Error(
+        'Instagram keyword/hashtag search needs a logged-in session (logged-out probe 2026-09-29: HTTP 429 and a redirect to the login page); this Actor does not log in. Use mode=profile with usernames instead',
+    );
 }

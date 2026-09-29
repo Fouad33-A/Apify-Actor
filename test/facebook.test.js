@@ -408,7 +408,7 @@ describe('fetchComments (full flow, synthetic pages)', () => {
 
 describe('unimplemented modes', () => {
     it('searchPosts throws rather than returning empty results', async () => {
-        await expect(searchPosts()).rejects.toThrow(/not yet implemented/i);
+        await expect(searchPosts()).rejects.toThrow(/needs a logged-in session/i);
     });
 });
 

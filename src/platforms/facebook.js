@@ -545,5 +545,7 @@ export async function fetchComments({ page, postUrl, sourceInput, maxComments, t
 // Mode B (keyword search) is not built: Facebook's search results page has a different layout from a Page
 // and generally needs a login.
 export async function searchPosts() {
-    throw new Error('Facebook Mode B (search) not yet implemented - see README pending list');
+    throw new Error(
+        'Facebook keyword search needs a logged-in session (logged-out probe 2026-09-29: the search pages return "Not Found"); this Actor does not log in. Use mode=profile with Page names instead',
+    );
 }
