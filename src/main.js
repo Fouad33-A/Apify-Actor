@@ -83,7 +83,12 @@ const browser = await chromium.launch({
     headless: true,
     proxy: toPlaywrightProxy(proxyUrl),
 });
-const context = await browser.newContext();
+// The proxy exit country changes the page language (Facebook came back in Romanian on one run), and
+// the text parsing is English-based, so ask for English like a normal browser configured for it.
+const context = await browser.newContext({
+    locale: 'en-US',
+    extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
+});
 
 if (sessionCookies) {
     const cookies = parseCookieHeader(sessionCookies, PLATFORM_DOMAINS[platform]);

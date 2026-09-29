@@ -26,12 +26,20 @@ const detail = (over = {}) => ({
                     createTime: 1_500_000_000,
                     ...over.user,
                 },
+                // rounded counts (as TikTok ships them) and the exact ones as strings
                 stats: {
-                    followerCount: 1_912_345,
+                    followerCount: 1_900_000,
                     followingCount: 23,
-                    heartCount: 9_876_543,
-                    videoCount: 250,
+                    heartCount: 9_800_000,
+                    videoCount: 49,
                     ...over.stats,
+                },
+                statsV2: {
+                    followerCount: '1871927',
+                    followingCount: '23',
+                    heartCount: '9800658',
+                    videoCount: '49',
+                    ...over.statsV2,
                 },
             },
             statusCode: 0,
@@ -65,10 +73,11 @@ describe('parseUserDetail (pure)', () => {
             bio: 'Making the seemingly impossible, possible.',
             verified: true,
             externalLinks: ['https://www.nasa.gov'],
-            followerCount: 1_912_345,
+            followerCount: 1_871_927, // exact (statsV2), not the rounded 1,900,000
             followingCount: 23,
-            postCount: 250,
-            totalLikes: 9_876_543,
+            postCount: 49,
+            totalLikes: 9_800_658,
+            contactEmails: [],
             accountCreatedDate: new Date(1_500_000_000 * 1000).toISOString(),
         });
     });
@@ -87,6 +96,20 @@ describe('parseUserDetail (pure)', () => {
             totalLikes: null,
             accountCreatedDate: null,
         });
+    });
+
+    it('falls back to the rounded stats when the exact statsV2 block is missing', () => {
+        const root = detail();
+        // eslint-disable-next-line no-underscore-dangle -- TikTok's own key name
+        delete root.__DEFAULT_SCOPE__['webapp.user-detail'].userInfo.statsV2;
+        const r = tiktok.parseUserDetail(root);
+        expect(r.followerCount).toBe(1_900_000);
+        expect(r.totalLikes).toBe(9_800_000);
+    });
+
+    it('reads a contact email written in the bio', () => {
+        const r = tiktok.parseUserDetail(detail({ user: { signature: 'Business: Hello@Example.com.' } }));
+        expect(r.contactEmails).toEqual(['hello@example.com']);
     });
 
     it('an empty bio is null', () => {
@@ -140,10 +163,10 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
             status: 'found',
             username: 'nasa',
             displayName: 'NASA',
-            followerCount: 1_912_345,
+            followerCount: 1_871_927,
             followingCount: 23,
-            postCount: 250,
-            totalLikes: 9_876_543,
+            postCount: 49,
+            totalLikes: 9_800_658,
             verified: true,
             externalLinks: ['https://www.nasa.gov'],
         });

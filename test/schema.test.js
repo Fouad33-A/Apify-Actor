@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { makeCommentRow, makePostRow, makeProfileRow, makeRunSummary, parseAbbrevCount } from '../src/schema.js';
+import {
+    extractEmails,
+    makeCommentRow,
+    makePostRow,
+    makeProfileRow,
+    makeRunSummary,
+    parseAbbrevCount,
+} from '../src/schema.js';
 
 describe('row shapes', () => {
     it('profile row: unknown fields are explicit null / [] - never omitted, never guessed', () => {
@@ -111,5 +118,27 @@ describe('parseAbbrevCount', () => {
 
     it.each([[null], [undefined], [''], ['abc'], ['12X']])('%j -> null', (input) => {
         expect(parseAbbrevCount(input)).toBeNull();
+    });
+});
+
+describe('extractEmails', () => {
+    it('finds emails in public text, lower-cased and de-duplicated', () => {
+        expect(
+            extractEmails('Contact: Public-Inquiries@HQ.nasa.gov or public-inquiries@hq.nasa.gov, team@example.org.'),
+        ).toEqual(['public-inquiries@hq.nasa.gov', 'team@example.org']);
+    });
+
+    it.each([[null], [undefined], [''], ['no email here'], ['almost@nodot']])('%j -> []', (input) => {
+        expect(extractEmails(input)).toEqual([]);
+    });
+});
+
+describe('contactEmails on profile rows', () => {
+    it('defaults to an empty list and keeps what is given', () => {
+        expect(makeProfileRow({ platform: 'facebook', sourceInput: 'x', status: 'found' }).contactEmails).toEqual([]);
+        expect(
+            makeProfileRow({ platform: 'facebook', sourceInput: 'x', status: 'found', contactEmails: ['a@b.co'] })
+                .contactEmails,
+        ).toEqual(['a@b.co']);
     });
 });

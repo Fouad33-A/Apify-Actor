@@ -11,7 +11,7 @@
 
 import { saveDiagnostics } from '../diagnostics.js';
 import { assertNotRateLimited } from '../errors.js';
-import { makeProfileRow } from '../schema.js';
+import { extractEmails, makeProfileRow } from '../schema.js';
 
 const DOMAIN = 'www.tiktok.com';
 
@@ -29,7 +29,13 @@ export function parseUserDetail(root) {
     const detail = root?.__DEFAULT_SCOPE__?.['webapp.user-detail'];
     if (!detail) return { state: 'unrecognised' };
     const user = detail.userInfo?.user;
-    const stats = detail.userInfo?.stats ?? {};
+    // `stats` holds rounded counts (1900000); `statsV2` holds the exact ones as strings ("1871927").
+    const rounded = detail.userInfo?.stats ?? {};
+    const exact = detail.userInfo?.statsV2 ?? {};
+    const count = (key) => {
+        const n = Number(exact[key]);
+        return exact[key] !== undefined && exact[key] !== '' && Number.isFinite(n) ? n : (rounded[key] ?? null);
+    };
     if (!user) {
         // TikTok reports an unknown account as statusCode 10221.
         return detail.statusCode === 10221
@@ -43,10 +49,11 @@ export function parseUserDetail(root) {
         bio: user.signature ? user.signature : null,
         verified: typeof user.verified === 'boolean' ? user.verified : null,
         externalLinks: user.bioLink?.link ? [user.bioLink.link] : [],
-        followerCount: stats.followerCount ?? null,
-        followingCount: stats.followingCount ?? null,
-        postCount: stats.videoCount ?? null,
-        totalLikes: stats.heartCount ?? stats.heart ?? null,
+        contactEmails: extractEmails(user.signature),
+        followerCount: count('followerCount'),
+        followingCount: count('followingCount'),
+        postCount: count('videoCount'),
+        totalLikes: count('heartCount'),
         accountCreatedDate: user.createTime ? new Date(user.createTime * 1000).toISOString() : null,
     };
 }
@@ -89,6 +96,7 @@ export async function lookupProfile({ page, username: rawUsername, sourceInput }
                 displayName: parsed.displayName,
                 bio: parsed.bio,
                 externalLinks: parsed.externalLinks,
+                contactEmails: parsed.contactEmails,
                 followerCount: parsed.followerCount,
                 followingCount: parsed.followingCount,
                 postCount: parsed.postCount,

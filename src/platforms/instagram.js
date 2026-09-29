@@ -250,6 +250,21 @@ export function domExtractProfile() {
     };
 }
 
+// Post pages describe themselves in og:description, e.g.
+//   '1,234 likes, 56 comments - nasa on September 10, 2026: "The caption."'
+// Anything that cannot be read stays null (some posts hide likes; the format can change).
+export function parsePostDescription(text) {
+    if (!text) return { likeCount: null, commentCount: null, caption: null };
+    const likes = text.match(/([\d.,]+\s*[KMB]?)\s+likes?\b/i)?.[1] ?? null;
+    const comments = text.match(/([\d.,]+\s*[KMB]?)\s+comments?\b/i)?.[1] ?? null;
+    const caption = text.match(/\son\s[^:"]+:\s*"([\s\S]*)"\.?\s*$/)?.[1] ?? null;
+    return {
+        likeCount: parseAbbrevCount(likes),
+        commentCount: parseAbbrevCount(comments),
+        caption: caption && caption.trim() ? caption.trim() : null,
+    };
+}
+
 // Runs inside a single post's page. Pulls publish date (exact, from the
 // <time> element), like count if shown (some accounts hide it - that's a
 // real null, not a failure), and a best-effort view count for video posts.
@@ -304,6 +319,7 @@ export function domExtractPostMetrics() {
         publishDate: publishTime ? publishTime.getAttribute('datetime') : null,
         likeCount,
         viewCount,
+        ogDescription: (document.querySelector('meta[property="og:description"]') || {}).content ?? null,
     };
 }
 
@@ -394,15 +410,13 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
     log.info(`Nav diagnostics for ${username}: ${JSON.stringify(navMeta)}`);
 
     await assertNotRateLimited(page, 'instagram', 'profile');
+    // Visible text only: raw HTML carries strings like "Sorry, this page isn't available" in script bundles.
+    const visibleLower = (await page.evaluate(() => (document.body ? document.body.innerText : ''))).toLowerCase();
 
     const status = response?.status();
     const lowerHtml = html.toLowerCase();
 
-    if (
-        status === 404 ||
-        lowerHtml.includes('sorry, this page isn&#x27;t available') ||
-        lowerHtml.includes("sorry, this page isn't available")
-    ) {
+    if (status === 404 || visibleLower.includes("sorry, this page isn't available")) {
         return {
             profile: makeProfileRow({
                 platform: 'instagram',
@@ -415,7 +429,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
         };
     }
 
-    if (lowerHtml.includes('this account is private')) {
+    if (visibleLower.includes('this account is private')) {
         return {
             profile: makeProfileRow({
                 platform: 'instagram',
@@ -451,7 +465,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
         const posts = [];
         for (const gp of gridPosts) {
             const postUrl = new URL(gp.href, `https://${DOMAIN}`).toString();
-            let metrics = { publishDate: null, likeCount: null, viewCount: null };
+            let metrics = { publishDate: null, likeCount: null, viewCount: null, ogDescription: null };
             try {
                 await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 30_000 });
                 await page.waitForTimeout(800);
@@ -462,6 +476,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                 // a single post failing to load shouldn't drop the whole profile -
                 // report this post with nulls rather than aborting the run.
             }
+            const described = parsePostDescription(metrics.ogDescription);
             posts.push(
                 makePostRow({
                     platform: 'instagram',
@@ -474,10 +489,11 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                     followingCount: dom.followingCount,
                     verified: dom.verified,
                     postUrl,
-                    caption: gp.caption,
+                    // The grid image alt text is Instagram's auto-generated image description ("Photo by X on ..."), not the caption.
+                    caption: described.caption,
                     publishDate: metrics.publishDate,
-                    likeCount: metrics.likeCount,
-                    commentCount: null, // Instagram's web UI doesn't expose an exact total without paging all comments
+                    likeCount: metrics.likeCount ?? described.likeCount,
+                    commentCount: described.commentCount,
                     shareCount: null, // Instagram does not expose share counts
                     viewCount: metrics.viewCount,
                     isSponsored: null, // not reliably exposed in the current DOM; left honest-null rather than guessed
@@ -510,29 +526,17 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
             status: 'found',
         });
         const edges = user.edge_owner_to_timeline_media?.edges || [];
-        const posts = edges.slice(0, maxRecentPosts).map((edge) => {
-            const { node } = edge;
-            const postUrl = `https://${DOMAIN}/p/${node.shortcode}/`;
-            return makePostRow({
-                platform: 'instagram',
-                sourceInput,
-                username: user.username ?? username,
-                displayName: user.full_name ?? null,
-                bio: user.biography ?? null,
-                externalLinks: [user.external_url].filter(Boolean),
-                followerCount: user.edge_followed_by?.count ?? null,
-                followingCount: user.edge_follow?.count ?? null,
-                verified: user.is_verified ?? null,
-                postUrl,
-                caption: node.edge_media_to_caption?.edges?.[0]?.node?.text ?? null,
-                publishDate: node.taken_at_timestamp ? new Date(node.taken_at_timestamp * 1000).toISOString() : null,
-                likeCount: node.edge_liked_by?.count ?? node.edge_media_preview_like?.count ?? null,
-                commentCount: node.edge_media_to_comment?.count ?? null,
-                shareCount: null,
-                viewCount: node.video_view_count ?? null,
-                isSponsored: node.is_ad ?? null,
-            });
-        });
+        const author = {
+            sourceInput,
+            username: user.username ?? username,
+            displayName: user.full_name ?? null,
+            bio: user.biography ?? null,
+            externalLinks: [user.external_url].filter(Boolean),
+            followerCount: user.edge_followed_by?.count ?? null,
+            followingCount: user.edge_follow?.count ?? null,
+            verified: user.is_verified ?? null,
+        };
+        const posts = edges.slice(0, maxRecentPosts).map((edge) => mediaNodeToPostRow(edge.node, author));
         return { profile, posts };
     }
 
@@ -548,8 +552,8 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
 
     const redirectedToLogin = /\/accounts\/login/.test(page.url());
     if (looksLikeLoginWall || redirectedToLogin) {
-        const limited = await lookupViaEmbed({ page, username, sourceInput });
-        if (limited) return { profile: limited, posts: [] };
+        const limited = await lookupViaEmbed({ page, username, sourceInput, maxRecentPosts });
+        if (limited) return limited;
         return {
             profile: makeProfileRow({
                 platform: 'instagram',
@@ -591,9 +595,55 @@ export function parseEmbedText(text) {
     return { username, fullName, followers, posts };
 }
 
-// The profile page needs a login, but Instagram's public embed page (served to anonymous
-// visitors for third-party sites) shows a few profile facts. Counts are shown rounded.
-async function lookupViaEmbed({ page, username, sourceInput }) {
+// One Instagram media node (legacy JSON or embed "shortcode_media") -> a post row. Anything the node
+// does not carry stays null; nothing is inferred.
+export function mediaNodeToPostRow(node, author) {
+    return makePostRow({
+        platform: 'instagram',
+        ...author,
+        postUrl: node.shortcode ? `https://${DOMAIN}/p/${node.shortcode}/` : null,
+        caption: node.edge_media_to_caption?.edges?.[0]?.node?.text ?? null,
+        publishDate: node.taken_at_timestamp ? new Date(node.taken_at_timestamp * 1000).toISOString() : null,
+        likeCount: node.edge_liked_by?.count ?? node.edge_media_preview_like?.count ?? null,
+        commentCount: node.edge_media_to_comment?.count ?? null,
+        shareCount: null,
+        viewCount: node.video_view_count ?? null,
+        isSponsored: node.is_ad ?? null,
+    });
+}
+
+// The embed page carries the profile as a JSON string argument: ..."contextJSON":"{\"context\":{...}}"...
+// Returns the parsed inner object, or null when it is absent or malformed.
+export function extractEmbedContext(html) {
+    const marker = '"contextJSON":"';
+    const start = html.indexOf(marker);
+    if (start === -1) return null;
+    let i = start + marker.length;
+    let raw = '';
+    while (i < html.length) {
+        const c = html[i];
+        if (c === '\\') {
+            raw += c + (html[i + 1] ?? '');
+            i += 2;
+        } else if (c === '"') {
+            break;
+        } else {
+            raw += c;
+            i += 1;
+        }
+    }
+    try {
+        const inner = JSON.parse(JSON.parse(`"${raw}"`));
+        return inner?.context ?? null;
+    } catch {
+        return null;
+    }
+}
+
+// The profile page needs a login, but Instagram's public embed page (served to anonymous visitors for
+// third-party sites) carries exact counts, the verified/private flags and the latest posts as JSON.
+// It has no bio, following count or links.
+async function lookupViaEmbed({ page, username, sourceInput, maxRecentPosts = 0 }) {
     try {
         await page.goto(`https://${DOMAIN}/${encodeURIComponent(username)}/embed/`, {
             waitUntil: 'domcontentloaded',
@@ -601,20 +651,57 @@ async function lookupViaEmbed({ page, username, sourceInput }) {
         });
         await page.waitForTimeout(1500);
         await assertNotRateLimited(page, 'instagram', 'embed');
+
+        const ctx = extractEmbedContext(await page.content());
+        if (ctx?.username) {
+            const isPrivate = ctx.is_private === true;
+            const verified = typeof ctx.is_verified === 'boolean' ? ctx.is_verified : null;
+            const profile = makeProfileRow({
+                platform: 'instagram',
+                sourceInput,
+                username: ctx.username,
+                displayName: ctx.full_name || null,
+                followerCount: ctx.followers_count ?? null,
+                postCount: ctx.posts_count ?? null,
+                verified,
+                status: isPrivate ? 'private' : 'found',
+                statusDetail:
+                    'Data from the public embed page (the profile page requires login): exact counts, but no bio, following count or links',
+            });
+            const author = {
+                sourceInput,
+                username: ctx.username,
+                displayName: ctx.full_name || null,
+                followerCount: ctx.followers_count ?? null,
+                verified,
+            };
+            const posts = isPrivate
+                ? []
+                : (ctx.graphql_media ?? [])
+                      .map((m) => m.shortcode_media)
+                      .filter(Boolean)
+                      .slice(0, maxRecentPosts)
+                      .map((node) => mediaNodeToPostRow(node, author));
+            return { profile, posts };
+        }
+
         const text = await page.evaluate(() => (document.body ? document.body.innerText : ''));
         const parsed = parseEmbedText(text);
         if (!parsed) return null;
-        return makeProfileRow({
-            platform: 'instagram',
-            sourceInput,
-            username: parsed.username ?? username,
-            displayName: parsed.fullName,
-            followerCount: parseAbbrevCount(parsed.followers),
-            postCount: parseAbbrevCount(parsed.posts),
-            status: 'found',
-            statusDetail:
-                'Limited data from the public embed page (the profile page requires login): counts are rounded as displayed; no bio, following count, links, verified flag or recent posts',
-        });
+        return {
+            profile: makeProfileRow({
+                platform: 'instagram',
+                sourceInput,
+                username: parsed.username ?? username,
+                displayName: parsed.fullName,
+                followerCount: parseAbbrevCount(parsed.followers),
+                postCount: parseAbbrevCount(parsed.posts),
+                status: 'found',
+                statusDetail:
+                    'Limited data from the public embed page (the profile page requires login): counts are rounded as displayed; no bio, following count, links, verified flag or recent posts',
+            }),
+            posts: [],
+        };
     } catch (err) {
         if (err?.name === 'RateLimitError') throw err;
         return null;

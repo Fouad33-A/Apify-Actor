@@ -4,7 +4,7 @@
 // that structure and its edge cases; it does not prove the real sites still
 // look like this. Real-site validation needs a live run.
 
-const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
 // ---- Instagram ----
 
@@ -57,43 +57,98 @@ export function igComment({ user, ago = '2d', iso = '2026-09-01T10:00:00.000Z', 
   </li>`;
 }
 
-export function igPost({ postIso = '2026-09-20T12:00:00.000Z', likes = null, views = null, comments = [] } = {}) {
-    return igPage(`<article>
+export function igPost({
+    postIso = '2026-09-20T12:00:00.000Z',
+    likes = null,
+    views = null,
+    comments = [],
+    ogDescription = null,
+} = {}) {
+    return `<!doctype html><html><head>${
+        ogDescription ? `<meta property="og:description" content="${esc(ogDescription)}">` : ''
+    }</head><body><article>
     <div><time datetime="${postIso}">5d</time></div>
     ${likes ? `<section><span>${likes}</span></section>` : ''}
     ${views ? `<section><span>${views}</span></section>` : ''}
     <ul>${comments.join('')}</ul>
-  </article>`);
+  </article></body></html>`;
+}
+
+// The public embed page: profile facts as a JSON string argument, exactly the shape seen live.
+export function igEmbedPage(context) {
+    const inner = JSON.stringify({ context });
+    return `<!doctype html><html><body><div>${esc(context?.username ?? '')}</div>
+    <script>requireLazy(["x"], function(){ return {"isProfileEmbed":true,"contextJSON":${JSON.stringify(inner)},"z":1}; });</script>
+    </body></html>`;
 }
 
 // ---- Facebook ----
 
-// Intro card order per facebook.js: name, stats line, action buttons, bio, category.
+// Mirrors the structure of a real Page captured by a live DOM outline (2026-09-29): <h1>, follower/following
+// links with <strong> counts, an Intro <span>bio</span> + <ul> (category button, email text, l.php links),
+// and [role=article] posts with nested comment articles. Still synthetic content, real shape.
+export const fbComment = ({ author, text, ago = '20h', likes = null, reply = false, to = 'Someone' }) =>
+    `<div role="article" aria-label="${reply ? `Reply by ${author} to ${to}'s comment ${ago} ago` : `Comment by ${author} ${ago} ago`}">
+        <div><div><div><a role="link" href="https://www.facebook.com/${author.replace(/\s/g, '.').toLowerCase()}?comment_id=1">${esc(author)}</a>
+        <div>${esc(text)}</div></div>
+        <div><a role="link" href="https://www.facebook.com/reel/1/?comment_id=1">${ago}</a>${likes ? `<div role="button" aria-label="${likes} reactions">${likes}</div>` : ''}</div></div></div>
+    </div>`;
+
+export const fbPost = ({
+    url = 'https://www.facebook.com/reel/28263630716612782/?__cft__[0]=AZg0M1R5&__tn__=x',
+    ago = '1d',
+    caption = 'What happens when we detect an asteroid that could pose a threat to Earth?',
+    truncated = true,
+    reactions = '1.7K',
+    comments = [],
+} = {}) => `<div role="article"><div><div>
+    <div><span><a role="link" href="https://www.facebook.com/NASA?__cft__[0]=x"><span>NASA</span></a></span>
+      <span><span>a day ago</span><a role="link" aria-label="${ago}" href="${url}">${ago}</a></span></div>
+    ${caption === null ? '' : `<div>${esc(caption)}${truncated ? ' … <div role="button">See more</div>' : ''}</div>`}
+    <div><div><div>All reactions:</div><span>${reactions}</span></div><div role="button"><span>92</span></div><div role="button"><span>159</span></div></div>
+    ${comments.join('')}
+  </div></div></div>`;
+
 export function fbPage({
-    name = 'NASA',
-    stats = '28M followers • 52 following',
-    buttons = ['Follow', 'Message'],
-    bioLines = ['Explore the universe and discover our home planet.'],
+    name = 'NASA - National Aeronautics and Space Administration',
+    followers = '28M',
+    following = '52',
+    bio = 'Explore the universe and discover our home planet.',
     category = 'Government organization',
     verified = true,
+    email = 'public-inquiries@hq.nasa.gov',
     links = [],
     ogDescription = null,
+    posts = [],
+    personalProfile = false,
 } = {}) {
-    const linksSection = links.length
-        ? `<section><div><div><div><div><span>Links</span></div></div></div></div>${links
-              .map((u) => `<a href="https://l.facebook.com/l.php?u=${encodeURIComponent(u)}&h=AT0abc">${esc(u)}</a>`)
-              .join('')}</section>`
-        : '';
+    const linkItems = links
+        .map(
+            (u) =>
+                `<div><a role="link" href="https://l.facebook.com/l.php?u=${encodeURIComponent(u)}&h=AUDL"><span>${esc(u.replace(/^https?:\/\//, ''))}</span></a></div>`,
+        )
+        .join('');
+    const introList =
+        category || email || links.length
+            ? `<ul>${category ? `<div><div role="button"><span>· ${esc(category)}<strong>Page</strong></span></div></div>` : ''}${
+                  email ? `<div><span>${esc(email)}</span></div>` : ''
+              }${linkItems}</ul>`
+            : '';
     return `<!doctype html><html><head>${
         ogDescription ? `<meta property="og:description" content="${esc(ogDescription)}">` : ''
     }</head><body><div role="main">
-    <div>
-      <div>${esc(name)}${verified ? '<svg><title>Verified account</title></svg>' : ''}</div>
-      ${stats ? `<div>${esc(stats)}</div>` : ''}
-      <div>${buttons.map((b) => `<div role="button">${esc(b)}</div>`).join('')}</div>
-      ${bioLines.map((l) => `<div>${esc(l)}</div>`).join('')}
-      ${category ? `<div><div role="button">${esc(category)}</div></div>` : ''}
+    <div><div><div>
+      <h1>${esc(name)}</h1>${verified ? '<svg><title>Verified account</title></svg>' : ''}
+      <span> • ${
+          personalProfile
+              ? '1,234 friends'
+              : `<a role="link" href="https://www.facebook.com/NASA/followers/"><strong>${followers}</strong> followers</a> <a role="link" href="https://www.facebook.com/NASA/following/"><strong>${following}</strong> following</a>`
+      }</span>
+    </div></div></div>
+    <div><div role="tablist"><a role="tab" href="/NASA/"><span>Posts</span></a><a role="tab" href="/NASA/about"><span>About</span></a></div></div>
+    <div><div><div><div><span>Intro</span></div><div>${bio ? `<span>${esc(bio)}</span>` : ''}${introList}</div></div></div>
+      <footer role="contentinfo"><ul><li><a href="/privacy">Privacy</a></li></ul></footer>
     </div>
-    ${linksSection}
+    <div>${posts.join('')}</div>
   </div></body></html>`;
 }

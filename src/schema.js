@@ -23,6 +23,7 @@ export function makeProfileRow(fields) {
         displayName: fields.displayName ?? null,
         bio: fields.bio ?? null, // full text, unescaped - never truncated
         externalLinks: fields.externalLinks ?? [],
+        contactEmails: fields.contactEmails ?? [], // emails shown publicly on the profile/bio
         followerCount: fields.followerCount ?? null,
         followingCount: fields.followingCount ?? null,
         postCount: fields.postCount ?? null,
@@ -110,4 +111,11 @@ export function parseAbbrevCount(text) {
     if (!m) return null;
     const mult = { K: 1e3, M: 1e6, B: 1e9 }[(m[2] || '').toUpperCase()] || 1;
     return Math.round(parseFloat(m[1]) * mult);
+}
+
+// Emails written out in public text (bio, contact block). Deduplicated, lower-cased; never guessed.
+export function extractEmails(text) {
+    if (!text) return [];
+    const found = String(text).match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g) ?? [];
+    return [...new Set(found.map((e) => e.toLowerCase().replace(/[.,;:]+$/, '')))];
 }

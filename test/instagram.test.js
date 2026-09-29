@@ -6,14 +6,17 @@ import {
     domExtractComments,
     domExtractPostMetrics,
     domExtractProfile,
+    extractEmbedContext,
     extractProfileJson,
     fetchComments,
     findUserNode,
     lookupProfile,
+    mediaNodeToPostRow,
     parseEmbedText,
+    parsePostDescription,
 } from '../src/platforms/instagram.js';
 import { launchBrowser, serve } from './helpers/browser.js';
-import { igComment, igGrid, igHeader, igPage, igPost } from './helpers/fixtures.js';
+import { igComment, igEmbedPage, igGrid, igHeader, igPage, igPost } from './helpers/fixtures.js';
 
 const setValue = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('apify', () => ({
@@ -164,12 +167,30 @@ describe('domExtractPostMetrics (in-page)', () => {
             igPost({ postIso: '2026-09-20T12:00:00.000Z', likes: '1,234 likes', views: '12.5K views' }),
             domExtractPostMetrics,
         );
-        expect(m).toEqual({ publishDate: '2026-09-20T12:00:00.000Z', likeCount: 1234, viewCount: 12_500 });
+        expect(m).toEqual({
+            publishDate: '2026-09-20T12:00:00.000Z',
+            likeCount: 1234,
+            viewCount: 12_500,
+            ogDescription: null,
+        });
     });
 
     it('like and view counts are null (not 0) when the post hides them', async () => {
         const m = await evaluate(igPost({}), domExtractPostMetrics);
-        expect(m).toEqual({ publishDate: '2026-09-20T12:00:00.000Z', likeCount: null, viewCount: null });
+        expect(m).toEqual({
+            publishDate: '2026-09-20T12:00:00.000Z',
+            likeCount: null,
+            viewCount: null,
+            ogDescription: null,
+        });
+    });
+
+    it('returns the post og:description so caption, likes and comments can be read from it', async () => {
+        const m = await evaluate(
+            igPost({ ogDescription: '5 likes, 2 comments - nasa on May 1, 2026: "Hi."' }),
+            domExtractPostMetrics,
+        );
+        expect(m.ogDescription).toBe('5 likes, 2 comments - nasa on May 1, 2026: "Hi."');
     });
 
     it('publishDate is null when there is no <time> element', async () => {
@@ -285,7 +306,14 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
     it('returns a found profile row and post rows limited by maxRecentPosts', async () => {
         const routes = [
             { match: PROFILE_URL, body: profilePage() },
-            { match: /\/p\/AAA\/$/, body: igPost({ postIso: '2026-09-20T12:00:00.000Z', likes: '1,000 likes' }) },
+            {
+                match: /\/p\/AAA\/$/,
+                body: igPost({
+                    postIso: '2026-09-20T12:00:00.000Z',
+                    likes: '1,000 likes',
+                    ogDescription: '1,000 likes, 56 comments - nasa on September 20, 2026: "The real caption."',
+                }),
+            },
             { match: /\/p\/BBB\/$/, body: igPost({ postIso: '2026-09-19T12:00:00.000Z' }) },
         ];
         const { profile, posts } = await withContext(routes, ({ page }) => lookupProfile({ page, ...base }));
@@ -306,13 +334,16 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
         expect(posts[0]).toMatchObject({
             recordType: 'post',
             postUrl: 'https://www.instagram.com/p/AAA/',
-            caption: 'First caption',
+            // the grid alt text ("First caption") is an auto-generated image description, not the caption
+            caption: 'The real caption.',
             publishDate: '2026-09-20T12:00:00.000Z',
             likeCount: 1000,
+            commentCount: 56,
             followerCount: 104_333_810, // author fields are embedded on every post row
         });
         // hidden like count is an honest null, and unexposed metrics are never guessed
         expect(posts[1]).toMatchObject({
+            caption: null,
             likeCount: null,
             viewCount: null,
             commentCount: null,
@@ -337,7 +368,7 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
         ];
         const { posts } = await withContext(routes, ({ page }) => lookupProfile({ page, ...base }));
         expect(posts).toHaveLength(2);
-        expect(posts[0]).toMatchObject({ caption: 'First caption', likeCount: null, publishDate: null });
+        expect(posts[0]).toMatchObject({ caption: null, likeCount: null, publishDate: null });
         expect(posts[1].likeCount).toBe(7);
     }, 60_000);
 
@@ -614,4 +645,150 @@ describe('parseEmbedText', () => {
     it('returns null when neither count is present (not a profile embed)', () => {
         expect(parseEmbedText('Log into Instagram')).toBeNull();
     });
+});
+
+describe('parsePostDescription', () => {
+    it('reads likes, comments and the caption from the post og:description', () => {
+        expect(
+            parsePostDescription(
+                '1,234 likes, 56 comments - nasa on September 10, 2026: "The caption. Two sentences."',
+            ),
+        ).toEqual({
+            likeCount: 1234,
+            commentCount: 56,
+            caption: 'The caption. Two sentences.',
+        });
+    });
+
+    it('handles abbreviated counts and a trailing period after the quote', () => {
+        expect(parsePostDescription('1.2M likes, 3K comments - nasa on May 1, 2026: "Hi."\u0020.').likeCount).toBe(
+            1_200_000,
+        );
+        expect(parsePostDescription('5 likes, 1 comment - nasa on May 1, 2026: "Hi.".').caption).toBe('Hi.');
+    });
+
+    it('anything unreadable stays null, never guessed', () => {
+        expect(parsePostDescription(null)).toEqual({ likeCount: null, commentCount: null, caption: null });
+        expect(parsePostDescription('Something else entirely')).toEqual({
+            likeCount: null,
+            commentCount: null,
+            caption: null,
+        });
+        expect(parsePostDescription('nasa on May 1, 2026: ""').caption).toBeNull();
+    });
+});
+
+describe('extractEmbedContext', () => {
+    it('reads the profile context from the embed page JSON string', () => {
+        const html = igEmbedPage({
+            username: 'nasa',
+            followers_count: 104_321_770,
+            note: 'quote " and \\ backslash and unicode \u00e9',
+        });
+        expect(extractEmbedContext(html)).toMatchObject({ username: 'nasa', followers_count: 104_321_770 });
+    });
+
+    it.each([['no marker here'], ['"contextJSON":"{not json"'], ['"contextJSON":"unterminated']])(
+        'returns null for %j',
+        (html) => {
+            expect(extractEmbedContext(html)).toBeNull();
+        },
+    );
+});
+
+describe('mediaNodeToPostRow', () => {
+    const author = { sourceInput: 'nasa', username: 'nasa', displayName: 'NASA', followerCount: 5, verified: true };
+
+    it('maps what the node carries and leaves the rest null', () => {
+        const row = mediaNodeToPostRow(
+            {
+                shortcode: 'AAA',
+                taken_at_timestamp: 1_790_000_000,
+                edge_media_to_caption: { edges: [{ node: { text: 'cap' } }] },
+                edge_liked_by: { count: 9 },
+                edge_media_to_comment: { count: 2 },
+                video_view_count: 100,
+                is_ad: false,
+            },
+            author,
+        );
+        expect(row).toMatchObject({
+            postUrl: 'https://www.instagram.com/p/AAA/',
+            caption: 'cap',
+            publishDate: new Date(1_790_000_000 * 1000).toISOString(),
+            likeCount: 9,
+            commentCount: 2,
+            viewCount: 100,
+            isSponsored: false,
+            shareCount: null,
+            followerCount: 5,
+        });
+    });
+
+    it('a bare node yields nulls, not invented values', () => {
+        expect(mediaNodeToPostRow({ shortcode: 'B' }, author)).toMatchObject({
+            caption: null,
+            publishDate: null,
+            likeCount: null,
+            commentCount: null,
+            viewCount: null,
+            isSponsored: null,
+        });
+    });
+});
+
+describe('embed fallback with the real embed JSON shape (synthetic values)', () => {
+    const PROFILE = /instagram\.com\/nasa\/$/;
+    const redirect = {
+        match: PROFILE,
+        body: `<html><body><script>location.replace('https://www.instagram.com/accounts/login/?next=%2Fnasa%2F&is_from_rle')</script></body></html>`,
+    };
+    const loginPage = { match: /accounts\/login/, body: igPage('<div>Log into Instagram</div>') };
+    const embed = (context) => ({ match: /\/nasa\/embed\/$/, body: igEmbedPage(context) });
+    const base = { username: 'nasa', sourceInput: 'nasa', maxRecentPosts: 2 };
+    const context = {
+        username: 'nasa',
+        full_name: 'NASA',
+        is_verified: true,
+        is_private: false,
+        followers_count: 104_321_770,
+        posts_count: 4937,
+        graphql_media: [
+            { shortcode_media: { shortcode: 'AAA', is_video: false } },
+            { shortcode_media: { shortcode: 'BBB', is_video: true, video_view_count: 7 } },
+            { shortcode_media: { shortcode: 'CCC' } },
+        ],
+    };
+
+    it('returns EXACT counts, verified and the latest posts (limited by maxRecentPosts); no bio', async () => {
+        const { profile, posts } = await withContext([redirect, loginPage, embed(context)], ({ page }) =>
+            lookupProfile({ page, ...base }),
+        );
+        expect(profile).toMatchObject({
+            status: 'found',
+            username: 'nasa',
+            displayName: 'NASA',
+            followerCount: 104_321_770,
+            postCount: 4937,
+            verified: true,
+            bio: null,
+            followingCount: null,
+        });
+        expect(profile.statusDetail).toMatch(/embed page.*no bio/i);
+        expect(posts.map((p) => p.postUrl)).toEqual([
+            'https://www.instagram.com/p/AAA/',
+            'https://www.instagram.com/p/BBB/',
+        ]);
+        expect(posts[1].viewCount).toBe(7);
+        expect(posts[0]).toMatchObject({ followerCount: 104_321_770, verified: true, caption: null, likeCount: null });
+    }, 60_000);
+
+    it('a private account returns only header facts with a private status and no posts', async () => {
+        const { profile, posts } = await withContext(
+            [redirect, loginPage, embed({ ...context, is_private: true })],
+            ({ page }) => lookupProfile({ page, ...base }),
+        );
+        expect(profile.status).toBe('private');
+        expect(posts).toEqual([]);
+    }, 60_000);
 });
