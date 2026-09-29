@@ -2,6 +2,7 @@ import { Actor, log } from 'apify';
 import { chromium } from 'playwright';
 
 import { BudgetTracker } from './budget.js';
+import { makeCharger } from './charging.js';
 import { parseCookieHeader } from './cookies.js';
 import { CostTracker } from './cost.js';
 import { runtimeInfo } from './diagnostics.js';
@@ -125,6 +126,7 @@ if (sessionCookies) {
     if (cookies.length) await context.addCookies(cookies);
 }
 
+const charger = makeCharger({ actor: Actor, budget, warn: (m) => log.warning(m) });
 const page = await context.newPage();
 
 try {
@@ -135,7 +137,7 @@ try {
         });
         log.info(`Probe run finished: ${results.length} result(s) saved to PROBE_RESULTS`);
     } else {
-        await runMode({ mode, mod, page, input, budget, pushData: (row) => Actor.pushData(row), rateLimitErrors });
+        await runMode({ mode, mod, page, input, budget, pushData: (row) => charger.push(row), rateLimitErrors });
     }
 } finally {
     await cost.settle();
@@ -168,6 +170,7 @@ const summary = makeRunSummary({
 await Actor.setValue('OUTPUT', {
     ...summary,
     cost: cost.report({ platformUsage }),
+    charging: charger.summary(),
     runtime: { ...runtimeInfo(), proxyUsed: Boolean(proxyUrl), proxyGroups: proxyConfiguration?.groups ?? null },
 });
 log.info('Run summary', summary);

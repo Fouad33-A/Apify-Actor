@@ -41,6 +41,14 @@ export class BudgetTracker {
         return true;
     }
 
+    // Undo record() for a row that then was not written (e.g. the user's spending limit was reached).
+    unrecord(recordType) {
+        if (recordType === 'profile') this.counts.profiles -= 1;
+        else if (recordType === 'post') this.counts.posts -= 1;
+        else if (recordType === 'comment') this.counts.comments -= 1;
+        this.counts.total -= 1;
+    }
+
     summary() {
         return {
             maxItemsPerRun: this.maxItemsPerRun,

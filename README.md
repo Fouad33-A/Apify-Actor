@@ -77,6 +77,18 @@ Rows share one shape and are told apart by `recordType` (`profile`, `post`, `com
 - **Instagram's profile page is sometimes login-walled.** The Actor then falls back to Instagram's public embed page: exact counts, verified flag and latest posts, but no bio, following count or links (stated in `statusDetail`).
 - Page layouts change. If a platform changes its markup a field can come back `null` or a row can come back `blocked`; the `DIAG_*` records in the run's key-value store show what was seen.
 
+## Pricing
+
+This Actor uses **pay per event**. You are charged only for rows that contain real data, and only when they are written to your dataset:
+
+| Event             | Charged when                                     |
+| ----------------- | ------------------------------------------------ |
+| `profile-scraped` | A profile row with status `found` (or `private`) |
+| `post-scraped`    | A post row with status `found`                   |
+| `comment-scraped` | A comment row with status `found`                |
+
+Rows with status `not_found`, `blocked` or `error` are written **free of charge**, so you never pay for a platform block or a failed lookup. The run stops cleanly when your spending limit for the run is reached. There are no feature limits for free-plan users.
+
 ## Cost report
 
 Every run writes an `OUTPUT` record with a `cost` block: runtime, requests, `proxyMegabytes` measured in the browser, compute-unit estimate, an optional dollar estimate, and Apify's own usage figure for the run. Two caps protect spend: `maxItemsPerRun` and `maxProxyMegabytes`; `OUTPUT.budget.stopReason` says which one ended a run. Measured examples: a TikTok profile lookup moves about 7 MB and costs about $0.002 in platform usage plus that traffic on the residential proxy.

@@ -6,5 +6,7 @@
     "version": "0.1",
     "buildTag": "latest",
     "input": "./input_schema.json",
-    "dockerfile": "../Dockerfile"
+    "dockerfile": "../Dockerfile",
+    "minMemoryMbytes": 1024,
+    "maxMemoryMbytes": 2048
 }

@@ -39,7 +39,11 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
 
     async function write(recordType, row) {
         if (!budget.record(recordType)) return false;
-        await pushData(row);
+        // pushData may report false when it did not write (spending limit reached): do not count that row.
+        if ((await pushData(row)) === false) {
+            budget.unrecord(recordType);
+            return false;
+        }
         return true;
     }
 
