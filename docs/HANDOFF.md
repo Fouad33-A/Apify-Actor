@@ -1,4 +1,4 @@
-# Handoff notes (final state, code version 0.6.1, Apify build 0.0.21)
+# Handoff notes (final state, code version 0.7.1, Apify build 0.0.25)
 
 Everything below was verified with real runs on Apify (residential proxy, no login, no cookies, `fouad_dp/my-actor`) unless marked otherwise. Total test spend was well under the agreed cap.
 
@@ -13,7 +13,16 @@ Everything below was verified with real runs on Apify (residential proxy, no log
 | Facebook Page (`NASA`, `natgeo`, `Cristiano`, `NASAKennedy`) | Name, exact followers, following, category, unwrapped links, contact email, verified.            |
 | Facebook posts + comments                                    | Post link, reactions, caption, a few comments (relative times only).                             |
 
-Not built: Mode B (search) on any platform, TikTok videos/comments, Facebook comment counts beyond what a post page labels. These return `error` rows.
+Added in 0.7.x and live-checked on build 0.0.23-0.0.25 (2026-09-29): run cost report + proxy-MB cap, TikTok `posts` mode (caption, likes, comments, shares, views, date, author followers from a video URL - verified on a real video), Facebook commenter @handle.
+
+**Blocked by the platforms for a logged-out automated browser (verified live):**
+
+- TikTok profile video list: `/api/post/item_list` answers HTTP 200 with an EMPTY body; TikTok's page data marks the session `botType: "others"`. The Actor writes one `blocked` post row.
+- TikTok comments: the comment call is never made. `blocked` comment row.
+- TikTok search: empty page, no search data. Error row.
+- Instagram search/hashtag pages: HTTP 429 + redirect to login. Facebook search pages: "Not Found". Error rows with that evidence.
+- `blockHeavyResources: true` made TikTok return an empty page (default now off). `standardUserAgent: true` also made the TikTok profile come back empty in one test; leave it off.
+- TikTok profile lookups otherwise work intermittently-reliably; one profile run returned the empty shell once, the repeat worked.
 
 **Last live checks:** build 0.0.20 found a regression (every Facebook lookup threw on an `<svg>` sibling and the run silently wrote nothing). Fixed in 0.6.1 (regression tests, plus every failed lookup/comment fetch/search now writes a `status: "error"` row). **Build 0.0.21 re-verified Facebook live:** bio, exact followers, links and contact email on NASA, National Geographic and Cristiano Ronaldo; a reel post with full caption and views; a regular post with reactions, comment and share counts; comments. NASA's first item was an event card and was correctly skipped (no post row). TikTok and Instagram were verified on 0.0.20 and are unchanged since.
 

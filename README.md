@@ -6,39 +6,43 @@ It is built for creator-outreach screening: given usernames, you get followers, 
 
 ## What works today
 
-|                       | Instagram                                                             | Facebook                                                      | TikTok    |
-| --------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------- | --------- |
-| **Profile (Mode A)**  | Yes                                                                   | Yes (Pages)                                                   | Yes       |
-| **Recent posts**      | Yes (latest posts, real captions, likes, comment counts, exact dates) | Only what a logged-out visitor sees (usually the latest post) | Not built |
-| **Comments (Mode C)** | Yes (those shown to logged-out visitors, exact timestamps)            | Yes (a few per post, relative times only)                     | Not built |
-| **Search (Mode B)**   | Not built                                                             | Not built                                                     | Not built |
+|                        | Instagram                                                             | Facebook                                                      | TikTok                                                                                    |
+| ---------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Profile (Mode A)**   | Yes                                                                   | Yes (Pages)                                                   | Yes (exact counts, bio, link, email in bio)                                               |
+| **Recent posts**       | Yes (latest posts, real captions, likes, comment counts, exact dates) | Only what a logged-out visitor sees (usually the latest post) | **Blocked**: TikTok returns an empty video list to this automated browser                 |
+| **Post by URL**        | Via profile                                                           | Via comments mode                                             | Yes (`mode: posts`: caption, likes, comments, shares, views, date, author follower count) |
+| **Comments (Mode C)**  | Yes (those shown to logged-out visitors, exact timestamps)            | Yes (a few per post, relative times, commenter @handle)       | **Blocked**: TikTok does not load comments for this browser                               |
+| **Keyword search (B)** | Needs login (429 + login redirect when logged out)                    | Needs login (search pages return "Not Found" when logged out) | Blocked (empty page, no search data)                                                      |
 
-Search, TikTok videos and TikTok comments are not implemented and return `error` rows saying so.
+Wherever TikTok, Instagram or Facebook withhold data, the dataset gets a row with `status: "blocked"` or `"error"` and the reason. Nothing is guessed or filled in. This Actor never logs in and does not try to get around bot detection.
 
 ## How to use it
 
 1. Set **Mode** to `profile` and **Platform** to the network you want.
-2. Add **Usernames** (for example `nasa`) or, for comments, **Post URLs**.
+2. Add **Usernames** (for example `nasa`) or, for `posts` / `comments` modes, **Post URLs**.
 3. Keep the default **Proxy configuration** but choose the **RESIDENTIAL** group. These platforms block datacenter traffic much more often.
 4. Run it and open the dataset. Export as JSON, CSV or Excel.
 
-Start small: `maxRecentPosts` 1–3 and `maxItemsPerRun` 5 costs a few cents.
+Start small: `maxRecentPosts` 1-3 and `maxItemsPerRun` 5 costs a few cents.
 
 ## Input
 
-| Field                  | Meaning                                          |
-| ---------------------- | ------------------------------------------------ |
-| `mode`                 | `profile`, `comments`, or `probe` (diagnostics)  |
-| `platform`             | `instagram`, `facebook` or `tiktok`              |
-| `usernames`            | Handles without `@` (Mode A)                     |
-| `postUrls`             | Post URLs (Mode C)                               |
-| `maxRecentPosts`       | Posts per profile                                |
-| `fetchComments`        | Also fetch comments for each post returned       |
-| `maxCommentsPerPost`   | Comment cap per post                             |
-| `topLevelCommentsOnly` | Skip replies                                     |
-| `maxItemsPerRun`       | Hard cap on rows written (cost safety net)       |
-| `proxyConfiguration`   | Apify Proxy settings                             |
-| `sessionCookies`       | Optional, secret. Not needed for anything above. |
+| Field                  | Meaning                                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| `mode`                 | `profile`, `posts` (known post URLs, TikTok), `comments`, `search`, or `probe` (diagnostics) |
+| `platform`             | `instagram`, `facebook` or `tiktok`                                                          |
+| `usernames`            | Handles without `@` (Mode A)                                                                 |
+| `postUrls`             | Post URLs (`posts` and `comments` modes)                                                     |
+| `maxRecentPosts`       | Posts per profile                                                                            |
+| `fetchComments`        | Also fetch comments for each post returned                                                   |
+| `maxCommentsPerPost`   | Comment cap per post                                                                         |
+| `topLevelCommentsOnly` | Skip replies                                                                                 |
+| `maxItemsPerRun`       | Hard cap on rows written                                                                     |
+| `maxProxyMegabytes`    | Hard cap on proxy traffic; the run stops cleanly when reached (default 300, 0 = none)        |
+| `proxyPricePerGbUsd`   | Optional: adds an estimated proxy cost in dollars to the cost report                         |
+| `blockHeavyResources`  | Skip images/video/fonts to save traffic. Off by default (TikTok returns an empty page if on) |
+| `proxyConfiguration`   | Apify Proxy settings                                                                         |
+| `sessionCookies`       | Optional, secret. Not needed for anything above.                                             |
 
 ## Output
 
@@ -73,9 +77,9 @@ Rows share one shape and are told apart by `recordType` (`profile`, `post`, `com
 - **Instagram's profile page is sometimes login-walled.** The Actor then falls back to Instagram's public embed page: exact counts, verified flag and latest posts, but no bio, following count or links (stated in `statusDetail`).
 - Page layouts change. If a platform changes its markup a field can come back `null` or a row can come back `blocked`; the `DIAG_*` records in the run's key-value store show what was seen.
 
-## Cost
+## Cost report
 
-A profile lookup with a few posts typically runs 10–40 seconds on 1 GB of memory plus a few megabytes of residential proxy traffic, i.e. cents. Use `maxItemsPerRun` and the run's own timeout as caps.
+Every run writes an `OUTPUT` record with a `cost` block: runtime, requests, `proxyMegabytes` measured in the browser, compute-unit estimate, an optional dollar estimate, and Apify's own usage figure for the run. Two caps protect spend: `maxItemsPerRun` and `maxProxyMegabytes`; `OUTPUT.budget.stopReason` says which one ended a run. Measured examples: a TikTok profile lookup moves about 7 MB and costs about $0.002 in platform usage plus that traffic on the residential proxy.
 
 ## FAQ and disclaimer
 
