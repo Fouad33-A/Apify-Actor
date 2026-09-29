@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { MAX_PROBES, runProbes, sanitizeHeaders, validateProbe } from '../src/probes.js';
+import { extractJsonPath, grepText, MAX_PROBES, runProbes, sanitizeHeaders, validateProbe } from '../src/probes.js';
 import { launchBrowser, serve } from './helpers/browser.js';
 
 describe('validateProbe', () => {
@@ -141,5 +141,106 @@ describe('runProbes (synthetic responses, no network)', () => {
         const results = await runProbes({ context, probes });
         await context.close();
         expect(results).toHaveLength(MAX_PROBES);
+    });
+});
+
+describe('grepText', () => {
+    it('returns snippets around the first matches and caps hits per term', () => {
+        const text = `${'a'.repeat(300)}NEEDLE${'b'.repeat(400)}NEEDLE second NEEDLE third NEEDLE fourth`;
+        const r = grepText(text, ['NEEDLE', 'missing']);
+        expect(r.NEEDLE).toHaveLength(3);
+        expect(r.NEEDLE[0]).toContain('NEEDLE');
+        expect(r.NEEDLE[0].length).toBeLessThan(600);
+        expect(r.missing).toEqual([]);
+    });
+
+    it('caps the number of terms', () => {
+        const terms = Array.from({ length: 20 }, (_, i) => `t${i}`);
+        expect(Object.keys(grepText('t0 t1', terms))).toHaveLength(8);
+    });
+});
+
+describe('extractJsonPath', () => {
+    const json = JSON.stringify({ a: { 'b.c': { x: 1, y: [1, 2] } } });
+
+    it('walks a path of keys, including keys that contain dots', () => {
+        const r = extractJsonPath(json, ['a', 'b.c']);
+        expect(r.keys).toEqual(['x', 'y']);
+        expect(JSON.parse(r.head)).toEqual({ x: 1, y: [1, 2] });
+    });
+
+    it('reports where a path breaks and what keys exist there', () => {
+        const r = extractJsonPath(json, ['a', 'nope']);
+        expect(r.error).toMatch(/nope/);
+        expect(r.keysAtFailure).toEqual(['b.c']);
+    });
+
+    it('reports invalid JSON', () => {
+        expect(extractJsonPath('{bad', []).error).toMatch(/not valid JSON/);
+    });
+
+    it('truncates large values', () => {
+        expect(extractJsonPath(JSON.stringify({ big: 'x'.repeat(20_000) }), []).head.length).toBeLessThanOrEqual(6000);
+    });
+});
+
+describe('probe options: grep / outline / jsonScriptId (synthetic pages)', () => {
+    let browser;
+    beforeAll(async () => {
+        browser = await launchBrowser();
+    });
+    afterAll(async () => {
+        await browser?.close();
+    });
+
+    it('page probe returns grep snippets, a DOM outline and an extracted JSON path', async () => {
+        const body = `<html><head><title>t</title></head><body><div role="main"><h1>NASA</h1><div><a href="/x/y">link text</a></div></div>
+            <script id="DATA" type="application/json">{"scope":{"user-detail":{"stats":{"followerCount":5}}}}</script></body></html>`;
+        const context = await browser.newContext();
+        await serve(context, [{ match: /tiktok\.com\/@nasa$/, body }]);
+        const [r] = await runProbes({
+            context,
+            probes: [
+                {
+                    url: 'https://www.tiktok.com/@nasa',
+                    waitMs: 10,
+                    grep: ['followerCount'],
+                    outline: { selector: '[role=main]', maxDepth: 5, maxLines: 20 },
+                    jsonScriptId: 'DATA',
+                    jsonPath: ['scope', 'user-detail'],
+                },
+            ],
+        });
+        await context.close();
+        expect(r.grep.followerCount[0]).toContain('followerCount');
+        expect(r.outline.join('\n')).toMatch(/role="main"/);
+        expect(r.outline.join('\n')).toMatch(/href="\/x\/y"/);
+        expect(JSON.parse(r.json.head)).toEqual({ stats: { followerCount: 5 } });
+    });
+
+    it('a missing script id is reported, not thrown', async () => {
+        const context = await browser.newContext();
+        await serve(context, [{ match: /tiktok\.com\/@a$/, body: '<html><body>x</body></html>' }]);
+        const [r] = await runProbes({
+            context,
+            probes: [{ url: 'https://www.tiktok.com/@a', waitMs: 10, jsonScriptId: 'NOPE' }],
+        });
+        await context.close();
+        expect(r.json).toEqual({ error: 'script id not found' });
+    });
+
+    it('fetch probe supports grep on the response body', async () => {
+        const context = await browser.newContext();
+        await serve(context, [
+            { match: /instagram\.com\/$/, body: '<html><body>home</body></html>' },
+            { match: /\/api\/x$/, contentType: 'application/json', body: '{"needle":"found-me"}' },
+        ]);
+        const [r] = await runProbes({
+            context,
+            probes: [{ url: 'https://www.instagram.com/api/x', type: 'fetch', grep: ['found-me'] }],
+        });
+        await context.close();
+        expect(r.grep['found-me'][0]).toContain('found-me');
+        expect(r.fullBody).toBeUndefined();
     });
 });

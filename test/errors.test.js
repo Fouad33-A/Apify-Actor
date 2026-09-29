@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { checkHttpStatusForRateLimit, checkPageForRateLimit, RateLimitError } from '../src/errors.js';
+import {
+    assertNotRateLimited,
+    checkHttpStatusForRateLimit,
+    checkPageForRateLimit,
+    RateLimitError,
+} from '../src/errors.js';
+import { launchBrowser } from './helpers/browser.js';
 
 describe('checkHttpStatusForRateLimit', () => {
     it('throws RateLimitError on 429', () => {
@@ -56,5 +62,39 @@ describe('RateLimitError.toRecord', () => {
         const rec = new RateLimitError('tiktok', 'comments', 'HTTP 429').toRecord();
         expect(Object.keys(rec).sort()).toEqual(['at', 'endpoint', 'message', 'platform']);
         expect(Number.isNaN(Date.parse(rec.at))).toBe(false);
+    });
+});
+
+describe('assertNotRateLimited (visible text only)', () => {
+    let browser;
+    beforeAll(async () => {
+        browser = await launchBrowser();
+    });
+    afterAll(async () => {
+        await browser?.close();
+    });
+
+    async function check(html, platform = 'tiktok') {
+        const page = await browser.newPage();
+        try {
+            await page.setContent(html);
+            await assertNotRateLimited(page, platform, 'profile');
+        } finally {
+            await page.close();
+        }
+    }
+
+    it('ignores marker words that only appear inside script text', async () => {
+        await expect(
+            check('<body>Hello<script>var chunks = ["captcha-sg.js", "rate limit"]</script></body>'),
+        ).resolves.toBeUndefined();
+    });
+
+    it('throws when the marker is visible to the user', async () => {
+        await expect(check('<body>Verify to continue</body>')).rejects.toBeInstanceOf(RateLimitError);
+    });
+
+    it('ignores hidden elements', async () => {
+        await expect(check('<body>ok<div style="display:none">captcha</div></body>')).resolves.toBeUndefined();
     });
 });

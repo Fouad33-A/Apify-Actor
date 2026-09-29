@@ -77,13 +77,16 @@ export function fbPage({
     category = 'Government organization',
     verified = true,
     links = [],
+    ogDescription = null,
 } = {}) {
     const linksSection = links.length
         ? `<section><div><div><div><div><span>Links</span></div></div></div></div>${links
               .map((u) => `<a href="https://l.facebook.com/l.php?u=${encodeURIComponent(u)}&h=AT0abc">${esc(u)}</a>`)
               .join('')}</section>`
         : '';
-    return `<!doctype html><html><body><div role="main">
+    return `<!doctype html><html><head>${
+        ogDescription ? `<meta property="og:description" content="${esc(ogDescription)}">` : ''
+    }</head><body><div role="main">
     <div>
       <div>${esc(name)}${verified ? '<svg><title>Verified account</title></svg>' : ''}</div>
       ${stats ? `<div>${esc(stats)}</div>` : ''}

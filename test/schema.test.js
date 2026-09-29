@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { makeCommentRow, makePostRow, makeProfileRow, makeRunSummary } from '../src/schema.js';
+import { makeCommentRow, makePostRow, makeProfileRow, makeRunSummary, parseAbbrevCount } from '../src/schema.js';
 
 describe('row shapes', () => {
     it('profile row: unknown fields are explicit null / [] - never omitted, never guessed', () => {
@@ -93,5 +93,23 @@ describe('row shapes', () => {
         );
         expect(s.itemCounts).toEqual({ total: 1 });
         expect(s.rateLimitErrors).toEqual([]);
+    });
+});
+
+describe('parseAbbrevCount', () => {
+    it.each([
+        ['104,333,810', 104_333_810],
+        ['104M', 104_000_000],
+        ['1.2K', 1200],
+        ['3.5B', 3_500_000_000],
+        ['4,937', 4937],
+        ['0', 0],
+        [' 12 K ', 12_000],
+    ])('%s -> %s', (input, expected) => {
+        expect(parseAbbrevCount(input)).toBe(expected);
+    });
+
+    it.each([[null], [undefined], [''], ['abc'], ['12X']])('%j -> null', (input) => {
+        expect(parseAbbrevCount(input)).toBeNull();
     });
 });

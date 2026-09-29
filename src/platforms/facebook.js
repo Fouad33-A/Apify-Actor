@@ -39,7 +39,7 @@
 // the actor itself" caveat instagram.js carried before its first live run.
 
 import { saveDiagnostics } from '../diagnostics.js';
-import { checkPageForRateLimit } from '../errors.js';
+import { assertNotRateLimited } from '../errors.js';
 import { makeProfileRow } from '../schema.js';
 
 const DOMAIN = 'www.facebook.com';
@@ -99,7 +99,10 @@ export function domExtractProfile() {
         return Math.round(n);
     }
 
-    const followerCount = parseAbbrev(statsMatch[1]);
+    // og:description carries the exact count ("28,729,285 followers · ..."); the visible line is rounded ("28M").
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    const exactMatch = ogDesc ? ogDesc.content.match(/([\d,]+)\s+followers/i) : null;
+    const followerCount = exactMatch ? parseInt(exactMatch[1].replace(/,/g, ''), 10) : parseAbbrev(statsMatch[1]);
     const followingCount = statsMatch[2] ? parseAbbrev(statsMatch[2]) : null;
 
     const roleButtonTexts = [...introCard.querySelectorAll('[role="button"]')]
@@ -169,7 +172,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
     await page.waitForTimeout(1500);
     const html = await page.content();
 
-    checkPageForRateLimit('facebook', 'profile', html);
+    await assertNotRateLimited(page, 'facebook', 'profile');
 
     const status = response?.status();
     const lowerHtml = html.toLowerCase();

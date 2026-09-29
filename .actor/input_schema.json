@@ -106,7 +106,7 @@
         "debugProbes": {
             "title": "Diagnostic probes (mode = probe only)",
             "type": "array",
-            "description": "Up to 12 items like {\"url\": \"https://www.tiktok.com/@nasa\", \"type\": \"page\"} or {\"url\": \"https://www.instagram.com/api/v1/...\", \"type\": \"fetch\", \"headers\": {\"x-ig-app-id\": \"...\"}}. HTTPS GET on instagram/facebook/tiktok hosts only. Results are saved to the PROBE_RESULTS record. Reports what comes back, including login walls; it does not try to get past them.",
+            "description": "Up to 12 items like {\"url\": \"https://www.tiktok.com/@nasa\", \"type\": \"page\"} or {\"url\": \"...\", \"type\": \"fetch\", \"headers\": {\"x-ig-app-id\": \"...\"}}. Optional per item: \"grep\": [\"text\", ...] (snippets around matches), \"outline\": {\"selector\": \"[role=main]\", \"maxDepth\": 10, \"maxLines\": 150} (compact DOM outline), \"jsonScriptId\" + \"jsonPath\": [\"key\", ...] (extract from an embedded JSON script). HTTPS GET on instagram/facebook/tiktok hosts only. Results are saved to the PROBE_RESULTS record. Reports what comes back, including login walls; it does not try to get past them.",
             "editor": "json",
             "default": []
         }

@@ -100,3 +100,14 @@ export function makeRunSummary({ mode, platform, startedAt, counts, budget, erro
         rateLimitErrors: errors, // list of { platform, endpoint, message, at }
     };
 }
+
+// "104,333,810" -> 104333810, "104M" -> 104000000 (rounded, as displayed), "1.2K" -> 1200, else null.
+export function parseAbbrevCount(text) {
+    if (text == null) return null;
+    const m = String(text)
+        .replace(/[,\s]/g, '')
+        .match(/^([\d.]+)([KMB])?$/i);
+    if (!m) return null;
+    const mult = { K: 1e3, M: 1e6, B: 1e9 }[(m[2] || '').toUpperCase()] || 1;
+    return Math.round(parseFloat(m[1]) * mult);
+}

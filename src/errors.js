@@ -51,3 +51,11 @@ export function checkPageForRateLimit(platform, endpoint, pageText) {
         }
     }
 }
+
+// Checks what a visitor would actually see. Scanning raw HTML is wrong: normal pages carry
+// words like "captcha" or "rate limit" inside script bundles (TikTok's page does), which
+// would falsely stop a healthy run.
+export async function assertNotRateLimited(page, platform, endpoint) {
+    const text = await page.evaluate(() => (document.body ? document.body.innerText : ''));
+    checkPageForRateLimit(platform, endpoint, text);
+}

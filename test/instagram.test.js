@@ -10,6 +10,7 @@ import {
     fetchComments,
     findUserNode,
     lookupProfile,
+    parseEmbedText,
 } from '../src/platforms/instagram.js';
 import { launchBrowser, serve } from './helpers/browser.js';
 import { igComment, igGrid, igHeader, igPage, igPost } from './helpers/fixtures.js';
@@ -371,16 +372,61 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
         expect(posts).toEqual([]);
     });
 
-    it('a login wall is reported as not_found with a login-wall detail and saves debug artifacts', async () => {
+    it('a login wall with no usable embed page is reported as blocked (not not_found) and saves diagnostics', async () => {
         const wall = igPage('<form><input name="password"><button>Log in</button></form>');
         const { profile } = await withContext([{ match: PROFILE_URL, body: wall }], ({ page }) =>
             lookupProfile({ page, ...base }),
         );
-        expect(profile.status).toBe('not_found');
-        expect(profile.statusDetail).toMatch(/login wall/i);
+        expect(profile).toMatchObject({ status: 'blocked', followerCount: null, displayName: null });
+        expect(profile.statusDetail).toMatch(/login/i);
         const keys = setValue.mock.calls.map((c) => c[0]);
-        expect(keys).toContain('DEBUG_HTML_profile_nasa');
-        expect(keys).toContain('DEBUG_META_profile_nasa');
+        expect(keys).toEqual(
+            expect.arrayContaining(['DEBUG_HTML_profile_nasa', 'DEBUG_META_profile_nasa', 'DIAG_profile_nasa']),
+        );
+    }, 60_000);
+
+    it('a redirect to /accounts/login falls back to the public embed page: rounded counts, honest detail, no bio', async () => {
+        const routes = [
+            {
+                match: PROFILE_URL,
+                body: `<html><body><script>location.replace('https://www.instagram.com/accounts/login/?next=%2Fnasa%2F&is_from_rle')</script></body></html>`,
+            },
+            { match: /accounts\/login/, body: igPage('<div>Log into Instagram</div>') },
+            {
+                match: /instagram\.com\/nasa\/embed\/$/,
+                body: igPage(
+                    '<div>nasa</div><div>NASA</div><div>104M followers</div><div>•</div><div>4,937 posts</div>',
+                ),
+            },
+        ];
+        const { profile, posts } = await withContext(routes, ({ page }) => lookupProfile({ page, ...base }));
+        expect(profile).toMatchObject({
+            status: 'found',
+            username: 'nasa',
+            displayName: 'NASA',
+            followerCount: 104_000_000,
+            postCount: 4937,
+            bio: null,
+            followingCount: null,
+            verified: null,
+            externalLinks: [],
+        });
+        expect(profile.statusDetail).toMatch(/embed page.*rounded/i);
+        expect(posts).toEqual([]);
+    }, 60_000);
+
+    it('a rate-limit message on the embed page still throws RateLimitError', async () => {
+        const routes = [
+            {
+                match: PROFILE_URL,
+                body: `<html><body><script>location.replace('https://www.instagram.com/accounts/login/?next=%2Fnasa%2F')</script></body></html>`,
+            },
+            { match: /accounts\/login/, body: igPage('<div>Log into Instagram</div>') },
+            { match: /embed\/$/, body: igPage('<div>Please wait a few minutes before you try again.</div>') },
+        ];
+        await expect(withContext(routes, ({ page }) => lookupProfile({ page, ...base }))).rejects.toBeInstanceOf(
+            RateLimitError,
+        );
     }, 60_000);
 
     it('DEBUG_META is saved as a JSON string (Actor.setValue rejects raw objects when contentType is set)', async () => {
@@ -548,5 +594,24 @@ describe('fetchComments (full flow, synthetic pages)', () => {
                 fetchComments({ page, ...opts }),
             ),
         ).rejects.toBeInstanceOf(RateLimitError);
+    });
+});
+
+describe('parseEmbedText', () => {
+    it('reads username, name, followers and posts from the embed page text', () => {
+        expect(parseEmbedText('nasa\nNASA\n104M followers\n • \n4,937 posts\nView full profile on Instagram')).toEqual({
+            username: 'nasa',
+            fullName: 'NASA',
+            followers: '104M',
+            posts: '4,937',
+        });
+    });
+
+    it('full name is null when the second line is already a stat', () => {
+        expect(parseEmbedText('nasa\n1.2K followers\n5 posts').fullName).toBeNull();
+    });
+
+    it('returns null when neither count is present (not a profile embed)', () => {
+        expect(parseEmbedText('Log into Instagram')).toBeNull();
     });
 });

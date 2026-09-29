@@ -50,6 +50,19 @@ describe('domExtractProfile (in-page)', () => {
         });
     });
 
+    it('uses the exact follower count from og:description instead of the rounded visible one', async () => {
+        const dom = await evaluate(
+            fbPage({ ogDescription: 'NASA. 28,729,285 followers · 122,448 talking about this.' }),
+            domExtractProfile,
+        );
+        expect(dom.followerCount).toBe(28_729_285);
+    });
+
+    it('falls back to the rounded visible count when og:description has no follower figure', async () => {
+        const dom = await evaluate(fbPage({ ogDescription: 'A page about space.' }), domExtractProfile);
+        expect(dom.followerCount).toBe(28_000_000);
+    });
+
     it('following is null when the stats line only has followers', async () => {
         const dom = await evaluate(fbPage({ stats: '1.5K followers' }), domExtractProfile);
         expect(dom.followerCount).toBe(1500);

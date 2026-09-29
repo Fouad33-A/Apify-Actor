@@ -27,8 +27,8 @@
 import { Actor, log } from 'apify';
 
 import { saveDiagnostics } from '../diagnostics.js';
-import { checkPageForRateLimit } from '../errors.js';
-import { makeCommentRow, makePostRow, makeProfileRow } from '../schema.js';
+import { assertNotRateLimited } from '../errors.js';
+import { makeCommentRow, makePostRow, makeProfileRow, parseAbbrevCount } from '../schema.js';
 
 // TEMP DIAGNOSTIC (2026-09-28): the live-DOM extraction below was verified
 // by hand in a real logged-in Chrome session, but the first Apify test run
@@ -393,7 +393,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
     };
     log.info(`Nav diagnostics for ${username}: ${JSON.stringify(navMeta)}`);
 
-    checkPageForRateLimit('instagram', 'profile', html);
+    await assertNotRateLimited(page, 'instagram', 'profile');
 
     const status = response?.status();
     const lowerHtml = html.toLowerCase();
@@ -455,8 +455,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
             try {
                 await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 30_000 });
                 await page.waitForTimeout(800);
-                const postHtml = await page.content();
-                checkPageForRateLimit('instagram', 'post', postHtml);
+                await assertNotRateLimited(page, 'instagram', 'post');
                 metrics = await page.evaluate(domExtractPostMetrics);
             } catch (err) {
                 if (err?.name === 'RateLimitError') throw err;
@@ -547,25 +546,86 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
 
     await saveDebugArtifact(page, html, `profile_${username}`, navMeta);
 
+    const redirectedToLogin = /\/accounts\/login/.test(page.url());
+    if (looksLikeLoginWall || redirectedToLogin) {
+        const limited = await lookupViaEmbed({ page, username, sourceInput });
+        if (limited) return { profile: limited, posts: [] };
+        return {
+            profile: makeProfileRow({
+                platform: 'instagram',
+                sourceInput,
+                username,
+                status: 'blocked',
+                statusDetail:
+                    'Instagram redirected to its login page and its public embed page returned no profile data (no session cookie provided, or this IP/session was challenged)',
+            }),
+            posts: [],
+        };
+    }
+
     return {
         profile: makeProfileRow({
             platform: 'instagram',
             sourceInput,
             username,
             status: 'not_found',
-            statusDetail: looksLikeLoginWall
-                ? 'Instagram served a login wall instead of the profile page (no session cookie provided, or this IP/session was challenged)'
-                : 'Page loaded but neither the current DOM layout nor the legacy JSON shape matched - Instagram may have changed its page structure again (needs a live re-check)',
+            statusDetail:
+                'Page loaded but neither the current DOM layout nor the legacy JSON shape matched - Instagram may have changed its page structure again (needs a live re-check)',
         }),
         posts: [],
     };
+}
+
+// Parses the text of Instagram's public embed page: "<username> / <name> / 104M followers / • / 4,937 posts".
+export function parseEmbedText(text) {
+    const lines = String(text)
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    const followers = text.match(/([\d.,]+\s*[KMB]?)\s+followers/i)?.[1] ?? null;
+    const posts = text.match(/([\d.,]+\s*[KMB]?)\s+posts/i)?.[1] ?? null;
+    if (!followers && !posts) return null;
+    const isStat = (l) => /followers|posts|^[•·]$/i.test(l);
+    const username = lines[0] && !isStat(lines[0]) ? lines[0] : null;
+    const fullName = lines[1] && !isStat(lines[1]) ? lines[1] : null;
+    return { username, fullName, followers, posts };
+}
+
+// The profile page needs a login, but Instagram's public embed page (served to anonymous
+// visitors for third-party sites) shows a few profile facts. Counts are shown rounded.
+async function lookupViaEmbed({ page, username, sourceInput }) {
+    try {
+        await page.goto(`https://${DOMAIN}/${encodeURIComponent(username)}/embed/`, {
+            waitUntil: 'domcontentloaded',
+            timeout: 45_000,
+        });
+        await page.waitForTimeout(1500);
+        await assertNotRateLimited(page, 'instagram', 'embed');
+        const text = await page.evaluate(() => (document.body ? document.body.innerText : ''));
+        const parsed = parseEmbedText(text);
+        if (!parsed) return null;
+        return makeProfileRow({
+            platform: 'instagram',
+            sourceInput,
+            username: parsed.username ?? username,
+            displayName: parsed.fullName,
+            followerCount: parseAbbrevCount(parsed.followers),
+            postCount: parseAbbrevCount(parsed.posts),
+            status: 'found',
+            statusDetail:
+                'Limited data from the public embed page (the profile page requires login): counts are rounded as displayed; no bio, following count, links, verified flag or recent posts',
+        });
+    } catch (err) {
+        if (err?.name === 'RateLimitError') throw err;
+        return null;
+    }
 }
 
 export async function fetchComments({ page, postUrl, sourceInput, maxComments, topLevelOnly }) {
     await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 60_000 });
     await page.waitForTimeout(1200);
     const html = await page.content();
-    checkPageForRateLimit('instagram', 'comments', html);
+    await assertNotRateLimited(page, 'instagram', 'comments');
 
     if (!topLevelOnly) {
         // Best-effort: replies are collapsed behind "View replies" by default

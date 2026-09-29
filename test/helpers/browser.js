@@ -23,6 +23,7 @@ export async function serve(context, routes) {
         return route.fulfill({
             status: hit.status ?? 200,
             contentType: hit.contentType ?? 'text/html; charset=utf-8',
+            headers: hit.headers,
             body: hit.body ?? '<html><body></body></html>',
         });
     });
