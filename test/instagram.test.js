@@ -1,12 +1,6 @@
 // Instagram extraction + flow tests. Fixtures are SYNTHETIC (see helpers/fixtures.js).
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const setValue = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock("apify", () => ({
-  Actor: { setValue },
-  log: { info: vi.fn(), warning: vi.fn(), exception: vi.fn() },
-}));
-
 import { RateLimitError } from "../src/errors.js";
 import {
   domExtractComments,
@@ -19,6 +13,12 @@ import {
 } from "../src/platforms/instagram.js";
 import { launchBrowser, serve } from "./helpers/browser.js";
 import { igComment, igGrid, igHeader, igPage, igPost } from "./helpers/fixtures.js";
+
+const setValue = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("apify", () => ({
+  Actor: { setValue },
+  log: { info: vi.fn(), warning: vi.fn(), exception: vi.fn() },
+}));
 
 let browser;
 beforeAll(async () => {

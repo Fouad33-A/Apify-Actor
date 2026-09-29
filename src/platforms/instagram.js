@@ -25,8 +25,9 @@
 // like count, Reply/See translation controls).
 
 import { Actor, log } from "apify";
-import { makeProfileRow, makePostRow, makeCommentRow } from "../schema.js";
+
 import { checkPageForRateLimit } from "../errors.js";
+import { makeCommentRow,makePostRow, makeProfileRow } from "../schema.js";
 
 // TEMP DIAGNOSTIC (2026-09-28): the live-DOM extraction below was verified
 // by hand in a real logged-in Chrome session, but the first Apify test run
@@ -161,9 +162,9 @@ export function domExtractProfile() {
     return parseAbbrev(displayText);
   }
 
-  const postCount = exactCount(statValues["posts"]);
-  const followerCount = exactCount(statValues["followers"]);
-  const followingCount = exactCount(statValues["following"]);
+  const postCount = exactCount(statValues.posts);
+  const followerCount = exactCount(statValues.followers);
+  const followingCount = exactCount(statValues.following);
 
   // Bio: everything between the last stat line and either the external-link
   // line ("...and N more") or a known button/control word.
@@ -370,8 +371,8 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
     responseOk: response?.ok() ?? null,
     contentType: responseHeaders["content-type"] ?? null,
     contentLength: responseHeaders["content-length"] ?? null,
-    server: responseHeaders["server"] ?? null,
-    viaHeader: responseHeaders["via"] ?? null,
+    server: responseHeaders.server ?? null,
+    viaHeader: responseHeaders.via ?? null,
     htmlByteLength: new TextEncoder().encode(html).length,
   };
   log.info(`Nav diagnostics for ${username}: ${JSON.stringify(navMeta)}`);
@@ -485,7 +486,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
     });
     const edges = user.edge_owner_to_timeline_media?.edges || [];
     const posts = edges.slice(0, maxRecentPosts).map((edge) => {
-      const node = edge.node;
+      const {node} = edge;
       const postUrl = `https://${DOMAIN}/p/${node.shortcode}/`;
       return makePostRow({
         platform: "instagram",
@@ -583,7 +584,7 @@ export async function fetchComments({ page, postUrl, sourceInput, maxComments, t
 
   const rows = [];
   for (const edge of edges.slice(0, maxComments)) {
-    const node = edge.node;
+    const {node} = edge;
     rows.push(
       makeCommentRow({
         platform: "instagram",

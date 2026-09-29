@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("apify", () => ({
-  log: { warning: vi.fn(), exception: vi.fn(), info: vi.fn() },
-}));
-
 import { BudgetTracker } from "../src/budget.js";
 import { RateLimitError } from "../src/errors.js";
 import { runMode } from "../src/run.js";
+
+vi.mock("apify", () => ({
+  log: { warning: vi.fn(), exception: vi.fn(), info: vi.fn() },
+}));
 
 const post = (n) => ({ postUrl: `https://x/p/${n}/` });
 
@@ -27,7 +27,9 @@ function harness({ input = {}, cap = 1000, mod = {} } = {}) {
       page: {},
       input,
       budget,
-      pushData: async (row) => void pushed.push(row),
+      pushData: async (row) => {
+        pushed.push(row);
+      },
       rateLimitErrors,
     });
   return { run, pushed, rateLimitErrors, budget, mod: fullMod };

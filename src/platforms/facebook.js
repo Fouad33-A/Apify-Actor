@@ -38,9 +38,9 @@
 // own Playwright/proxy path yet) - same "verified by hand, untested via
 // the actor itself" caveat instagram.js carried before its first live run.
 
-import { log } from "apify";
-import { makeProfileRow } from "../schema.js";
+
 import { checkPageForRateLimit } from "../errors.js";
+import { makeProfileRow } from "../schema.js";
 
 const DOMAIN = "www.facebook.com";
 

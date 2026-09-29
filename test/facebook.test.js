@@ -1,15 +1,15 @@
 // Facebook extraction + flow tests. Fixtures are SYNTHETIC (see helpers/fixtures.js).
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("apify", () => ({
-  Actor: { setValue: vi.fn(async () => {}) },
-  log: { info: vi.fn(), warning: vi.fn(), exception: vi.fn() },
-}));
-
 import { RateLimitError } from "../src/errors.js";
 import { domExtractPosts, domExtractProfile, fetchComments, lookupProfile, searchPosts } from "../src/platforms/facebook.js";
 import { launchBrowser, serve } from "./helpers/browser.js";
 import { fbPage } from "./helpers/fixtures.js";
+
+vi.mock("apify", () => ({
+  Actor: { setValue: vi.fn(async () => {}) },
+  log: { info: vi.fn(), warning: vi.fn(), exception: vi.fn() },
+}));
 
 let browser;
 beforeAll(async () => {
