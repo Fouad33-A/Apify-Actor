@@ -38,6 +38,7 @@
 // own Playwright/proxy path yet) - same "verified by hand, untested via
 // the actor itself" caveat instagram.js carried before its first live run.
 
+import { saveDiagnostics } from '../diagnostics.js';
 import { checkPageForRateLimit } from '../errors.js';
 import { makeProfileRow } from '../schema.js';
 
@@ -214,6 +215,8 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
 
         return { profile, posts: domPosts };
     }
+
+    await saveDiagnostics(page, html, `profile_${username}`, { httpStatus: status });
 
     const looksLikeLoginWall = lowerHtml.includes('name="pass"') && lowerHtml.includes('log in');
 

@@ -26,6 +26,7 @@
 
 import { Actor, log } from 'apify';
 
+import { saveDiagnostics } from '../diagnostics.js';
 import { checkPageForRateLimit } from '../errors.js';
 import { makeCommentRow, makePostRow, makeProfileRow } from '../schema.js';
 
@@ -39,6 +40,7 @@ import { makeCommentRow, makePostRow, makeProfileRow } from '../schema.js';
 // actor's key-value store on that failure path so it can be inspected
 // without guessing. Safe to remove once the real cause is confirmed.
 async function saveDebugArtifact(page, html, tag, meta) {
+    await saveDiagnostics(page, html, tag, meta);
     try {
         await Actor.setValue(`DEBUG_HTML_${tag}`, html, { contentType: 'text/html; charset=utf-8' });
     } catch (err) {

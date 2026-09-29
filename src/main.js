@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 
 import { BudgetTracker } from './budget.js';
 import { parseCookieHeader } from './cookies.js';
+import { runtimeInfo } from './diagnostics.js';
 import * as facebook from './platforms/facebook.js';
 import * as instagram from './platforms/instagram.js';
 import * as tiktok from './platforms/tiktok.js';
@@ -97,7 +98,7 @@ const summary = makeRunSummary({
     budget: budget.summary(),
     errors: rateLimitErrors,
 });
-await Actor.setValue('OUTPUT', summary);
+await Actor.setValue('OUTPUT', { ...summary, runtime: runtimeInfo() });
 log.info('Run summary', summary);
 
 await Actor.exit();
