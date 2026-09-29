@@ -7,14 +7,15 @@
             "title": "Mode",
             "type": "string",
             "editor": "select",
-            "enum": ["profile", "search", "comments", "probe"],
+            "enum": ["profile", "search", "posts", "comments", "probe"],
             "enumTitles": [
                 "A - Profile lookup",
                 "B - Keyword/search discovery",
+                "Posts by URL (metrics for known post/video URLs)",
                 "C - Comment retrieval",
                 "Diagnostic probe (fetch a few public URLs and report)"
             ],
-            "description": "A: look up known usernames. B: discover posts/creators by keyword. C: pull comments for known post URLs. To get comments alongside A or B in one run, use that mode and set fetchComments=true instead of running C separately.",
+            "description": "A: look up known usernames. B: discover posts/creators by keyword. Posts: read metrics of known post/video URLs (TikTok). C: pull comments for known post URLs. To get comments alongside A, B or Posts in one run, use that mode and set fetchComments=true instead of running C separately.",
             "default": "profile"
         },
         "platform": {
@@ -132,8 +133,14 @@
         "blockHeavyResources": {
             "title": "Block images, video and fonts",
             "type": "boolean",
-            "description": "Saves proxy traffic. The Actor reads text, JSON and attributes, never pixels.",
-            "default": true
+            "description": "Saves proxy traffic by not loading images, video and fonts. Off by default: TikTok returned an empty page when these were blocked. Try it on Instagram/Facebook to cut cost.",
+            "default": false
+        },
+        "standardUserAgent": {
+            "title": "Announce plain Chrome instead of HeadlessChrome",
+            "type": "boolean",
+            "description": "Headless Chromium puts 'HeadlessChrome' in its user agent, which some sites treat as a bot. This announces the same browser version as ordinary Chrome. It changes nothing else and does not hide automation.",
+            "default": false
         }
     },
     "required": ["mode", "platform"]

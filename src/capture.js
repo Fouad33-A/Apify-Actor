@@ -12,12 +12,15 @@ export function captureJson(page, needles, { maxHits = 40 } = {}) {
         if (!wanted.some((n) => url.includes(n))) return;
         if (hits.length >= maxHits) return;
         let data = null;
+        let bodyLength = null;
         try {
-            data = await response.json();
+            const text = await response.text();
+            bodyLength = text.length;
+            data = JSON.parse(text);
         } catch {
-            // not JSON (or body unavailable): still record that the call happened
+            // not JSON (or body unavailable): still record that the call happened, and how big the body was
         }
-        const hit = { url, status: response.status(), data };
+        const hit = { url, status: response.status(), data, bodyLength };
         hits.push(hit);
         for (const w of [...waiters]) {
             if (w.pred(hit)) {

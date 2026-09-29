@@ -374,6 +374,55 @@ describe('runMode: search with author profiles', () => {
     });
 });
 
+describe('runMode: posts by URL', () => {
+    it('reads each URL, writes the post, and attaches comments when asked', async () => {
+        const fetchPost = vi.fn(async ({ postUrl }) => ({ recordType: 'post', postUrl, status: 'found' }));
+        const h = harness({ input: { postUrls: ['u1', 'u2'], fetchComments: true }, mod: { fetchPost } });
+        await h.run('posts');
+        expect(h.budget.counts).toMatchObject({ posts: 2, comments: 4 });
+        expect(h.pushed[0].recordType).toBe('post');
+    });
+
+    it('a platform without fetchPost gets an error row per URL, not a crash', async () => {
+        const h = harness({ input: { postUrls: ['u1'], platform: 'facebook' } });
+        await h.run('posts');
+        expect(h.pushed[0]).toMatchObject({ recordType: 'post', status: 'error', postUrl: 'u1' });
+        expect(h.pushed[0].statusDetail).toMatch(/not supported for facebook/);
+    });
+
+    it('does not fetch comments for a post that was not found/blocked', async () => {
+        const fetchPost = vi.fn(async ({ postUrl }) => ({ recordType: 'post', postUrl, status: 'blocked' }));
+        const h = harness({ input: { postUrls: ['u1'], fetchComments: true }, mod: { fetchPost } });
+        await h.run('posts');
+        expect(h.mod.fetchComments).not.toHaveBeenCalled();
+    });
+
+    it('a rate limit stops the run', async () => {
+        const fetchPost = vi.fn().mockRejectedValue(new RateLimitError('tiktok', 'post', 'x'));
+        const h = harness({ input: { postUrls: ['u1', 'u2'] }, mod: { fetchPost } });
+        await h.run('posts');
+        expect(fetchPost).toHaveBeenCalledTimes(1);
+        expect(h.rateLimitErrors).toHaveLength(1);
+    });
+});
+
+describe('runMode: rows without a URL never trigger a comment fetch', () => {
+    it('a blocked post row (no postUrl) from a profile lookup is written but not commented on', async () => {
+        const h = harness({
+            input: { usernames: ['a'], fetchComments: true },
+            mod: {
+                lookupProfile: vi.fn(async () => ({
+                    profile: { id: 'P' },
+                    posts: [{ postUrl: null, status: 'blocked' }],
+                })),
+            },
+        });
+        await h.run('profile');
+        expect(h.mod.fetchComments).not.toHaveBeenCalled();
+        expect(h.budget.counts.posts).toBe(1);
+    });
+});
+
 describe('runMode: validation', () => {
     it('throws on an unknown mode', async () => {
         const h = harness();

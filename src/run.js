@@ -34,6 +34,8 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         enrichSearchAuthors = true,
     } = input;
     const shouldContinue = () => budget.canWriteMore();
+    // Comments are only fetched for posts that were really read (a blocked/not-found row has no usable URL).
+    const canComment = (post) => Boolean(post.postUrl) && (post.status ?? 'found') === 'found';
 
     async function write(recordType, row) {
         if (!budget.record(recordType)) return false;
@@ -91,7 +93,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 await write('profile', profile);
                 for (const post of posts) {
                     if (!(await write('post', post))) break;
-                    if (fetchComments && (await collectComments(post.postUrl, username))) return;
+                    if (fetchComments && canComment(post) && (await collectComments(post.postUrl, username))) return;
                 }
             } catch (err) {
                 if (err instanceof RateLimitError) {
@@ -180,7 +182,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                           }
                         : post;
                     if (!(await write('post', merged))) break;
-                    if (fetchComments && (await collectComments(post.postUrl, q.query))) return;
+                    if (fetchComments && canComment(post) && (await collectComments(post.postUrl, q.query))) return;
                 }
             } catch (err) {
                 if (err instanceof RateLimitError) {
@@ -196,6 +198,36 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                         sourceInput: q.query,
                         status: 'error',
                         statusDetail: `Search failed: ${reason(err)}`,
+                    }),
+                );
+            }
+        }
+    } else if (mode === 'posts') {
+        // Post metrics for known post URLs (no profile page needed), optionally with comments.
+        for (const url of postUrls) {
+            if (!budget.canWriteMore()) break;
+            try {
+                if (typeof mod.fetchPost !== 'function') {
+                    throw new Error(`Reading a single post URL is not supported for ${platform}`);
+                }
+                const post = await mod.fetchPost({ page, postUrl: url, sourceInput: url });
+                if (!(await write('post', post))) break;
+                if (fetchComments && canComment(post) && (await collectComments(url, url))) return;
+            } catch (err) {
+                if (err instanceof RateLimitError) {
+                    rateLimitErrors.push(err.toRecord());
+                    log.warning(err.message);
+                    return;
+                }
+                log.exception(err, `Post fetch failed for ${url}`);
+                await write(
+                    'post',
+                    makePostRow({
+                        platform,
+                        sourceInput: url,
+                        postUrl: url,
+                        status: 'error',
+                        statusDetail: `Post fetch failed: ${reason(err)}`,
                     }),
                 );
             }

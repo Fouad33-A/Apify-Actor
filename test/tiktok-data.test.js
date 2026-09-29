@@ -539,3 +539,64 @@ describe('TikTok flows (real Chromium, synthetic pages)', () => {
         ).rejects.toThrow(/no result data/);
     }, 90_000);
 });
+
+describe('fetchPost (real Chromium, synthetic page)', () => {
+    let browser;
+    beforeAll(async () => {
+        browser = await launchBrowser();
+    });
+    afterAll(async () => {
+        await browser?.close();
+    });
+    const POST_URL = 'https://www.tiktok.com/@complex/video/760000000000000001';
+    const pageWith = (detail) =>
+        `<html><body>x<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify({ __DEFAULT_SCOPE__: { 'webapp.video-detail': detail } })}</script></body></html>`;
+    async function run(body, status = 200) {
+        const context = await browser.newContext();
+        try {
+            await serve(context, [{ match: /video\/760000000000000001$/, body, status }]);
+            return await tiktok.fetchPost({
+                page: await context.newPage(),
+                postUrl: POST_URL,
+                sourceInput: POST_URL,
+            });
+        } finally {
+            await context.close();
+        }
+    }
+
+    it('reads caption, exact counts, date and author facts from the video page itself', async () => {
+        const row = await run(
+            pageWith({
+                itemInfo: {
+                    itemStruct: item(1, {
+                        id: '760000000000000001',
+                        author: { uniqueId: 'complex', nickname: 'COMPLEX', verified: true },
+                        authorStats: { followerCount: 4_000_000 },
+                    }),
+                },
+                statusCode: 0,
+            }),
+        );
+        expect(row).toMatchObject({
+            recordType: 'post',
+            username: 'complex',
+            followerCount: 4_000_000,
+            postUrl: 'https://www.tiktok.com/@complex/video/760000000000000001',
+            caption: 'caption 1 #tag "quoted" & <b>raw</b>',
+            likeCount: 1001,
+            commentCount: 11,
+            shareCount: 6,
+            viewCount: 100_001,
+            status: 'found',
+        });
+    }, 60_000);
+
+    it('not found / private / unrecognised', async () => {
+        expect((await run(pageWith({ statusCode: 10204 }))).status).toBe('not_found');
+        expect((await run(pageWith({ statusCode: 10222 }))).status).toBe('private');
+        const blocked = await run('<html><body>nothing</body></html>');
+        expect(blocked).toMatchObject({ status: 'blocked', caption: null, likeCount: null, postUrl: POST_URL });
+        expect(blocked.statusDetail).toMatch(/DIAG_post_tiktok/);
+    }, 60_000);
+});

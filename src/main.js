@@ -29,7 +29,8 @@ const {
     maxItemsPerRun = 2000,
     maxProxyMegabytes = 300,
     proxyPricePerGbUsd = null,
-    blockHeavyResources = true,
+    blockHeavyResources = false,
+    standardUserAgent = false,
     sessionCookies = '',
     proxyConfiguration: proxyInput = { useApifyProxy: true },
 } = input;
@@ -95,7 +96,14 @@ const browser = await chromium.launch({
 });
 // The proxy exit country changes the page language (Facebook came back in Romanian on one run), and
 // the text parsing is English-based, so ask for English like a normal browser configured for it.
+// Optional: headless Chromium announces itself as "HeadlessChrome" in its user agent. With
+// standardUserAgent the same browser version is announced as plain Chrome. Nothing else about the browser
+// is altered or hidden.
+const userAgent = standardUserAgent
+    ? `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browser.version()} Safari/537.36`
+    : undefined;
 const context = await browser.newContext({
+    userAgent,
     locale: 'en-US',
     extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
 });

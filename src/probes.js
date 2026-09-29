@@ -158,6 +158,7 @@ export function describeCapture(hit, headChars = CAPTURE_HEAD_CHARS) {
     return {
         url: hit.url.slice(0, 300),
         status: hit.status,
+        bodyLength: hit.bodyLength ?? null,
         keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 40) : null,
         head: data == null ? null : JSON.stringify(data).slice(0, headChars),
     };

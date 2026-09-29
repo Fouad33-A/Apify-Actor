@@ -363,6 +363,33 @@ async function loadRecentPosts({ page, capture, profile, sourceInput, maxRecentP
     return items.slice(0, maxRecentPosts).map((item) => itemToPostRow(item, { sourceInput, profile }));
 }
 
+// ---------- one post by URL ----------
+
+// Reads a single video's caption and counts from the data embedded in its own page. This works for any
+// public video URL, independent of the profile's video list.
+export async function fetchPost({ page, postUrl, sourceInput }) {
+    const response = await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.waitForTimeout(1500);
+    await assertNotRateLimited(page, 'tiktok', 'post');
+    const verdict = parseVideoDetail(await readRehydration(page));
+    if (verdict.state === 'ok') return itemToPostRow(verdict.item, { sourceInput });
+    if (verdict.state === 'not_found' || response?.status() === 404) {
+        return makePostRow({ platform: 'tiktok', sourceInput, postUrl, status: 'not_found' });
+    }
+    if (verdict.state === 'private') {
+        return makePostRow({ platform: 'tiktok', sourceInput, postUrl, status: 'private' });
+    }
+    await saveDiagnostics(page, await page.content(), 'post_tiktok', { httpStatus: response?.status() ?? null });
+    return makePostRow({
+        platform: 'tiktok',
+        sourceInput,
+        postUrl,
+        status: 'blocked',
+        statusDetail:
+            'TikTok page loaded but the embedded video data was missing or unrecognised (block, challenge, or a layout change) - see DIAG_post_tiktok',
+    });
+}
+
 // ---------- comments ----------
 
 export async function fetchComments({
