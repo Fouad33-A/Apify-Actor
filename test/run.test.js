@@ -10,7 +10,8 @@ vi.mock('apify', () => ({
 
 const post = (n) => ({ postUrl: `https://x/p/${n}/` });
 
-function harness({ input = {}, cap = 1000, mod = {} } = {}) {
+function harness({ input: inputOverride = {}, cap = 1000, mod = {} } = {}) {
+    const input = { platform: 'instagram', ...inputOverride };
     const pushed = [];
     const rateLimitErrors = [];
     const budget = new BudgetTracker(cap);
@@ -107,8 +108,42 @@ describe('runMode: profile (Mode A)', () => {
             .mockResolvedValueOnce({ profile: { id: 'B' }, posts: [] });
         const h = harness({ input: { usernames: ['a', 'b'] }, mod: { lookupProfile } });
         await h.run('profile');
-        expect(h.pushed.map((r) => r.id)).toEqual(['B']);
+        // the failed lookup is reported as a row (never silently dropped), then the next username runs
+        expect(h.pushed[0]).toMatchObject({
+            recordType: 'profile',
+            platform: 'instagram',
+            sourceInput: 'a',
+            username: 'a',
+            status: 'error',
+            statusDetail: 'Lookup failed: boom',
+            followerCount: null,
+        });
+        expect(h.pushed.map((r) => r.id)).toEqual([undefined, 'B']);
         expect(h.rateLimitErrors).toEqual([]);
+    });
+
+    it('an error row carries only the first line of the message, truncated', async () => {
+        const lookupProfile = vi.fn().mockRejectedValue(new Error(`first line ${'x'.repeat(500)}\nsecond line`));
+        const h = harness({ input: { usernames: ['a'] }, mod: { lookupProfile } });
+        await h.run('profile');
+        expect(h.pushed[0].statusDetail).not.toMatch(/second line/);
+        expect(h.pushed[0].statusDetail.length).toBeLessThanOrEqual('Lookup failed: '.length + 300);
+    });
+
+    it('a failed comment fetch is reported as an error row and the run continues', async () => {
+        const fetchComments = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('page broke'))
+            .mockResolvedValueOnce([{ id: 'c' }]);
+        const h = harness({ input: { postUrls: ['https://x/p/1/', 'https://x/p/2/'] }, mod: { fetchComments } });
+        await h.run('comments');
+        expect(h.pushed[0]).toMatchObject({
+            recordType: 'comment',
+            postUrl: 'https://x/p/1/',
+            status: 'error',
+            statusDetail: 'Comment fetch failed: page broke',
+        });
+        expect(h.pushed[1].id).toBe('c');
     });
 
     it('a rate limit stops the whole run (fail fast) and is recorded', async () => {
@@ -214,7 +249,12 @@ describe('runMode: search (Mode B)', () => {
         const h = harness({ input: { searchQueries: [{ query: 'a' }, { query: 'b' }] }, mod: { searchPosts } });
         await expect(h.run('search')).resolves.toBeUndefined();
         expect(searchPosts).toHaveBeenCalledTimes(2);
-        expect(h.pushed).toEqual([]);
+        // one error row per query instead of a silent empty dataset
+        expect(h.pushed.map((r) => [r.recordType, r.sourceInput, r.status])).toEqual([
+            ['post', 'a', 'error'],
+            ['post', 'b', 'error'],
+        ]);
+        expect(h.pushed[0].statusDetail).toMatch(/Search failed: not yet implemented/);
     });
 });
 

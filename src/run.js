@@ -14,8 +14,14 @@
 import { log } from 'apify';
 
 import { RateLimitError } from './errors.js';
+import { makeCommentRow, makePostRow, makeProfileRow } from './schema.js';
 
 export async function runMode({ mode, mod, page, input, budget, pushData, rateLimitErrors }) {
+    const platform = input.platform ?? null;
+    const reason = (err) =>
+        String(err?.message ?? err)
+            .split('\n')[0]
+            .slice(0, 300);
     const {
         usernames = [],
         searchQueries = [],
@@ -54,6 +60,16 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 return true;
             }
             log.exception(err, `Comment fetch failed for ${postUrl}`);
+            await write(
+                'comment',
+                makeCommentRow({
+                    platform,
+                    sourceInput,
+                    postUrl,
+                    status: 'error',
+                    statusDetail: `Comment fetch failed: ${reason(err)}`,
+                }),
+            );
         }
         return false;
     }
@@ -80,6 +96,17 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     return; // fail fast - don't keep hammering a platform that just rate-limited us
                 }
                 log.exception(err, `Profile lookup failed for ${username}`);
+                // Never silently drop a failed lookup: report it as a row.
+                await write(
+                    'profile',
+                    makeProfileRow({
+                        platform,
+                        sourceInput: username,
+                        username,
+                        status: 'error',
+                        statusDetail: `Lookup failed: ${reason(err)}`,
+                    }),
+                );
             }
         }
     } else if (mode === 'search') {
@@ -106,6 +133,15 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     return;
                 }
                 log.exception(err, `Search failed for query "${q.query}"`);
+                await write(
+                    'post',
+                    makePostRow({
+                        platform,
+                        sourceInput: q.query,
+                        status: 'error',
+                        statusDetail: `Search failed: ${reason(err)}`,
+                    }),
+                );
             }
         }
     } else if (mode === 'comments') {

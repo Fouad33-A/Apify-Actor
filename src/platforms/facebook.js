@@ -90,12 +90,16 @@ export function domExtractProfile() {
         while (anchor.parentElement && anchor.parentElement !== main && !anchor.previousElementSibling) {
             anchor = anchor.parentElement;
         }
-        const candidate = anchor.previousElementSibling;
+        // Skip elements that are not visible content (style/script/svg...) when looking for the bio.
+        const notContent = new Set(['STYLE', 'SCRIPT', 'NOSCRIPT', 'SVG', 'TEMPLATE', 'LINK', 'META']);
+        let candidate = anchor.previousElementSibling;
+        while (candidate && notContent.has(candidate.tagName.toUpperCase()))
+            candidate = candidate.previousElementSibling;
         // The bio may be a <span> or a wrapper <div> around one. The heading before it is "Intro", so a Page
         // with no bio (whose nearest earlier sibling is that heading) yields null.
-        const before = candidate && !/^intro$/i.test(candidate.innerText.trim()) ? candidate : null;
-        const bioText = before ? before.innerText.trim() : '';
-        bio = bioText || null;
+        // Non-HTML siblings (an <svg>, <style>) have no innerText: treat them as "no bio here", never throw.
+        const candidateText = candidate && typeof candidate.innerText === 'string' ? candidate.innerText.trim() : '';
+        bio = candidateText && !/^intro$/i.test(candidateText) ? candidateText : null;
 
         const catButton = [...introList.querySelectorAll('[role="button"]')].find((b) => b.querySelector('strong'));
         if (catButton) {

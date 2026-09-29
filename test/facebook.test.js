@@ -656,3 +656,20 @@ describe('comment badges and post-page enrichment', () => {
         expect(posts[0].statusDetail).not.toMatch(/caption is truncated/);
     }, 60_000);
 });
+
+describe('robustness (regression: build 0.0.20 threw on every Page)', () => {
+    it('a non-HTML element (svg) before the intro list does not throw; the bio is simply null', async () => {
+        const html = fbPage({ bio: '' }).replace('<div><ul>', '<svg width="1" height="1"></svg><div><ul>');
+        const dom = await evaluate(html, domExtractProfile);
+        expect(dom).toMatchObject({
+            pageName: 'NASA - National Aeronautics and Space Administration',
+            bio: null,
+            category: 'Government organization',
+        });
+    });
+
+    it('a <style> element before the list does not throw either', async () => {
+        const html = fbPage({ bio: '' }).replace('<div><ul>', '<style>.x{}</style><div><ul>');
+        expect((await evaluate(html, domExtractProfile)).bio).toBeNull();
+    });
+});

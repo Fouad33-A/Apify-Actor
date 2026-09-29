@@ -1,69 +1,51 @@
-# Handoff notes (2026-09-29, cloud Claude Code session)
+# Handoff notes (final state, code version 0.6.x, Apify build 0.0.20)
 
-Nothing here has been run on Apify. Tests use synthetic fixtures in a local headless Chromium; they check the logic, not the real Instagram/Facebook pages.
+Everything below was verified with real runs on Apify (residential proxy, no login, no cookies, `fouad_dp/my-actor`) unless marked otherwise. Total test spend was well under the agreed cap.
 
-## 1. Ready to carry over to the Apify Web IDE
+## 1. What works (live-verified)
 
-GitHub does not auto-deploy. Copy these into the Web IDE, save, build:
+| Feature                                                      | Status                                                                                           |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| TikTok profile (`@nasa`)                                     | Exact followers/following/likes/videos, bio, verified, account age. Unknown user -> `not_found`. |
+| Instagram profile (`nasa`)                                   | Display name, bio, link, exact followers, following, posts count, verified.                      |
+| Instagram posts                                              | Real caption, likes and comment count (rounded, flagged), exact date.                            |
+| Instagram comments (Mode C)                                  | Real comments with exact ISO timestamps (those shown logged out).                                |
+| Facebook Page (`NASA`, `natgeo`, `Cristiano`, `NASAKennedy`) | Name, exact followers, following, category, unwrapped links, contact email, verified.            |
+| Facebook posts + comments                                    | Post link, reactions, caption, a few comments (relative times only).                             |
 
-| File                         | Change                                                             |
-| ---------------------------- | ------------------------------------------------------------------ |
-| `src/proxy.js`               | **new** - splits the proxy URL into `server`/`username`/`password` |
-| `src/main.js`                | uses `toPlaywrightProxy()`; run loop moved to `run.js`             |
-| `src/run.js`                 | **new** - run loop; Mode C fix; fail-fast on comment rate limits   |
-| `src/platforms/facebook.js`  | `CONTROL_WORDS` moved inside `domExtractProfile`                   |
-| `src/platforms/instagram.js` | only `export` keywords added (plus lint autofixes)                 |
-| `src/cookies.js`             | accepts a leading `Cookie:` prefix                                 |
+Not built: Mode B (search) on any platform, TikTok videos/comments, Facebook comment counts beyond what a post page labels. These return `error` rows.
 
-`package.json` dev dependencies, tests, lint and CI files do not affect the Actor and need no carry-over. `src/routes.js` (unused template code) was deleted; deleting it in the Web IDE is optional. The Prettier commit only changes whitespace/quotes, so it does not matter which style you paste.
+**Last live check (build 0.0.20)** found one regression: every Facebook lookup threw (an `<svg>` sibling crashed the bio detection) and the run silently wrote nothing. Fixed in 0.6.1 with regression tests and by making all failures visible as `status: "error"` rows. **That fix is confirmed by tests only; it needs one more build and a run.**
 
-**Do this first, and carry it over as one batch:** `proxy.js` + `main.js` + `run.js`.
+## 2. How it is deployed
 
-### Why the proxy change matters (probable cause of the 407)
+Actor source is the GitHub branch `claude/apify-actor-handover-3w6phm`, linked in Apify Console (Source -> Git repository). Builds are triggered from the Console **Build** button (or automatically if "Automatic builds" is enabled). `.actor/`, `Dockerfile` (image `apify/actor-node-playwright-chrome:20-1.60.0`, `npm ci --omit=dev`) and `package.json` (Playwright pinned to 1.60.0 to match the image) must stay in sync.
 
-`main.js` passed `proxy: { server: "http://user:pass@proxy.apify.com:8000" }` to `chromium.launch`. Chromium ignores credentials embedded in a proxy URL, so it never sends `Proxy-Authorization`, and an authenticating proxy answers 407. That matches every symptom: 407 on all proxy types, no bytes or domain in Apify's proxy usage, and a proxy-off control that works.
+## 3. Why the original problems happened
 
-Reproduced locally against a fake authenticating proxy:
+- **HTTP 407:** Chromium ignores credentials embedded in the proxy URL; they are now split into `username`/`password` (`src/proxy.js`).
+- **Facebook Mode A never worked:** a module-level constant used inside `page.evaluate` (not serialised into the page).
+- **Login walls:** Instagram's profile page is intermittently login-walled for logged-out visitors; its public embed page and post pages are not. TikTok and Facebook render fully.
+- **False rate-limit stops:** rate-limit words appear inside script bundles (TikTok ships "captcha"); detection now reads visible text only.
+- **Page language:** the proxy country changed Facebook's language; the browser context now asks for `en-US`.
 
-- credentials in the URL: proxy sees no auth header, Chromium fails with `ERR_INVALID_AUTH_CREDENTIALS`
-- separate `username`/`password` fields: HTTP 200
+## 4. Diagnostics tools (kept on purpose)
 
-This is not yet confirmed against Apify's real proxy. After carrying over, one minimal run settles it: Instagram Mode A, `@nasa`, 512 MB, short timeout, `maxItemsPerRun=2`, a small hard cost cap. Whether to tell Apify support about this is Fouad's call.
+- `mode: "probe"` fetches up to 12 public URLs on the three platforms and saves status/text/DOM outline/JSON path to the `PROBE_RESULTS` record. It reports login walls; it never tries to get past them.
+- `DIAG_*` records are written when a page is unrecognised. `OUTPUT.runtime` records code version, build number and proxy status.
+- The temporary `DEBUG_HTML_*` / `DEBUG_SHOT_*` saves in `instagram.js` can be removed.
 
-### The other real bugs fixed
+## 5. Known limits and follow-ups
 
-- **Facebook Mode A threw `ReferenceError: CONTROL_WORDS is not defined` on every run.** `page.evaluate` serialises only the function body, so the module-level constant did not exist in the page. It could not have worked through the actor; the earlier check was done by hand in a browser console.
-- **Mode C did nothing unless `fetchComments` was also true.** It now always fetches comments.
-- **A rate limit during comment fetching did not stop the run.** It now does, like lookups and searches.
+- Selector work is based on layouts captured on 2026-09-29; platforms change markup. Tests use synthetic content in the captured shapes, so they prove the logic, not that the sites are unchanged. Re-run a small live check after any platform-side change.
+- Instagram `likeCount`/`commentCount` come from the post's og:description and are rounded when shown as "117K".
+- Facebook `likeCount` is the total reactions as displayed; comment/share counts are only set when the post page labels them.
+- Instagram embed fallback has no bio/following/links.
+- Anonymous visitors see only some posts/comments on Facebook and Instagram.
+- Mode B: Instagram/Facebook keyword search generally needs a logged-in session (not used). TikTok search is the most heavily protected surface; TikTok One for Partners already covers TikTok discovery.
+- TikTok videos/comments and Facebook post pagination are not built.
+- If cookies are ever needed, put them in secret Actor environment variables; never in the repo or chat.
 
-## 2. Suspected issues NOT changed (need a real page to confirm)
+## 6. Cost notes
 
-1. `checkPageForRateLimit` tests the full page HTML (`page.content()`, scripts included). Markers like `/rate limit/i`, `/captcha/i`, `/try again later/i` could match ordinary script text and stop a healthy run. Consider testing visible text instead once a real page can be inspected.
-2. Instagram bio: with exactly one external link there is no "... and N more" line, so the link's own text is probably appended to `bio`.
-3. Instagram post like count is the first "N likes" leaf in document order. If a post hides likes but a comment shows "N likes" as a single element, the comment's count could be reported as the post's.
-4. Instagram `isReply` is always `false`. With `topLevelCommentsOnly=false`, expanded replies are emitted as top-level comments.
-5. The profile grid selector `main a[href*="/p/"]` does not match `/reel/` links, so reels are likely missing from recent posts.
-6. Failed lookups (any non-rate-limit error) are only logged; no dataset row is written. `schema.js` says a failed lookup should never be silently dropped, but the status enum has no `error`. The same happens for Mode B/C on Facebook and TikTok: a successful exit and an empty dataset. Worth a schema decision (add an `error` status row).
-7. `makeProfileRow` does not default `status`; a caller that forgets it produces `undefined`.
-8. `waitUntil: "networkidle"` with a 60 s timeout may be slow or expensive on pages that never go idle; `domcontentloaded` plus waiting for the header could be cheaper.
-9. The temporary diagnostics in `main.js` and `instagram.js` (proxy logging, `DEBUG_*` saves) can be removed once the proxy question is settled.
-10. `README.md` is still the Apify Cheerio template text, which is what the Actor's page shows.
-
-## 3. Blocked: Facebook posts extraction
-
-Needs live DOM research on a real public Page. This session has no browsing tool that can safely do that (the Apify-run browsing tools would spend Fouad's account budget). `domExtractPosts` still returns `[]` on purpose.
-
-## 4. Mode B (search) - options only, nothing built
-
-These are hypotheses from general knowledge, not observations; each must be checked with a real session before designing anything.
-
-- **Instagram:** keyword and hashtag search generally sits behind login. It would need the `sessionCookies` input, with account-restriction risk on the account used.
-- **Facebook:** search results pages generally require login and use a different layout from a Page. Same cookie and risk considerations.
-- **TikTok:** search works in a normal browser but is the most heavily bot-protected surface.
-- **Existing alternative:** TikTok One for Partners already gives keyword search with follower, median-view and engagement filters, and the YouTube screener covers YouTube. So Mode B may not be worth building for TikTok discovery.
-
-Suggested order if it is wanted at all: validate TikTok Mode A first, then investigate TikTok search. Instagram and Facebook Mode B last, only with an explicit decision to accept the login-session risk.
-
-## 5. TikTok - risk assessment only
-
-Not started, per instruction. Known risk: earlier HTTP 403s even when authenticated, likely signature-based anti-bot checks. Playwright is a real browser, which may help, but that is unproven. A residential proxy may be needed, which costs more per GB; that is Fouad's decision. Suggested first step once approved: one tiny run on a single public profile, capped in cost, and stop at the first block.
+Residential proxy is billed per GB; a profile + a few posts is a few MB. Each verification round in this session cost cents. The account's $85/month limit was never approached.
