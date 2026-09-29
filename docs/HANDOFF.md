@@ -1,4 +1,4 @@
-# Handoff notes (final state, code version 0.6.x, Apify build 0.0.20)
+# Handoff notes (final state, code version 0.6.1, Apify build 0.0.21)
 
 Everything below was verified with real runs on Apify (residential proxy, no login, no cookies, `fouad_dp/my-actor`) unless marked otherwise. Total test spend was well under the agreed cap.
 
@@ -15,7 +15,7 @@ Everything below was verified with real runs on Apify (residential proxy, no log
 
 Not built: Mode B (search) on any platform, TikTok videos/comments, Facebook comment counts beyond what a post page labels. These return `error` rows.
 
-**Last live check (build 0.0.20)** found one regression: every Facebook lookup threw (an `<svg>` sibling crashed the bio detection) and the run silently wrote nothing. Fixed in 0.6.1 with regression tests and by making all failures visible as `status: "error"` rows. **That fix is confirmed by tests only; it needs one more build and a run.**
+**Last live checks:** build 0.0.20 found a regression (every Facebook lookup threw on an `<svg>` sibling and the run silently wrote nothing). Fixed in 0.6.1 (regression tests, plus every failed lookup/comment fetch/search now writes a `status: "error"` row). **Build 0.0.21 re-verified Facebook live:** bio, exact followers, links and contact email on NASA, National Geographic and Cristiano Ronaldo; a reel post with full caption and views; a regular post with reactions, comment and share counts; comments. NASA's first item was an event card and was correctly skipped (no post row). TikTok and Instagram were verified on 0.0.20 and are unchanged since.
 
 ## 2. How it is deployed
 
