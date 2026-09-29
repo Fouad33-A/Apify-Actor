@@ -31,7 +31,8 @@
             "type": "array",
             "editor": "stringList",
             "description": "Handles/usernames to look up, without @ or full URL (e.g. \"nasa\").",
-            "default": []
+            "default": [],
+            "prefill": ["nasa"]
         },
         "searchQueries": {
             "title": "Search queries (Mode B)",
@@ -59,7 +60,8 @@
             "type": "integer",
             "default": 25,
             "minimum": 0,
-            "description": "Maximum number of recent posts to fetch per profile (Mode A)."
+            "description": "Maximum number of recent posts to fetch per profile (Mode A).",
+            "prefill": 3
         },
         "fetchComments": {
             "title": "Also fetch comments (combined mode)",
@@ -92,7 +94,8 @@
             "type": "integer",
             "description": "Internal safety net in addition to the Actor run own maxItems/maxTotalChargeUsd call options.",
             "default": 2000,
-            "minimum": 1
+            "minimum": 1,
+            "prefill": 20
         },
         "sessionCookies": {
             "title": "Login session cookie header (this platform only)",
@@ -106,9 +109,14 @@
             "type": "object",
             "editor": "proxy",
             "default": {
-                "useApifyProxy": true
+                "useApifyProxy": true,
+                "apifyProxyGroups": ["RESIDENTIAL"]
             },
-            "description": "Proxy configuration to use for requests."
+            "description": "Proxy configuration to use for requests. RESIDENTIAL is the default because these platforms block datacenter addresses much more often.",
+            "prefill": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": ["RESIDENTIAL"]
+            }
         },
         "debugProbes": {
             "title": "Diagnostic probes (mode = probe only)",
