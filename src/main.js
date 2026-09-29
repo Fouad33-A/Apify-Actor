@@ -1,8 +1,9 @@
 import { Actor, log } from "apify";
 import { chromium } from "playwright";
 import { BudgetTracker } from "./budget.js";
-import { RateLimitError } from "./errors.js";
 import { parseCookieHeader } from "./cookies.js";
+import { toPlaywrightProxy } from "./proxy.js";
+import { runMode } from "./run.js";
 import { makeRunSummary } from "./schema.js";
 
 import * as instagram from "./platforms/instagram.js";
@@ -22,14 +23,6 @@ const input = await Actor.getInput();
 const {
   mode,
   platform,
-  usernames = [],
-  searchQueries = [],
-  postUrls = [],
-  maxResultsPerQuery = 25,
-  maxRecentPosts = 25,
-  fetchComments = false,
-  maxCommentsPerPost = 20,
-  topLevelCommentsOnly = true,
   maxItemsPerRun = 2000,
   sessionCookies = "",
   proxyConfiguration: proxyInput = { useApifyProxy: true },
@@ -77,7 +70,7 @@ try {
 
 const browser = await chromium.launch({
   headless: true,
-  proxy: proxyUrl ? { server: proxyUrl } : undefined,
+  proxy: toPlaywrightProxy(proxyUrl),
 });
 const context = await browser.newContext();
 
@@ -88,102 +81,8 @@ if (sessionCookies) {
 
 const page = await context.newPage();
 
-async function writeProfile(profile) {
-  if (!budget.record("profile")) return false;
-  await Actor.pushData(profile);
-  return true;
-}
-async function writePost(post) {
-  if (!budget.record("post")) return false;
-  await Actor.pushData(post);
-  return true;
-}
-async function writeComment(comment) {
-  if (!budget.record("comment")) return false;
-  await Actor.pushData(comment);
-  return true;
-}
-
-async function handleCommentsForPost(postUrl, sourceInput) {
-  if (!fetchComments) return;
-  if (!budget.canWriteMore()) return;
-  try {
-    const comments = await mod.fetchComments({
-      page,
-      postUrl,
-      sourceInput,
-      maxComments: maxCommentsPerPost,
-      topLevelOnly: topLevelCommentsOnly,
-    });
-    for (const c of comments) {
-      if (!(await writeComment(c))) break;
-    }
-  } catch (err) {
-    if (err instanceof RateLimitError) {
-      rateLimitErrors.push(err.toRecord());
-      log.warning(err.message);
-    } else {
-      log.exception(err, `Comment fetch failed for ${postUrl}`);
-    }
-  }
-}
-
 try {
-  if (mode === "profile") {
-    for (const username of usernames) {
-      if (!budget.canWriteMore()) break;
-      try {
-        const { profile, posts } = await mod.lookupProfile({
-          page, username, sourceInput: username, maxRecentPosts,
-        });
-        await writeProfile(profile);
-        for (const post of posts) {
-          if (!(await writePost(post))) break;
-          await handleCommentsForPost(post.postUrl, username);
-        }
-      } catch (err) {
-        if (err instanceof RateLimitError) {
-          rateLimitErrors.push(err.toRecord());
-          log.warning(err.message);
-          break; // fail fast - don't keep hammering a platform that just rate-limited us
-        }
-        log.exception(err, `Profile lookup failed for ${username}`);
-      }
-    }
-  } else if (mode === "search") {
-    for (const q of searchQueries) {
-      if (!budget.canWriteMore()) break;
-      try {
-        const results = await mod.searchPosts({
-          page,
-          query: q.query,
-          sortOrder: q.sortOrder || "relevance",
-          maxResults: q.maxResults || maxResultsPerQuery,
-          dateFrom: q.dateFrom || null,
-          dateTo: q.dateTo || null,
-          sourceInput: q.query,
-        });
-        for (const post of results) {
-          if (!(await writePost(post))) break;
-          await handleCommentsForPost(post.postUrl, q.query);
-        }
-      } catch (err) {
-        if (err instanceof RateLimitError) {
-          rateLimitErrors.push(err.toRecord());
-          log.warning(err.message);
-          break;
-        }
-        log.exception(err, `Search failed for query "${q.query}"`);
-      }
-    }
-  } else if (mode === "comments") {
-    for (const url of postUrls) {
-      if (!budget.canWriteMore()) break;
-      await handleCommentsForPost(url, url);
-    }
-  } else {
-    throw new Error(`Unknown mode "${mode}"`);
-  }
+  await runMode({ mode, mod, page, input, budget, pushData: (row) => Actor.pushData(row), rateLimitErrors });
 } finally {
   await browser.close();
 }

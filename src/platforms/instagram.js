@@ -75,7 +75,7 @@ const DOMAIN = "www.instagram.com";
 
 // ---- legacy JSON-blob extraction (kept as a harmless fallback in case
 // Instagram brings the old shape back for some accounts/builds) ----
-function extractProfileJson(html) {
+export function extractProfileJson(html) {
   const scriptRe = /<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/g;
   let match;
   while ((match = scriptRe.exec(html)) !== null) {
@@ -91,7 +91,7 @@ function extractProfileJson(html) {
   return null;
 }
 
-function findUserNode(json) {
+export function findUserNode(json) {
   if (!json) return null;
   const candidates = [json?.graphql?.user, json?.data?.user, json?.user];
   for (const c of candidates) {
@@ -107,7 +107,7 @@ function findUserNode(json) {
 // external link(s) / verified badge - in that order, but located by regex
 // on each line rather than fixed indices, so a missing full name or an
 // extra line doesn't shift everything else out of place.
-function domExtractProfile() {
+export function domExtractProfile() {
   const header = document.querySelector("header");
   if (!header) return null;
 
@@ -245,7 +245,7 @@ function domExtractProfile() {
 // Runs inside a single post's page. Pulls publish date (exact, from the
 // <time> element), like count if shown (some accounts hide it - that's a
 // real null, not a failure), and a best-effort view count for video posts.
-function domExtractPostMetrics() {
+export function domExtractPostMetrics() {
   const times = [...document.querySelectorAll("time")];
   const publishTime = times[0] || null;
 
@@ -298,7 +298,7 @@ function domExtractPostMetrics() {
 // be the exact single-comment text boundary (see file header note). The
 // very first <time> on the page is the post's own publish time, not a
 // comment, and is skipped.
-function domExtractComments(maxComments) {
+export function domExtractComments(maxComments) {
   const times = [...document.querySelectorAll("time")];
   if (times.length < 2) return [];
   const controlRe = /^(reply|see translation|hide|pin(ned)?|unpin|\d+[\d,]*\s*likes?|like)$/i;

@@ -44,24 +44,27 @@ import { checkPageForRateLimit } from "../errors.js";
 
 const DOMAIN = "www.facebook.com";
 
-const CONTROL_WORDS = new Set([
-  "sign up",
-  "log in",
-  "follow",
-  "following",
-  "message",
-  "call",
-  "email",
-  "directions",
-  "search this page",
-  "liked",
-  "like",
-  "share",
-  "more",
-]);
 
 // Runs inside the page. See file header for what was verified and how.
-function domExtractProfile() {
+export function domExtractProfile() {
+  // Must live inside this function: page.evaluate serialises only the function
+  // body, so a module-level constant would be a ReferenceError in the page.
+  const CONTROL_WORDS = new Set([
+    "sign up",
+    "log in",
+    "follow",
+    "following",
+    "message",
+    "call",
+    "email",
+    "directions",
+    "search this page",
+    "liked",
+    "like",
+    "share",
+    "more",
+  ]);
+
   const main = document.querySelector('[role="main"]');
   if (!main || !main.children.length) return null;
   const introCard = main.children[0];
@@ -156,7 +159,7 @@ function domExtractProfile() {
 // risking silently wrong data on the others. Needs its own live-test pass
 // (ideally the actor's real run, once the Apify proxy issue is fixed)
 // before being built for real, same discipline as instagram.js's Mode B.
-function domExtractPosts() {
+export function domExtractPosts() {
   return [];
 }
 

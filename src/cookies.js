@@ -8,6 +8,8 @@
 export function parseCookieHeader(header, domain) {
   if (!header || !header.trim()) return [];
   return header
+    .trim()
+    .replace(/^cookie:\s*/i, "")
     .split(";")
     .map((pair) => pair.trim())
     .filter(Boolean)
