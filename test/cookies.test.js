@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseCookieHeader } from '../src/cookies.js';
+import { parseCookieHeader, resolveSessionCookies } from '../src/cookies.js';
 
 describe('parseCookieHeader', () => {
     it('parses name=value pairs into Playwright cookie objects', () => {
@@ -34,5 +34,33 @@ describe('parseCookieHeader', () => {
     it("tolerates a leading 'Cookie:' prefix as copied from DevTools request headers", () => {
         const cookies = parseCookieHeader('Cookie: sessionid=abc; csrftoken=xyz', 'www.instagram.com');
         expect(cookies.map((c) => c.name)).toEqual(['sessionid', 'csrftoken']);
+    });
+});
+
+describe('resolveSessionCookies', () => {
+    it('the input wins', () => {
+        expect(
+            resolveSessionCookies({ input: 'a=1', env: { SESSION_COOKIES_TIKTOK: 'b=2' }, platform: 'tiktok' }),
+        ).toEqual({
+            header: 'a=1',
+            source: 'input',
+        });
+    });
+    it('falls back to the platform environment variable', () => {
+        expect(
+            resolveSessionCookies({ input: '', env: { SESSION_COOKIES_TIKTOK: 'b=2' }, platform: 'tiktok' }),
+        ).toEqual({
+            header: 'b=2',
+            source: 'environment',
+        });
+    });
+    it("does not use another platform's variable, and returns nothing when none is set", () => {
+        expect(resolveSessionCookies({ env: { SESSION_COOKIES_INSTAGRAM: 'x=1' }, platform: 'tiktok' })).toEqual({
+            header: '',
+            source: null,
+        });
+        expect(
+            resolveSessionCookies({ input: '  ', env: { SESSION_COOKIES_TIKTOK: '  ' }, platform: 'tiktok' }).source,
+        ).toBeNull();
     });
 });

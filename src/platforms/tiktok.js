@@ -19,7 +19,13 @@ import { extractEmails, makeCommentRow, makePostRow, makeProfileRow, parseAbbrev
 const DOMAIN = 'www.tiktok.com';
 
 // How long to wait for the page's own data calls. Exported so tests can shorten them.
-export const timing = { listWaitMs: 15_000, commentWaitMs: 10_000, commentRetryWaitMs: 8000, nextPageWaitMs: 8000 };
+export const timing = {
+    listWaitMs: 15_000,
+    commentWaitMs: 10_000,
+    commentRetryWaitMs: 8000,
+    nextPageWaitMs: 8000,
+    embedWaitMs: 10_000,
+};
 
 export function normalizeTiktokUsername(input) {
     return String(input)
@@ -331,21 +337,41 @@ export function domExtractCreatorEmbed() {
     };
 }
 
-// Loads the embed page; returns { header, videos } or null when it is not available.
+// Loads the embed page; returns { header, videos } or null when it is not available. The video links render a
+// moment after the page loads, so wait for them (not a fixed delay). If none appear, a DIAG_embed_<user> record
+// keeps what was seen.
 async function loadCreatorEmbed(page, username) {
+    let failure = null;
     try {
         await page.goto(`https://${DOMAIN}/embed/@${encodeURIComponent(username)}`, {
             waitUntil: 'domcontentloaded',
             timeout: 45_000,
         });
-        await page.waitForTimeout(2500);
+        await page
+            .waitForSelector('a[href*="/video/"], a[href*="/photo/"]', { timeout: timing.embedWaitMs })
+            .catch(() => {
+                // no video links yet: read whatever the page shows
+            });
         await assertNotRateLimited(page, 'tiktok', 'creator embed');
         const { text, anchors } = await page.evaluate(domExtractCreatorEmbed);
-        return { header: parseCreatorEmbedText(text), videos: parseEmbedVideos(anchors) };
+        const result = { header: parseCreatorEmbedText(text), videos: parseEmbedVideos(anchors) };
+        if (!result.videos.length) {
+            await saveDiagnostics(page, await page.content(), `embed_${username}`, {
+                anchors: anchors.length,
+                headerParsed: Boolean(result.header),
+            });
+        }
+        return result;
     } catch (err) {
         if (err?.name === 'RateLimitError') throw err;
-        return null; // the embed is an extra route: absence is handled by the caller
+        failure = String(err?.message ?? err).split('\n')[0];
     }
+    try {
+        await saveDiagnostics(page, '', `embed_${username}`, { error: failure });
+    } catch {
+        // diagnostics are best effort
+    }
+    return null; // the embed is an extra route: absence is handled by the caller
 }
 
 // ---------- profile + recent videos ----------

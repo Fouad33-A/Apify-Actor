@@ -3,7 +3,7 @@ import { chromium } from 'playwright';
 
 import { BudgetTracker } from './budget.js';
 import { makeCharger } from './charging.js';
-import { parseCookieHeader } from './cookies.js';
+import { parseCookieHeader, resolveSessionCookies } from './cookies.js';
 import { CostTracker } from './cost.js';
 import { runtimeInfo } from './diagnostics.js';
 import * as facebook from './platforms/facebook.js';
@@ -121,9 +121,14 @@ const context = await browser.newContext({
 
 await cost.attach(context, { blockHeavyResources });
 
-if (sessionCookies) {
-    const cookies = parseCookieHeader(sessionCookies, PLATFORM_DOMAINS[platform]);
+// Never logged: only how many cookies were applied and where they came from.
+const session = resolveSessionCookies({ input: sessionCookies, platform });
+let sessionCookiesApplied = 0;
+if (session.header) {
+    const cookies = parseCookieHeader(session.header, PLATFORM_DOMAINS[platform]);
     if (cookies.length) await context.addCookies(cookies);
+    sessionCookiesApplied = cookies.length;
+    log.info(`Session cookies applied: ${cookies.length} (from ${session.source})`);
 }
 
 const charger = makeCharger({ actor: Actor, budget, warn: (m) => log.warning(m) });
@@ -171,7 +176,12 @@ await Actor.setValue('OUTPUT', {
     ...summary,
     cost: cost.report({ platformUsage }),
     charging: charger.summary(),
-    runtime: { ...runtimeInfo(), proxyUsed: Boolean(proxyUrl), proxyGroups: proxyConfiguration?.groups ?? null },
+    runtime: {
+        ...runtimeInfo(),
+        sessionCookiesApplied,
+        proxyUsed: Boolean(proxyUrl),
+        proxyGroups: proxyConfiguration?.groups ?? null,
+    },
 });
 log.info('Run summary', summary);
 
