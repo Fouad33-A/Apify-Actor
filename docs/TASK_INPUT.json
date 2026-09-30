@@ -1,10 +1,11 @@
 {
     "mode": "discover",
+    "platform": "instagram",
     "searchKeywords": ["budgeting for beginners"],
     "excludeWords": ["course", "coach"],
     "discoverPlatforms": ["instagram", "facebook", "tiktok"],
-    "searchEngines": ["bing", "duckduckgo", "brave"],
-    "maxSearchPages": 2,
+    "searchEngines": ["google", "bing"],
+    "maxSearchPages": 3,
     "maxCandidates": 30,
     "excludeUsernames": [],
     "minFollowers": 10000,
@@ -64,6 +65,7 @@
     "maxConcurrentRuns": 2,
     "proxyConfiguration": {
         "useApifyProxy": true,
-        "apifyProxyGroups": ["RESIDENTIAL"]
+        "apifyProxyGroups": ["RESIDENTIAL"],
+        "apifyProxyCountry": "US"
     }
 }

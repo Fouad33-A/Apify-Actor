@@ -22,7 +22,18 @@ import { DEFAULT_SCORECARD, postStats, scoreRow, warnHits } from './scorecard.js
 import { pickSiteUrls, scanCreatorSites } from './sitescan.js';
 import { DEFAULT_ENGINES, discoverByWebSearch, orderCandidates } from './websearch.js';
 
-export async function runMode({ mode, mod, mods = {}, page, input, budget, pushData, rateLimitErrors, report = {} }) {
+export async function runMode({
+    mode,
+    mod,
+    mods = {},
+    serpProxyUrl = null,
+    page,
+    input,
+    budget,
+    pushData,
+    rateLimitErrors,
+    report = {},
+}) {
     const platform = input.platform ?? null;
     const reason = (err) =>
         String(err?.message ?? err)
@@ -618,6 +629,7 @@ export async function runMode({ mode, mod, mods = {}, page, input, budget, pushD
             platforms: discoverPlatforms,
             engines: searchEngines,
             maxPages: maxSearchPages,
+            serpProxyUrl,
             shouldContinue,
             log: (m) => log.warning(m),
         });

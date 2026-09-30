@@ -26,7 +26,7 @@ Only these two fields in the Task input (Console, or the Apify MCP "run task" ca
 
 ## What happens in one run
 
-1. Every keyword is searched on the public web for Instagram, Facebook and TikTok accounts (Bing first; DuckDuckGo and Brave are used only if the first answers with a bot check or nothing).
+1. Every keyword is searched on the public web for Instagram, Facebook and TikTok accounts. Google is asked first through Apify's own Google SERP proxy (plain HTTP, billed per search by the platform, no secret needed from you); Bing is the fallback. DuckDuckGo and Brave show CAPTCHAs to automated browsers and are only tried if listed.
 2. Up to `maxCandidates` (30) accounts are opened, the three platforms taking turns. Follower counts shown by the search engines are **not** used: each account is re-read from its own page.
 3. **A rules (hard filters):** followers 10,000 to 150,000; bio, bio links, link-in-bio pages and the creator's own website checked for the sells-courses/e-books words; management/agency e-mail in the bio; not found / private / blocked; duplicates skipped.
 4. **B score (max 60)** for the profiles that passed: B1 not monetised 20, B2 engagement 15, B3 size 10, B4 reachable by e-mail 10, B5 posts per week 5. Profiles below `minScore` 25 fail with the numbers.
@@ -42,6 +42,10 @@ TikTok hides most post data when logged out. A TikTok account that passes the ha
 - **Dataset:** one row per account with `scorecard` (points per rule), `scoreTotal`, `scoreMax`, `scoreUnknownRules`, `contactEmails` and `contactEmailSources` (where each e-mail was found), `filterFailures`, `screeningWarnings`.
 - **OUTPUT > discovery:** for every search: the query, which engine answered (`ok`, `blocked`, `no_results`, `unrecognised`), and how many accounts it gave. `enginesBlocked` lists engines that showed a bot check (nothing is solved or clicked through). `candidatesFound`, `toLookUp`, `preScreened`, `blockedPlatforms`.
 - **OUTPUT > cost:** proxy traffic and cost for the whole run. Cost per search is the run cost divided by the number of queries (keywords times platforms).
+
+## First live findings (build 0.0.72, 2026-09-30)
+
+Bing answered the Actor's browser with an empty results page; DuckDuckGo and Brave answered with CAPTCHAs (reported as blocked, nothing solved). Code version 0.12.1 therefore asks Google through Apify's Google SERP proxy first. Not yet run live.
 
 ## If a search engine blocks the Actor
 

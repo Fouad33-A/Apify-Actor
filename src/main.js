@@ -162,6 +162,18 @@ if (session.header) {
     log.info(`Session cookies applied: ${cookies.length} (from ${session.source})`);
 }
 
+// Discovery asks Google through Apify's own Google SERP proxy (plain HTTP, billed per request by the platform,
+// credential supplied by the platform). If the group is not available the search falls back to the other engines.
+let serpProxyUrl = null;
+if (mode === 'discover') {
+    try {
+        const serpConfiguration = await Actor.createProxyConfiguration({ groups: ['GOOGLE_SERP'] });
+        serpProxyUrl = serpConfiguration ? await serpConfiguration.newUrl() : null;
+    } catch (err) {
+        log.warning(`Google SERP proxy not available: ${String(err?.message ?? err).split('\n')[0]}`);
+    }
+}
+
 const charger = makeCharger({ actor: Actor, budget, warn: (m) => log.warning(m) });
 const page = await context.newPage();
 
@@ -177,6 +189,7 @@ try {
             mode,
             mod,
             mods: PLATFORM_MODULES,
+            serpProxyUrl,
             page,
             input,
             budget,

@@ -124,8 +124,8 @@
             "title": "Discover: search engines, in order",
             "type": "array",
             "editor": "stringList",
-            "default": ["bing", "duckduckgo", "brave"],
-            "description": "Tried in this order for each search; one that answers with a bot check is reported as blocked and not used again in the run (nothing is solved or clicked through)."
+            "default": ["google", "bing", "duckduckgo", "brave"],
+            "description": "Tried in this order for each search. 'google' goes through Apify's own Google SERP proxy (plain HTTP, billed per request by the platform); bing, duckduckgo and brave use the browser. An engine that answers with a bot check is reported as blocked and not used again in the run (nothing is solved or clicked through); one that keeps returning nothing is dropped."
         },
         "maxSearchPages": {
             "title": "Discover: result pages per search",
@@ -133,7 +133,7 @@
             "default": 2,
             "minimum": 1,
             "maximum": 5,
-            "description": "How many result pages are read per keyword and platform."
+            "description": "How many result pages are read per keyword and platform (Google gives 10 results per page, Bing up to 50)."
         },
         "minFollowers": {
             "title": "Screening: minimum followers",

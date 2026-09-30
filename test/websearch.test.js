@@ -5,8 +5,11 @@ import {
     classifySearchPage,
     discoverByWebSearch,
     followerHint,
+    handleFromTitle,
     handleFromUrl,
+    mentionsExcluded,
     orderCandidates,
+    parseSerpHtml,
     unwrapSearchUrl,
 } from '../src/websearch.js';
 import { launchBrowser, serve } from './helpers/browser.js';
@@ -21,15 +24,19 @@ afterAll(async () => {
 
 const b64url = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-describe('buildQuery', () => {
-    it('site + keyword + followers hint + minus words (phrases quoted)', () => {
-        expect(
-            buildQuery({ platform: 'instagram', keyword: 'budgeting tips', excludeWords: ['course', '-my book', ' '] }),
-        ).toBe('site:instagram.com budgeting tips followers -course -"my book"');
-        expect(buildQuery({ platform: 'facebook', keyword: 'debt free' })).toBe(
-            'site:facebook.com debt free page followers',
+describe('buildQuery / mentionsExcluded', () => {
+    it('variant 0 uses the site: operator, variant 1 has none; excluded words are not sent to the engine', () => {
+        expect(buildQuery({ platform: 'instagram', keyword: ' budgeting tips ' })).toBe(
+            'site:instagram.com budgeting tips',
         );
-        expect(buildQuery({ platform: 'tiktok', keyword: 'etf' })).toBe('site:tiktok.com etf followers');
+        expect(buildQuery({ platform: 'facebook', keyword: 'debt free', variant: 0 })).toBe(
+            'site:facebook.com debt free',
+        );
+        expect(buildQuery({ platform: 'tiktok', keyword: 'etf', variant: 1 })).toBe('etf tiktok followers');
+    });
+    it('finds the first excluded word in a result (case-insensitive, leading minus ignored)', () => {
+        expect(mentionsExcluded('Jane | Budget COURSE here', ['-course', 'coach'])).toBe('course');
+        expect(mentionsExcluded('Jane | budget tips', ['course', ' '])).toBeUndefined();
     });
 });
 
@@ -124,6 +131,38 @@ describe('followerHint / classifySearchPage', () => {
     });
 });
 
+describe('classifySearchPage: titles and excluded words', () => {
+    const a = (href, text, container = '') => ({ href, text, container });
+    it('takes the account from the title when a post address has none, and drops results with excluded words', () => {
+        const res = classifySearchPage({
+            title: 't',
+            text: 'x',
+            platform: 'instagram',
+            excludeWords: ['course'],
+            anchors: [
+                a('https://www.instagram.com/p/AbC/', 'Michela (@breakyourbudget) • Instagram photos and videos'),
+                a('https://www.instagram.com/seller/', 'Seller', 'Join my budgeting COURSE'),
+            ],
+        });
+        expect(res.hits.map((h) => [h.handle, h.kind])).toEqual([['breakyourbudget', 'post']]);
+        expect(res.excluded).toBe(1);
+    });
+    it('all_excluded is its own outcome', () => {
+        const res = classifySearchPage({
+            title: 't',
+            text: 'x',
+            platform: 'instagram',
+            excludeWords: ['course'],
+            anchors: [a('https://www.instagram.com/seller/', 'Seller', 'budgeting course')],
+        });
+        expect(res.status).toBe('all_excluded');
+    });
+    it('handleFromTitle only for instagram and tiktok', () => {
+        expect(handleFromTitle('Jane (@Jane.B) | TikTok', 'tiktok')).toBe('jane.b');
+        expect(handleFromTitle('Jane (@jane)', 'facebook')).toBeNull();
+    });
+});
+
 describe('orderCandidates', () => {
     const c = (platform, handle, o = {}) => ({
         platform,
@@ -152,7 +191,7 @@ describe('orderCandidates', () => {
 
 describe('discoverByWebSearch (real page, synthetic search engines)', () => {
     const real = (u) => `https://www.bing.com/ck/a?!&&p=1&u=a1${b64url(u)}&ntb=1`;
-    const bingPage = `<html><head><title>q - Bing</title></head><body><ol>
+    const bingPage = `<html><head><title>q - Bing</title></head><body><ol id="b_results">
         <li class="b_algo"><h2><a href="${real('https://www.instagram.com/jane.budgets/')}">Jane</a></h2><p>25K Followers, 10 Following, 300 Posts - Jane on Instagram</p></li>
         <li class="b_algo"><h2><a href="${real('https://www.instagram.com/bob/reel/AB/')}">Bob</a></h2><p>reel</p></li>
         </ol></body></html>`;
@@ -168,7 +207,9 @@ describe('discoverByWebSearch (real page, synthetic search engines)', () => {
                 page,
                 keywords: ['budgeting'],
                 platforms: ['instagram'],
+                engines: ['bing', 'duckduckgo', 'brave'],
                 maxPages: 1,
+                resultWaitMs: 300,
                 ...extra,
             });
         } finally {
@@ -183,8 +224,30 @@ describe('discoverByWebSearch (real page, synthetic search engines)', () => {
             ['bob', false, null],
         ]);
         expect(report.queries[0]).toMatchObject({ platform: 'instagram', handlesFound: 2 });
-        expect(report.queries[0].attempts).toEqual([{ engine: 'bing', status: 'ok', results: 2 }]);
-        expect(report.queries[0].query).toContain('site:instagram.com budgeting');
+        expect(report.queries[0].attempts).toEqual([
+            { engine: 'bing', query: 'site:instagram.com budgeting', status: 'ok', results: 2 },
+        ]);
+    });
+
+    it('when the site: wording gives an empty page the plain wording is tried, and its results are kept', async () => {
+        const empty = '<html><head><title>x</title></head><body>nothing</body></html>';
+        const { candidates, report } = await run([
+            { match: /bing\.com\/search\?q=site%3A/, body: empty },
+            { match: /bing\.com\/search\?q=/, body: bingPage },
+        ]);
+        expect(candidates.map((x) => x.handle)).toEqual(['jane.budgets', 'bob']);
+        expect(report.queries[0].attempts.map((a) => [a.query, a.status])).toEqual([
+            ['site:instagram.com budgeting', 'unrecognised'],
+            ['budgeting instagram followers', 'ok'],
+        ]);
+    }, 60_000);
+
+    it('words to leave out are applied to the results, not sent to the engine', async () => {
+        const { candidates, report } = await run([{ match: /bing\.com\/search/, body: bingPage }], {
+            excludeWords: ['Jane'],
+        });
+        expect(candidates.map((x) => x.handle)).toEqual(['bob']);
+        expect(report.queries[0].attempts[0].query).not.toContain('-');
     });
 
     it('a blocked engine is reported, skipped for the rest of the run, and the next engine answers', async () => {
@@ -213,8 +276,87 @@ describe('discoverByWebSearch (real page, synthetic search engines)', () => {
             {},
         );
         expect(candidates).toEqual([]);
-        expect(report.queries[0].attempts).toHaveLength(3);
+        // 3 engines x 2 query wordings
+        expect(report.queries[0].attempts).toHaveLength(6);
         expect(report.queries[0].attempts[0]).toMatchObject({ engine: 'bing', status: 'unrecognised' });
         expect(report.queries[0].attempts[0].detail).toContain('nothing');
     }, 90_000);
+});
+
+describe('Google through the SERP proxy (HTTP, no browser)', () => {
+    const googleHtml = `<html><head><title>site:instagram.com budgeting - Google Search</title></head><body>
+      <div class="g"><a href="https://www.instagram.com/breakyourbudget/"><h3>Michela (@breakyourbudget) • Instagram</h3></a>
+        <div>432K Followers, 800 Following, 2,100 Posts - See Instagram photos and videos from Michela</div></div>
+      <div class="g"><a href="/url?q=https://www.instagram.com/ohhyoubudget/&sa=U"><h3>Deidre</h3></a>
+        <div>23K Followers, 500 Following - money tips and budgeting</div></div>
+      <div class="g"><a href="https://www.instagram.com/seller/"><h3>Seller</h3></a><div>Join my budgeting course today</div></div>
+      </body></html>`;
+
+    it('parseSerpHtml reads links (direct and /url?q=) with the text of their result block', async () => {
+        const page = await parseSerpHtml(googleHtml);
+        expect(page.title).toContain('Google Search');
+        const hrefs = page.anchors.map((a) => a.href);
+        expect(hrefs).toContain('https://www.instagram.com/breakyourbudget/');
+        expect(hrefs).toContain('https://www.google.com/url?q=https://www.instagram.com/ohhyoubudget/&sa=U');
+        expect(page.anchors[0].container).toContain('432K Followers');
+    });
+
+    const run = (over = {}) =>
+        discoverByWebSearch({
+            page: {},
+            keywords: ['budgeting'],
+            platforms: ['instagram'],
+            engines: ['google'],
+            maxPages: 1,
+            excludeWords: ['course'],
+            serpProxyUrl: 'http://proxy.test',
+            serpFetch: async () => parseSerpHtml(googleHtml),
+            ...over,
+        });
+
+    it('finds the accounts, keeps the follower hint, drops the excluded-word result, reports the query', async () => {
+        const { candidates, report } = await run();
+        expect(candidates.map((c) => [c.handle, c.hint, c.engines])).toEqual([
+            ['breakyourbudget', '432K', ['google']],
+            ['ohhyoubudget', '23K', ['google']],
+        ]);
+        expect(report.queries[0].attempts).toEqual([
+            { engine: 'google', query: 'site:instagram.com budgeting', status: 'ok', results: 2 },
+        ]);
+    });
+
+    it('without the SERP proxy the engine is reported as unavailable and asked only once per query', async () => {
+        const { candidates, report } = await run({ serpProxyUrl: null });
+        expect(candidates).toEqual([]);
+        expect(report.queries[0].attempts).toEqual([
+            {
+                engine: 'google',
+                query: 'site:instagram.com budgeting',
+                status: 'unavailable',
+                results: 0,
+                detail: 'the Google SERP proxy is not available to this run',
+            },
+        ]);
+    });
+
+    it('a Google block page is reported as blocked and the engine is not used again', async () => {
+        const blocked = await parseSerpHtml(
+            '<html><head><title>Sorry</title></head><body>Our systems have detected unusual traffic from your computer network.</body></html>',
+        );
+        const { report } = await run({ keywords: ['a', 'b'], serpFetch: async () => blocked });
+        expect(report.enginesBlocked).toEqual(['google']);
+        expect(report.queries[1].attempts).toEqual([]);
+    });
+
+    it('an HTTP failure is reported as an error with its reason, never as an empty success', async () => {
+        const { report } = await run({
+            serpFetch: async () => {
+                throw new Error('HTTP 403 from the search proxy');
+            },
+        });
+        expect(report.queries[0].attempts[0]).toMatchObject({
+            status: 'error',
+            detail: 'HTTP 403 from the search proxy',
+        });
+    });
 });
