@@ -51,6 +51,7 @@ const cost = new CostTracker({
     memoryMbytes: Number(process.env.ACTOR_MEMORY_MBYTES) || null,
 });
 const rateLimitErrors = [];
+const report = {};
 const startedAt = new Date().toISOString();
 
 log.info(`Proxy input (raw): ${JSON.stringify(proxyInput)}`);
@@ -143,7 +144,16 @@ try {
         });
         log.info(`Probe run finished: ${results.length} result(s) saved to PROBE_RESULTS`);
     } else {
-        await runMode({ mode, mod, page, input, budget, pushData: (row) => charger.push(row), rateLimitErrors });
+        await runMode({
+            mode,
+            mod,
+            page,
+            input,
+            budget,
+            pushData: (row) => charger.push(row),
+            rateLimitErrors,
+            report,
+        });
     }
 } finally {
     await cost.settle();
@@ -177,6 +187,7 @@ await Actor.setValue('OUTPUT', {
     ...summary,
     cost: cost.report({ platformUsage }),
     charging: charger.summary(),
+    expand: report.expand ? { ...report.expand, stopReason: budget.summary().stopReason } : null,
     runtime: {
         ...runtimeInfo(),
         sessionCookiesApplied,

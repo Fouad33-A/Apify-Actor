@@ -17,7 +17,7 @@ import { RateLimitError } from './errors.js';
 import { applyScreening, extractMentions, normalizeHandle, rankCandidates } from './expand.js';
 import { makeCommentRow, makePostRow, makeProfileRow } from './schema.js';
 
-export async function runMode({ mode, mod, page, input, budget, pushData, rateLimitErrors }) {
+export async function runMode({ mode, mod, page, input, budget, pushData, rateLimitErrors, report = {} }) {
     const platform = input.platform ?? null;
     const reason = (err) =>
         String(err?.message ?? err)
@@ -235,8 +235,23 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         const seeds = usernames.map((u) => normalizeHandle(u)).filter(Boolean);
         const events = [];
         let stopped = false;
+        // What happened per seed, so a run that finds nothing explains itself in OUTPUT.expand.
+        const seedReports = [];
+        const expandReport = { seeds: seedReports, sightings: 0, candidates: 0, lookedUp: 0 };
+        Object.assign(report, { expand: expandReport });
         for (const seed of seeds) {
             if (stopped || !shouldContinue()) break;
+            const sr = {
+                seed,
+                profileStatus: null,
+                postsRead: 0,
+                captionMentions: 0,
+                postPagesWithComments: 0,
+                commentsRead: 0,
+                commenterSightings: 0,
+                commentErrors: 0,
+            };
+            seedReports.push(sr);
             try {
                 const { profile, posts, rateLimit } = await mod.lookupProfile({
                     page,
@@ -245,6 +260,8 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     maxRecentPosts,
                     shouldContinue,
                 });
+                sr.profileStatus = profile.status;
+                sr.postsRead = posts.length;
                 if (profile.status !== 'found') {
                     await write('profile', {
                         ...profile,
@@ -260,6 +277,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 for (const post of posts) {
                     for (const handle of [...extractMentions(post.caption), ...(post.mentionedAccounts ?? [])]) {
                         events.push({ handle, signal: 'mention', seed, postUrl: post.postUrl });
+                        sr.captionMentions += 1;
                     }
                 }
                 for (const post of posts.filter(canComment).slice(0, maxRecentPosts)) {
@@ -273,8 +291,11 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                             topLevelOnly: false,
                             shouldContinue,
                         });
+                        sr.postPagesWithComments += 1;
                         for (const c of comments.filter((x) => (x.status ?? 'found') === 'found')) {
+                            sr.commentsRead += 1;
                             if (c.commenterUsername) {
+                                sr.commenterSightings += 1;
                                 events.push({
                                     handle: c.commenterUsername,
                                     signal: 'commenter',
@@ -288,6 +309,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                         }
                     } catch (err) {
                         if (err instanceof RateLimitError) throw err;
+                        sr.commentErrors += 1;
                         log.warning(`Comments for ${post.postUrl} unavailable: ${reason(err)}`);
                     }
                 }
@@ -312,9 +334,12 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
             }
         }
         const ranked = rankCandidates(events, { seeds, exclude: excludeUsernames }).slice(0, maxCandidates);
+        expandReport.sightings = events.length;
+        expandReport.candidates = ranked.length;
         log.info(`Expand: ${events.length} sightings -> ${ranked.length} candidate(s) to look up`);
         for (const cand of ranked) {
             if (stopped || !shouldContinue()) break;
+            expandReport.lookedUp += 1;
             try {
                 const { profile, rateLimit } = await mod.lookupProfile({
                     page,

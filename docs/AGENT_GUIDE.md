@@ -50,7 +50,12 @@ Honest expectations:
 - **Instagram** signals: accounts @mentioned in captions and comments, and commenters.
 - **Facebook** works too (seeds are Page names such as `NASA`). Signals: accounts tagged or linked in the Page's latest post, and commenters (with their `@handle` when they have one). Anonymous visitors see only the latest post(s) and a few comments per Page, so each seed gives fewer candidates than on Instagram, and many commenters are personal profiles, which the Actor cannot read as Pages (those rows come back as `not_found`, `private` or `blocked`, marked as such). Use a small `maxCandidates` on Facebook; tagged Pages are the useful signal.
 - **TikTok** can only use @mentions in captions (comments are not available).
-- **Not yet verified live**, and the cost per candidate is not measured. Start with 2 seeds, `maxRecentPosts` 3, `maxCandidates` 10, `maxProxyMegabytes` 60, read the `OUTPUT` cost, then scale.
+- **First live results (build 0.0.51, 2026-09-30):**
+    - **Instagram:** it works mechanically. With seeds `planbudgetdream` and `easy_budget` (3 posts each) it reached the 60 MB cap before finishing even one candidate lookup, so **the seed phase alone takes roughly 50-60 MB**. Use `maxProxyMegabytes` 150-200 for a 2-seed run with about 10 candidates. One candidate it found (mentioned twice) did not exist ("Profile isn't available"): mentions can be typos or dead accounts, and those come back as `not_found`.
+    - **Facebook:** a run on the `NASA` Page (latest post only) found **no candidates**: the latest post tagged nobody and showed no commenter handles. Facebook yields far less than Instagram for anonymous visitors.
+    - **Cost:** the platform's proxy figure worked out to roughly **$2 per GB** (16.6 MB measured = about $0.03), so 60 MB is about $0.12 and a 200 MB run about $0.40 plus a few cents of compute. The proxy line in `OUTPUT` can lag: re-read it a minute later.
+- Read `OUTPUT.expand`: per seed, `profileStatus`, `postsRead`, `captionMentions`, `commentsRead`, `commenterSightings`, plus the total `sightings`, `candidates` and `lookedUp`. A run that returns nothing explains itself there.
+- Start small, read `OUTPUT.cost`, then scale.
 
 Example:
 
@@ -68,7 +73,7 @@ Example:
     "requireContactEmail": true,
     "excludeBioPatterns": ["stan.store", "ebook", "e-book"],
     "maxItemsPerRun": 30,
-    "maxProxyMegabytes": 60,
+    "maxProxyMegabytes": 200,
     "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
 }
 ```

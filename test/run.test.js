@@ -503,6 +503,32 @@ describe('runMode: expand (discovery from seeds)', () => {
         );
     });
 
+    it('fills the per-seed report so a run explains what it saw', async () => {
+        const report = {};
+        const h = expandHarness({ excludeUsernames: ['known_one'], maxRecentPosts: 2 });
+        await runMode({
+            mode: 'expand',
+            mod: h.mod,
+            page: {},
+            input: { usernames: ['SeedOne'], excludeUsernames: ['known_one'], maxRecentPosts: 2 },
+            budget: h.budget,
+            pushData: async () => {},
+            rateLimitErrors: [],
+            report,
+        });
+        expect(report.expand).toMatchObject({ sightings: 7, candidates: 3, lookedUp: 3 });
+        expect(report.expand.seeds[0]).toEqual({
+            seed: 'seedone',
+            profileStatus: 'found',
+            postsRead: 2,
+            captionMentions: 2,
+            postPagesWithComments: 2,
+            commentsRead: 4,
+            commenterSightings: 4,
+            commentErrors: 0,
+        });
+    });
+
     it('screening flags each candidate; onlyPassing leaves out found profiles that fail (never blocked ones)', async () => {
         const lookupProfile = vi.fn(async ({ username }) => {
             if (username === 'seedone') return { profile: profileFor('seedone'), posts: seedPosts };

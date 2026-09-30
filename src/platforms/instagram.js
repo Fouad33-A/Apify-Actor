@@ -449,7 +449,11 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
     const status = response?.status();
     const lowerHtml = html.toLowerCase();
 
-    if (status === 404 || visibleLower.includes("sorry, this page isn't available")) {
+    if (
+        status === 404 ||
+        visibleLower.includes("sorry, this page isn't available") ||
+        visibleLower.includes("profile isn't available")
+    ) {
         return {
             profile: makeProfileRow({
                 platform: 'instagram',
