@@ -143,21 +143,29 @@ describe('staged screen: the reach rule', () => {
         expect(h.pushed[0].filterFailures).toEqual(['reach 0.2% of followers is below 3%']);
     });
 
-    it('reach that cannot be computed fails a minReachPercent screen and warns; without the rule it only warns', async () => {
+    it('unknown reach (hidden likes / too few posts) does not fail the screen: it warns so the row is checked by hand', async () => {
         const noCounts = async ({ username, maxRecentPosts }) => ({
             profile: profile(username, { externalLinks: [] }),
             posts: maxRecentPosts ? posts([null, null, null]) : [],
         });
         const strict = harness({ usernames: ['x'], reachPosts: 5, minReachPercent: 3 }, noCounts);
         await strict.run();
-        expect(strict.pushed[0].passesFilters).toBe(false);
-        expect(strict.pushed[0].filterFailures[0]).toMatch(/reach could not be computed/);
-        const lenient = harness({ usernames: ['x'], reachPosts: 5 }, noCounts);
-        await lenient.run();
-        expect(lenient.pushed[0].passesFilters).toBeNull();
-        expect(lenient.pushed[0].screeningWarnings).toEqual([
-            'reach not computed: too few posts with like/view counts',
-        ]);
+        expect(strict.pushed[0].passesFilters).toBe(true);
+        expect(strict.pushed[0].filterFailures).toEqual([]);
+        expect(strict.pushed[0].screeningWarnings[0]).toMatch(/reach not computed.*check the reach by hand/);
+        // other criteria still fail it
+        const other = harness(
+            { usernames: ['x'], reachPosts: 5, minReachPercent: 3, requireContactEmail: true },
+            async (a) => {
+                const r = await noCounts(a);
+                return { ...r, profile: { ...r.profile, contactEmails: [] } };
+            },
+        );
+        await other.run();
+        expect(other.pushed[0]).toMatchObject({
+            passesFilters: false,
+            filterFailures: ['no contact email in the bio'],
+        });
     });
 
     it('reachPosts 0 (default) never reads posts', async () => {

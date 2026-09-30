@@ -123,8 +123,9 @@ export function applyScreening(row, criteria = {}, { includeReach = true } = {})
         for (const p of patterns) if (haystack.includes(p)) failures.push(`bio or link contains "${p}"`);
     }
     if (reachActive) {
-        if (row.reachPctOfFollowers == null) failures.push('reach could not be computed (too few posts with counts)');
-        else if (row.reachPctOfFollowers < minReachPercent) {
+        // Unknown reach (hidden likes, too few posts read) is not a failure: it cannot be judged either way. The
+        // caller adds a warning so the row is checked by hand; only a measured reach below the minimum fails.
+        if (row.reachPctOfFollowers != null && row.reachPctOfFollowers < minReachPercent) {
             failures.push(`reach ${row.reachPctOfFollowers}% of followers is below ${minReachPercent}%`);
         }
     }

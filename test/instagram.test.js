@@ -15,6 +15,7 @@ import {
     mediaNodeToPostRow,
     parseEmbedText,
     parsePostDescription,
+    pickLikeCount,
     taggedAccounts,
 } from '../src/platforms/instagram.js';
 import { launchBrowser, serve } from './helpers/browser.js';
@@ -965,5 +966,22 @@ describe('cut-off bios ("... more") and contact e-mails', () => {
         );
         expect(profile.contactEmails).toEqual([]); // a cut-off address is not guessed
         expect(profile.screeningWarnings[0]).toMatch(/bio is cut off/);
+    });
+});
+
+describe("pickLikeCount: hidden post likes never become a comment's like count", () => {
+    it.each([
+        // og has the post's likes, the page agrees within rounding -> the exact page number
+        [{ domLikes: 117_345, ogLikes: 117_000, ogPresent: true }, 117_345],
+        // og has likes, the page number is something else (a comment's) -> og
+        [{ domLikes: 2, ogLikes: 1200, ogPresent: true }, 1200],
+        // og present but no likes (the creator hides them), page shows a comment's "2 likes" -> unknown
+        [{ domLikes: 2, ogLikes: null, ogPresent: true }, null],
+        // no og description at all (older layout) -> the page number
+        [{ domLikes: 500, ogLikes: null, ogPresent: false }, 500],
+        [{ domLikes: null, ogLikes: null, ogPresent: false }, null],
+        [{ domLikes: null, ogLikes: 9, ogPresent: true }, 9],
+    ])('%j -> %s', (input, expected) => {
+        expect(pickLikeCount(input)).toBe(expected);
     });
 });

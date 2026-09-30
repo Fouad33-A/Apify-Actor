@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { destinationsFromAnchors, isLinkInBioUrl, resolveBioLinks } from '../src/linkinbio.js';
+import { destinationsFromAnchors, isLinkInBioUrl, looksLikeErrorPage, resolveBioLinks } from '../src/linkinbio.js';
 import { launchBrowser, serve } from './helpers/browser.js';
 
 describe('isLinkInBioUrl', () => {
@@ -18,6 +18,20 @@ describe('isLinkInBioUrl', () => {
         [null, false],
     ])('%s -> %s', (url, expected) => {
         expect(isLinkInBioUrl(url)).toBe(expected);
+    });
+});
+
+describe('looksLikeErrorPage', () => {
+    it.each([
+        [{ title: 'Error 502: Bad gateway | cloudflare', text: 'Cloudflare' }, true],
+        [{ title: '', text: 'Just a moment... Checking your browser' }, true],
+        [{ title: 'Access denied', text: '' }, true],
+        [{ title: '', text: 'Sorry, this page could not be found' }, true],
+        [{ title: 'Creator | Beacons', text: 'Shop my store Watch on YouTube Book a call', length: 40 }, false],
+        [{ title: '', text: 'My 404 ebook guide and captcha tips '.repeat(40), length: 1400 }, false],
+        [{}, false],
+    ])('%j -> %s', (info, expected) => {
+        expect(looksLikeErrorPage(info)).toBe(expected);
     });
 });
 
@@ -89,6 +103,14 @@ describe('resolveBioLinks (real Chromium, synthetic pages)', () => {
             ['https://beacons.ai/x'],
         );
         expect(r.warnings[0]).toMatch(/showed no outgoing links/);
+    });
+
+    it('an error or bot-check page is a warning and its own links (Cloudflare) are NOT read as destinations', async () => {
+        const body = `<html><head><title>Error 502: Bad gateway</title></head><body>Bad gateway
+            <a href="https://www.cloudflare.com/5xx-error-landing">Cloudflare</a></body></html>`;
+        const r = await run([{ match: /beacons\.ai\/cazzatime$/, body }], ['https://beacons.ai/cazzatime']);
+        expect(r.targets).toEqual([]);
+        expect(r.warnings[0]).toMatch(/error or bot-check page.*NOT read/);
     });
 
     it('follows at most maxPages pages and ignores ordinary links', async () => {

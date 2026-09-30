@@ -96,7 +96,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         ) {
             done.screeningWarnings = [
                 ...(done.screeningWarnings ?? []),
-                'reach not computed: too few posts with like/view counts',
+                'reach not computed (likes hidden by the creator, or too few posts read): check the reach by hand',
             ];
         }
         return done;

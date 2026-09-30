@@ -307,6 +307,28 @@ export function domExtractProfile() {
 // Post pages describe themselves in og:description, e.g.
 //   '1,234 likes, 56 comments - nasa on September 10, 2026: "The caption."'
 // Anything that cannot be read stays null (some posts hide likes; the format can change).
+// Chooses the post's like count from the two places it can be read:
+//  - og:description ("117K likes, 829 comments - ..."): the post's own number, but rounded for big counts;
+//  - the first "N likes" line in the page: exact when it IS the post's count, but when the creator hides the
+//    post's likes that first line belongs to a COMMENT (seen live: "2 likes" on a 127K-follower account).
+// So the page number is used only when it agrees with the og number (within rounding), and is never used when
+// the og description was present but carried no likes (hidden likes: unknown, not a guess).
+export function pickLikeCount({ domLikes, ogLikes, ogPresent }) {
+    if (ogLikes != null) {
+        if (domLikes != null && Math.abs(domLikes - ogLikes) <= Math.max(ogLikes * 0.06, 1)) return domLikes;
+        return ogLikes;
+    }
+    return ogPresent ? null : (domLikes ?? null);
+}
+
+function postNote(described, metrics) {
+    if (described.rounded) return 'likeCount/commentCount are rounded as displayed (e.g. "117K")';
+    if (metrics.ogDescription && described.likeCount == null) {
+        return 'like count is hidden by the creator (Instagram shows only the comment count): likeCount is null, not a guess';
+    }
+    return null;
+}
+
 export function parsePostDescription(text) {
     if (!text) return { likeCount: null, commentCount: null, caption: null, rounded: false };
     const likes = text.match(/([\d.,]+\s*[KMB]?)\s+likes?\b/i)?.[1] ?? null;
@@ -569,11 +591,13 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                     // The grid image alt text is Instagram's auto-generated image description ("Photo by X on ..."), not the caption.
                     caption: described.caption,
                     publishDate: metrics.publishDate,
-                    likeCount: metrics.likeCount ?? described.likeCount,
+                    likeCount: pickLikeCount({
+                        domLikes: metrics.likeCount,
+                        ogLikes: described.likeCount,
+                        ogPresent: Boolean(metrics.ogDescription),
+                    }),
                     commentCount: described.commentCount,
-                    statusDetail: described.rounded
-                        ? 'likeCount/commentCount are rounded as displayed (e.g. "117K")'
-                        : null,
+                    statusDetail: postNote(described, metrics),
                     shareCount: null, // Instagram does not expose share counts
                     viewCount: metrics.viewCount,
                     isSponsored: null, // not reliably exposed in the current DOM; left honest-null rather than guessed
