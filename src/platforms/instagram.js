@@ -455,15 +455,81 @@ export function domExtractComments(maxComments) {
     return rows;
 }
 
-export async function lookupProfile({ page, username, sourceInput, maxRecentPosts }) {
+// The header element appears before the page has finished hydrating: its follower/following counts (and the "... more"
+// control, which does nothing before the page's scripts are attached) arrive a little later. Wait for the counts, not
+// for a fixed pause (a fixed 1.5 s was too short on slower residential connections and lost the profile or its bio).
+async function waitForProfileStats(page) {
+    // A header, or a page that already says why there is none (unavailable, private, login, rate limit).
+    const settled = await page
+        .waitForFunction(
+            () =>
+                Boolean(document.querySelector('header')) ||
+                /isn't available|account is private|log in|wait a few minutes|try again later/i.test(
+                    document.body?.innerText ?? '',
+                ),
+            undefined,
+            { timeout: 12_000 },
+        )
+        .then(() => true)
+        .catch(() => false); // nothing recognisable: the checks after this report what the page shows
+    if (!settled || !(await page.$('header'))) return;
+    await page
+        .waitForFunction(
+            () => {
+                const header = document.querySelector('header');
+                return Boolean(header && /[\d.,]+[KMB]?\s*followers/i.test(header.innerText));
+            },
+            undefined,
+            { timeout: 15_000 },
+        )
+        .catch(() => {
+            // not a normal profile header (private, unavailable): handled by the checks after this
+        });
+    await page.waitForTimeout(700);
+}
+
+// Reads the header, opening a "... more" bio first. The click is repeated (with a pause) because one made before the
+// page is interactive has no effect; the bio counts as unexpanded only if it still ends in "more" after all tries.
+async function readProfileDom(page) {
+    let dom = await page.evaluate(domExtractProfile);
+    for (let attempt = 0; attempt < 4 && dom?.bioTruncated; attempt += 1) {
+        try {
+            const clicked = await page.evaluate(domExpandBio);
+            if (!clicked) {
+                // not found by the in-page finder: a real pointer click on the visible "more" text
+                await page
+                    .locator('header')
+                    .getByText(/^(…|\.\.\.)?\s*more$/i)
+                    .first()
+                    .click({ timeout: 2000 });
+            }
+        } catch {
+            // the control is not there (yet) or the page moved on: look again after the pause
+        }
+        await page.waitForTimeout(700);
+        dom = (await page.evaluate(domExtractProfile)) ?? dom;
+    }
+    return dom;
+}
+
+// Instagram sometimes serves a profile whose header renders only after a second try; one fresh load before giving up.
+const UNRECOGNISED_LAYOUT = 'Page loaded but neither the current DOM layout';
+export async function lookupProfile(args) {
+    const first = await lookupProfileOnce(args);
+    if (first.profile.status === 'not_found' && first.profile.statusDetail?.startsWith(UNRECOGNISED_LAYOUT)) {
+        await args.page.waitForTimeout(2000);
+        const second = await lookupProfileOnce(args);
+        if (second.profile.status !== 'not_found') return second;
+    }
+    return first;
+}
+
+async function lookupProfileOnce({ page, username, sourceInput, maxRecentPosts }) {
     const url = `https://${DOMAIN}/${encodeURIComponent(username)}/`;
     // "networkidle" waited for every blocked/lingering request and cost 30-60 s per profile; the profile data is in
     // the page as soon as the document and its header are there, so wait for those and give the SPA a short beat.
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await page.waitForSelector('header', { timeout: 12_000 }).catch(() => {
-        // no header (login wall, not found, private): the checks below report what the page shows
-    });
-    await page.waitForTimeout(1500);
+    await waitForProfileStats(page);
     const html = await page.content();
 
     // TEMP DIAGNOSTIC: the two prior live tests (datacenter proxy, then
@@ -533,27 +599,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
         };
     }
 
-    // Show the whole bio before reading it (a contact e-mail is often past the "... more" cut).
-    try {
-        if (await page.evaluate(domExpandBio)) await page.waitForTimeout(500);
-    } catch {
-        // the page navigated or the control is not there: read the bio as shown
-    }
-    let dom = await page.evaluate(domExtractProfile);
-    if (dom?.bioTruncated) {
-        // The in-page click did not open it (seen live on one profile): try a real pointer click once.
-        try {
-            await page
-                .locator('header')
-                .getByText(/^(…|\.\.\.)?\s*more$/i)
-                .first()
-                .click({ timeout: 3000 });
-            await page.waitForTimeout(600);
-            dom = (await page.evaluate(domExtractProfile)) ?? dom;
-        } catch {
-            // nothing clickable: the truncation stays reported in screeningWarnings
-        }
-    }
+    const dom = await readProfileDom(page);
 
     if (dom) {
         const profile = makeProfileRow({
@@ -583,18 +629,23 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
             const postUrl = new URL(gp.href, `https://${DOMAIN}`).toString();
             let metrics = { publishDate: null, likeCount: null, viewCount: null, ogDescription: null };
             let loadFailed = false;
-            try {
-                // The post's counts are in the page's meta tags as soon as the document is there: do not wait for
-                // "networkidle" (it timed out after 30 s with the page already loaded, and the numbers were lost).
-                await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-                await page.waitForTimeout(800);
-                await assertNotRateLimited(page, 'instagram', 'post');
-                metrics = await page.evaluate(domExtractPostMetrics);
-            } catch (err) {
-                if (err?.name === 'RateLimitError') throw err;
-                // a single post failing to load shouldn't drop the whole profile -
-                // report this post with nulls rather than aborting the run.
-                loadFailed = true;
+            // One more try for a post page that did not load (a timeout is usually transient); reach needs these counts.
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                try {
+                    // The counts are in the page's meta tags as soon as the document is there: do not wait for
+                    // "networkidle" (it timed out after 30 s with the page already loaded, and the numbers were lost).
+                    await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+                    await page.waitForTimeout(800);
+                    await assertNotRateLimited(page, 'instagram', 'post');
+                    metrics = await page.evaluate(domExtractPostMetrics);
+                    loadFailed = false;
+                    break;
+                } catch (err) {
+                    if (err?.name === 'RateLimitError') throw err;
+                    // a single post failing to load shouldn't drop the whole profile -
+                    // report this post with nulls rather than aborting the run.
+                    loadFailed = true;
+                }
             }
             const described = parsePostDescription(metrics.ogDescription);
             posts.push(
@@ -700,8 +751,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
             sourceInput,
             username,
             status: 'not_found',
-            statusDetail:
-                'Page loaded but neither the current DOM layout nor the legacy JSON shape matched - Instagram may have changed its page structure again (needs a live re-check)',
+            statusDetail: `${UNRECOGNISED_LAYOUT} nor the legacy JSON shape matched - Instagram may have changed its page structure again (needs a live re-check)`,
         }),
         posts: [],
     };

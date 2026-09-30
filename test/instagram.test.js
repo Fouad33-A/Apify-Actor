@@ -319,7 +319,7 @@ async function withContext(routes, fn) {
     }
 }
 
-describe('lookupProfile (full flow, synthetic pages)', () => {
+describe('lookupProfile (full flow, synthetic pages)', { timeout: 60_000 }, () => {
     const base = { username: 'nasa', sourceInput: 'nasa', maxRecentPosts: 2 };
 
     it('returns a found profile row and post rows limited by maxRecentPosts', async () => {
@@ -955,6 +955,36 @@ describe('cut-off bios ("... more") and contact e-mails', () => {
         expect(profile.contactEmails).toEqual(['hello@coach-example.com']);
         expect(profile.screeningWarnings).toEqual([]);
     });
+
+    it('a page that hydrates late (counts and a working "more" arrive seconds after the header) is still read in full', async () => {
+        const real = igHeaderReal({ bioExpandable, linkLine: null });
+        const inner = real.match(/<header>([\s\S]*)<\/header>/)[1].replace(/ onclick="[^"]*"/, '');
+        const full = bioExpandable.full.replace(/\n/g, '<br>');
+        const late = `<!doctype html><html><body><main><header><div>nasa</div></header></main><script>
+            setTimeout(() => { document.querySelector('header').innerHTML = ${JSON.stringify(inner)}; }, 1500);
+            setTimeout(() => {
+                const more = [...document.querySelectorAll('[role=button]')].find((e) => /more$/.test(e.innerText));
+                if (more) more.onclick = () => { more.innerHTML = '<span>' + ${JSON.stringify(full)} + '</span>'; };
+            }, 2500);
+        </script></body></html>`;
+        const { profile } = await withContext([{ match: PROFILE_URL, body: late }], ({ page }) =>
+            lookupProfile({ page, username: 'nasa', sourceInput: 'nasa', maxRecentPosts: 0 }),
+        );
+        expect(profile.status).toBe('found');
+        expect(profile.followerCount).toBe(104_320_207);
+        expect(profile.contactEmails).toEqual(['hello@coach-example.com']);
+        expect(profile.screeningWarnings).toEqual([]);
+    }, 30_000);
+
+    it('a profile that shows no header on the first load is loaded once more before it is called not_found', async () => {
+        const body = (hit) => (hit === 1 ? igPage('<div>nothing recognisable</div>') : igHeaderReal());
+        const { profile, seen } = await withContext([{ match: PROFILE_URL, body }], async ({ page, seen: s }) => ({
+            profile: (await lookupProfile({ page, username: 'nasa', sourceInput: 'nasa', maxRecentPosts: 0 })).profile,
+            seen: s,
+        }));
+        expect(profile.status).toBe('found');
+        expect(seen.filter((u) => PROFILE_URL.test(u))).toHaveLength(2);
+    }, 60_000);
 
     it('a bio that stays cut off is reported in screeningWarnings, never presented as complete', async () => {
         const stuck = igHeaderReal({

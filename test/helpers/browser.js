@@ -13,6 +13,7 @@ export async function launchBrowser() {
 
 // Serve synthetic responses for matching URLs; everything else is aborted so a
 // test can never reach a real site. routes: [{ match: RegExp, status?, body?, contentType? }]
+// (body may be a function of the 1-based hit count, to serve a different page on a retry)
 export async function serve(context, routes) {
     const seen = [];
     await context.route('**/*', (route) => {
@@ -20,11 +21,13 @@ export async function serve(context, routes) {
         seen.push(url);
         const hit = routes.find((r) => r.match.test(url));
         if (!hit) return route.abort();
+        hit.hits = (hit.hits ?? 0) + 1;
+        const body = typeof hit.body === 'function' ? hit.body(hit.hits) : hit.body;
         return route.fulfill({
             status: hit.status ?? 200,
             contentType: hit.contentType ?? 'text/html; charset=utf-8',
             headers: hit.headers,
-            body: hit.body ?? '<html><body></body></html>',
+            body: body ?? '<html><body></body></html>',
         });
     });
     return seen;
