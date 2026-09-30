@@ -33,11 +33,19 @@ Read rows with `get-dataset-items`; read the run report with `get-key-value-stor
 ## What works, and what does not (verified live)
 
 - Profiles (followers, bio, links, contact email, verified): TikTok, Instagram, Facebook Pages. Yes.
+- **TikTok recent videos (`profile` mode with `maxRecentPosts`)**: yes, since 0.8.1. The Actor reads TikTok's public creator embed for the latest video ids, then each video's own page for caption, likes, comments count, shares, views, date. If a video page is withheld the row says so and keeps only what the embed showed.
+- TikTok video by URL (`posts` mode): yes, same fields plus the author's follower count.
 - Instagram posts (caption, likes, comment count, date) and comments: yes (what a logged-out visitor sees).
 - Facebook: latest post(s) and a few comments with commenter handle: yes.
-- TikTok video by URL (`posts` mode): caption, likes, comments, shares, views, date, author followers: yes.
-- **TikTok profile video list, TikTok comments, TikTok search: blocked by TikTok.** Instagram and Facebook keyword search: need a login, not available.
-- To find creators, use TikTok's own discovery tools first, then feed handles and video URLs into this Actor.
+- **Not available logged out, on any run: TikTok comment text, TikTok keyword/hashtag search, Instagram/Facebook keyword search.** TikTok never loads comments or search results for a logged-out browser (tested several ways); the hashtag and keyword pages come back empty. Rows for these say `blocked`/`error`.
+
+## Discovery without a search mode (works today)
+
+1. Use your own web search, limited to TikTok, with the audience keywords, for example `site:tiktok.com/@ "etf investing"` or `site:tiktok.com "index funds for beginners"`. Collect the `@handles` and video URLs in the results.
+2. Run `profile` mode for those handles with `"platform":"tiktok","maxRecentPosts":5` (about 6-7 MB per profile plus a few MB per video: keep batches small, see the budget section).
+3. Score the raw rows (followers, bio, captions, likes/comments/shares/views) with Verity's own rules.
+
+This finds creators the web index knows about, not every creator. Comment text cannot be collected this way.
 
 ## Reading the rows
 

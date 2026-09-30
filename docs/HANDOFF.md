@@ -1,4 +1,4 @@
-# Handoff notes (final state, code version 0.7.2, Apify build 0.0.27)
+# Handoff notes (final state, code version 0.8.1)
 
 Everything below was verified with real runs on Apify (residential proxy, no login, no cookies, `fouad_dp/my-actor`) unless marked otherwise. Total test spend was well under the agreed cap.
 
@@ -23,6 +23,7 @@ Added in 0.7.x and live-checked on build 0.0.23-0.0.25 (2026-09-29): run cost re
 - Instagram search/hashtag pages: HTTP 429 + redirect to login. Facebook search pages: "Not Found". Error rows with that evidence.
 - `blockHeavyResources: true` made TikTok return an empty page (default now off). `standardUserAgent: true` also made the TikTok profile come back empty in one test; leave it off.
 - Build 0.0.27 (2026-09-29): `fullChromium` (new headless), `hideAutomationFlag`, and both together were each tested on `@nasa`. The profile still loaded every time, but the video list was still empty/blocked in all three. Browser-flag changes do not fix it; the remaining routes (signed internal API calls, spoofed fingerprints, own accounts, captcha solving) were deliberately not built. Inputs kept, default off.
+- 2026-09-30 (0.8.1): TikTok's public creator embed `https://www.tiktok.com/embed/@user` works logged out and lists the latest ~10 videos with ids and one count each, plus rounded header counts and bio. The Actor now uses it for recent videos (each then read from its own video page) and as a fallback for the profile header when the profile page is withheld. Hashtag (`/tag/x`) and keyword (`/discover/x`) pages come back empty; `embed/v2/<id>` shows counts only, no comment text.
 - TikTok profile lookups otherwise work intermittently-reliably; one profile run returned the empty shell once, the repeat worked.
 
 **Last live checks:** build 0.0.20 found a regression (every Facebook lookup threw on an `<svg>` sibling and the run silently wrote nothing). Fixed in 0.6.1 (regression tests, plus every failed lookup/comment fetch/search now writes a `status: "error"` row). **Build 0.0.21 re-verified Facebook live:** bio, exact followers, links and contact email on NASA, National Geographic and Cristiano Ronaldo; a reel post with full caption and views; a regular post with reactions, comment and share counts; comments. NASA's first item was an event card and was correctly skipped (no post row). TikTok and Instagram were verified on 0.0.20 and are unchanged since.

@@ -600,3 +600,239 @@ describe('fetchPost (real Chromium, synthetic page)', () => {
         expect(blocked.statusDetail).toMatch(/DIAG_post_tiktok/);
     }, 60_000);
 });
+
+describe('creator embed route (pure parsers)', () => {
+    const REAL_TEXT =
+        'nasa \n23\nFollowing\n1.9M\nFollowers\n9.8M\nLikes\nMaking the seemingly impossible, possible.✨\n1.4M\n9858\n66.5K\n\nSee more\n\nView Privacy Policy\nOpen TikTok';
+
+    it('reads username, rounded counts and bio from the header text (as captured live)', () => {
+        expect(tiktok.parseCreatorEmbedText(REAL_TEXT)).toEqual({
+            username: 'nasa',
+            followingCount: 23,
+            followerCount: 1_900_000,
+            totalLikes: 9_800_000,
+            bio: 'Making the seemingly impossible, possible.✨',
+        });
+    });
+
+    it('no bio: the next line is a video count, not a bio', () => {
+        const r = tiktok.parseCreatorEmbedText('x\n5\nFollowing\n10K\nFollowers\n1.2M\nLikes\n1.4M\n9858');
+        expect(r.bio).toBeNull();
+        expect(r.followerCount).toBe(10_000);
+    });
+
+    it.each([[''], [null], ['just some text'], ['a\nFollowers\nLikes']])('unrecognised header %j -> null', (t) => {
+        expect(tiktok.parseCreatorEmbedText(t)).toBeNull();
+    });
+
+    it('a video id carries its creation time', () => {
+        // approximate: the id is minted a few seconds before TikTok's own createTime (1775625719 for this video)
+        expect(Math.abs(tiktok.videoIdToCreateTime('7626254334065511711') - 1_775_625_719)).toBeLessThan(60);
+        expect(tiktok.videoIdToCreateTime('not a number')).toBeNull();
+    });
+
+    it('lists distinct videos newest first, from the embed links (tracking params dropped)', () => {
+        const anchors = [
+            {
+                href: 'https://www.tiktok.com/@nasa/video/7665075736742530317?referer_url=&refer=creator_embed',
+                text: '1.4M',
+            },
+            { href: 'https://www.tiktok.com/@nasa/video/7691066504380452110?refer=creator_embed', text: '9858' },
+            { href: 'https://www.tiktok.com/@nasa/video/7691066504380452110?dup=1', text: '9858' },
+            { href: 'https://www.tiktok.com/@nasa?refer=creator_embed', text: 'nasa' },
+            { href: 'not a url', text: 'x' },
+            { href: 'https://www.tiktok.com/@nasa/photo/7690609551275494670', text: '66.5K' },
+        ];
+        const r = tiktok.parseEmbedVideos(anchors);
+        expect(r.map((v) => v.id)).toEqual(['7691066504380452110', '7690609551275494670', '7665075736742530317']);
+        expect(r[0]).toMatchObject({
+            postUrl: 'https://www.tiktok.com/@nasa/video/7691066504380452110',
+            embedCountText: '9858',
+        });
+        expect(r[1].postUrl).toContain('/photo/');
+    });
+});
+
+describe('creator embed route (real Chromium, synthetic pages)', () => {
+    let browser;
+    beforeAll(async () => {
+        browser = await launchBrowser();
+        Object.assign(tiktok.timing, {
+            listWaitMs: 2500,
+            commentWaitMs: 2000,
+            commentRetryWaitMs: 1000,
+            nextPageWaitMs: 1500,
+        });
+    });
+    afterAll(async () => {
+        await browser?.close();
+    });
+
+    const IDS = ['7691066504380452110', '7690609551275494670', '7665075736742530317']; // newest first
+    const embedPage =
+        () => `<!doctype html><html><body><div><div><a href="https://www.tiktok.com/@nasa?refer=creator_embed"><div>nasa</div></a>
+        <span><div><a href="https://www.tiktok.com/@nasa"><div>23</div></a><div>Following</div></div>
+        <div><a href="https://www.tiktok.com/@nasa"><div>1.9M</div></a><div>Followers</div></div>
+        <div><a href="https://www.tiktok.com/@nasa"><div>9.8M</div></a><div>Likes</div></div></span></div>
+        <a href="https://www.tiktok.com/@nasa"><div>Making the seemingly impossible, possible.</div></a></div>
+        <div>${IDS.map((id, i) => `<a href="https://www.tiktok.com/@nasa/video/${id}?refer=creator_embed"><div><div>${['9858', '66.5K', '1.4M'][i]}</div></div></a>`).join('')}</div>
+        <div>See more</div></body></html>`;
+    const videoPage = (id, likes) => {
+        const struct = {
+            id,
+            desc: `caption for ${id}`,
+            createTime: String(tiktok.videoIdToCreateTime(id)),
+            author: { uniqueId: 'nasa', nickname: 'NASA', verified: true },
+            authorStats: { followerCount: 1_872_000, followingCount: 23 },
+            stats: { diggCount: likes, commentCount: 5, shareCount: 2, playCount: likes * 10 },
+        };
+        return `<html><body>v<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify({
+            __DEFAULT_SCOPE__: { 'webapp.video-detail': { itemInfo: { itemStruct: struct }, statusCode: 0 } },
+        })}</script></body></html>`;
+    };
+    const mainPage = (root) =>
+        `<!doctype html><html><body>NASA<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(root)}</script></body></html>`;
+    const goodRoot = {
+        __DEFAULT_SCOPE__: {
+            'webapp.user-detail': {
+                userInfo: {
+                    user: { uniqueId: 'nasa', nickname: 'NASA', signature: 'bio', verified: true },
+                    stats: { videoCount: 49 },
+                    statsV2: {
+                        followerCount: '1872971',
+                        followingCount: '23',
+                        heartCount: '9806762',
+                        videoCount: '49',
+                    },
+                },
+                statusCode: 0,
+            },
+        },
+    };
+    async function run(routes, opts = {}) {
+        const context = await browser.newContext();
+        try {
+            await serve(context, routes);
+            return await tiktok.lookupProfile({
+                page: await context.newPage(),
+                username: 'nasa',
+                sourceInput: 'nasa',
+                ...opts,
+            });
+        } finally {
+            await context.close();
+        }
+    }
+
+    it('empty video-list call: falls back to the creator embed, newest first, exact stats from each video page', async () => {
+        const routes = [
+            { match: /\/api\/post\/item_list/, contentType: 'application/json', body: '' },
+            { match: /tiktok\.com\/embed\/@nasa$/, body: embedPage() },
+            ...IDS.map((id, i) => ({ match: new RegExp(`/video/${id}$`), body: videoPage(id, 100 * (i + 1)) })),
+            {
+                match: /tiktok\.com\/@nasa$/,
+                body: mainPage(goodRoot).replace(
+                    '</body>',
+                    "<script>fetch('/api/post/item_list/?cursor=0');</script></body>",
+                ),
+            },
+        ];
+        const { profile, posts } = await run(routes, { maxRecentPosts: 2 });
+        expect(profile.followerCount).toBe(1_872_971);
+        expect(posts).toHaveLength(2);
+        expect(posts.map((p) => p.postUrl.split('/').pop())).toEqual([IDS[0], IDS[1]]);
+        expect(posts[0]).toMatchObject({
+            recordType: 'post',
+            status: 'found',
+            username: 'nasa',
+            caption: `caption for ${IDS[0]}`,
+            likeCount: 100,
+            commentCount: 5,
+            shareCount: 2,
+            viewCount: 1000,
+            followerCount: 1_872_971, // from the profile
+        });
+    }, 90_000);
+
+    it('a withheld video page keeps the embed facts and says so', async () => {
+        const routes = [
+            { match: /\/api\/post\/item_list/, contentType: 'application/json', body: '' },
+            { match: /tiktok\.com\/embed\/@nasa$/, body: embedPage() },
+            {
+                match: /tiktok\.com\/@nasa$/,
+                body: mainPage(goodRoot).replace(
+                    '</body>',
+                    "<script>fetch('/api/post/item_list/?cursor=0');</script></body>",
+                ),
+            },
+            // video pages are not routed at all -> navigation fails
+        ];
+        const { posts } = await run(routes, { maxRecentPosts: 1 });
+        expect(posts).toHaveLength(1);
+        expect(posts[0]).toMatchObject({
+            status: 'found',
+            postUrl: `https://www.tiktok.com/@nasa/video/${IDS[0]}`,
+            caption: null,
+            likeCount: null,
+            viewCount: 9858,
+        });
+        expect(posts[0].publishDate).toBe(new Date(tiktok.videoIdToCreateTime(IDS[0]) * 1000).toISOString());
+        expect(posts[0].statusDetail).toMatch(/video page was withheld/);
+        expect(posts[0].statusDetail).toMatch(/approximate date/);
+    }, 90_000);
+
+    it('neither the list call nor the embed gives videos: one blocked row that mentions both', async () => {
+        const routes = [
+            { match: /\/api\/post\/item_list/, contentType: 'application/json', body: '' },
+            {
+                match: /tiktok\.com\/@nasa$/,
+                body: mainPage(goodRoot).replace(
+                    '</body>',
+                    "<script>fetch('/api/post/item_list/?cursor=0');</script></body>",
+                ),
+            },
+        ];
+        const { posts } = await run(routes, { maxRecentPosts: 2 });
+        expect(posts).toHaveLength(1);
+        expect(posts[0]).toMatchObject({ status: 'blocked', likeCount: null });
+        expect(posts[0].statusDetail).toMatch(/empty video list.*creator embed listed none/);
+    }, 90_000);
+
+    it('main profile page withheld: the profile comes from the embed (rounded, flagged) and so do the posts', async () => {
+        const routes = [
+            { match: /tiktok\.com\/embed\/@nasa$/, body: embedPage() },
+            ...IDS.map((id, i) => ({ match: new RegExp(`/video/${id}$`), body: videoPage(id, 10 * (i + 1)) })),
+            { match: /tiktok\.com\/@nasa$/, body: '<html><body>shell</body></html>' },
+        ];
+        const { profile, posts } = await run(routes, { maxRecentPosts: 1 });
+        expect(profile).toMatchObject({
+            status: 'found',
+            username: 'nasa',
+            followerCount: 1_900_000,
+            followingCount: 23,
+            totalLikes: 9_800_000,
+            bio: 'Making the seemingly impossible, possible.',
+            displayName: null,
+            verified: null,
+        });
+        expect(profile.statusDetail).toMatch(/rounded/);
+        expect(posts).toHaveLength(1);
+        expect(posts[0].likeCount).toBe(10);
+    }, 90_000);
+
+    it('main page withheld and no embed either: still blocked, as before', async () => {
+        const { profile, posts } = await run([
+            { match: /tiktok\.com\/@nasa$/, body: '<html><body>shell</body></html>' },
+        ]);
+        expect(profile.status).toBe('blocked');
+        expect(posts).toEqual([]);
+    }, 90_000);
+
+    it('a visible challenge on the embed page stops the run (RateLimitError)', async () => {
+        const routes = [
+            { match: /tiktok\.com\/embed\/@nasa$/, body: '<html><body>Verify to continue</body></html>' },
+            { match: /tiktok\.com\/@nasa$/, body: '<html><body>shell</body></html>' },
+        ];
+        await expect(run(routes)).rejects.toBeInstanceOf(RateLimitError);
+    }, 90_000);
+});

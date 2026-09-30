@@ -14,7 +14,7 @@
 import { captureJson } from '../capture.js';
 import { saveDiagnostics } from '../diagnostics.js';
 import { assertNotRateLimited } from '../errors.js';
-import { extractEmails, makeCommentRow, makePostRow, makeProfileRow } from '../schema.js';
+import { extractEmails, makeCommentRow, makePostRow, makeProfileRow, parseAbbrevCount } from '../schema.js';
 
 const DOMAIN = 'www.tiktok.com';
 
@@ -258,6 +258,96 @@ async function collectPaged({
 const isItemListHit = (h) => Array.isArray(h.data?.itemList) || h.data?.statusCode !== undefined;
 const isCommentHit = (h) => Array.isArray(h.data?.comments) || (h.data && 'comments' in h.data);
 
+// ---------- TikTok's public creator embed (/embed/@user) ----------
+//
+// TikTok publishes an embed page for every public creator (the same one third-party sites embed). Logged out,
+// it shows the creator's counts, bio and their latest videos as links with one count each (verified live on
+// 2026-09-30). It is served to normal visitors, needs no login and no signing.
+
+// Pure: the visible header text of the embed page -> counts (rounded, as displayed) and bio.
+export function parseCreatorEmbedText(text) {
+    const lines = String(text ?? '')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    const at = (label) => lines.findIndex((l) => l.toLowerCase() === label);
+    const following = at('following');
+    const followers = at('followers');
+    const likes = at('likes');
+    if (following < 1 || followers < 1 || likes < 1) return null;
+    const next = lines[likes + 1];
+    const looksLikeCount = (l) => /^[\d.,]+\s?[KMB]?$/i.test(l);
+    return {
+        username: lines[0].replace(/^@/, ''),
+        followingCount: parseAbbrevCount(lines[following - 1]),
+        followerCount: parseAbbrevCount(lines[followers - 1]),
+        totalLikes: parseAbbrevCount(lines[likes - 1]),
+        bio: next && !looksLikeCount(next) && !/^see more$/i.test(next) ? next : null,
+    };
+}
+
+// Pure: a video id is a snowflake whose upper bits are the creation time in seconds.
+export function videoIdToCreateTime(id) {
+    try {
+        return Number(BigInt(id) / 4_294_967_296n);
+    } catch {
+        return null;
+    }
+}
+
+// Pure: anchors [{ href, text }] -> distinct videos, newest first.
+export function parseEmbedVideos(anchors) {
+    const seen = new Set();
+    const out = [];
+    for (const a of anchors ?? []) {
+        let url;
+        try {
+            url = new URL(a.href);
+        } catch {
+            continue;
+        }
+        const m = url.pathname.match(/^\/@([^/]+)\/(video|photo)\/(\d+)$/);
+        if (!m || seen.has(m[3])) continue;
+        seen.add(m[3]);
+        out.push({
+            id: m[3],
+            username: m[1],
+            postUrl: `https://${DOMAIN}/@${m[1]}/${m[2]}/${m[3]}`,
+            embedCountText: a.text || null,
+            createTime: videoIdToCreateTime(m[3]),
+        });
+    }
+    return out.sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0));
+}
+
+// Runs in the page.
+export function domExtractCreatorEmbed() {
+    return {
+        text: document.body ? document.body.innerText : '',
+        anchors: [...document.querySelectorAll('a[href*="/video/"], a[href*="/photo/"]')].map((a) => ({
+            href: a.href,
+            text: (a.innerText || '').trim(),
+        })),
+    };
+}
+
+// Loads the embed page; returns { header, videos } or null when it is not available.
+async function loadCreatorEmbed(page, username) {
+    try {
+        await page.goto(`https://${DOMAIN}/embed/@${encodeURIComponent(username)}`, {
+            waitUntil: 'domcontentloaded',
+            timeout: 45_000,
+        });
+        await page.waitForTimeout(2500);
+        await assertNotRateLimited(page, 'tiktok', 'creator embed');
+        const { text, anchors } = await page.evaluate(domExtractCreatorEmbed);
+        return { header: parseCreatorEmbedText(text), videos: parseEmbedVideos(anchors) };
+    } catch (err) {
+        if (err?.name === 'RateLimitError') throw err;
+        return null; // the embed is an extra route: absence is handled by the caller
+    }
+}
+
 // ---------- profile + recent videos ----------
 
 export async function lookupProfile({
@@ -317,6 +407,29 @@ export async function lookupProfile({
             httpStatus: response?.status() ?? null,
             statusCode: parsed.statusCode ?? null,
         });
+        // The main profile page was withheld: the public creator embed still shows the header facts.
+        const embed = await loadCreatorEmbed(page, username);
+        if (embed?.header) {
+            const h = embed.header;
+            const profile = makeProfileRow({
+                platform: 'tiktok',
+                sourceInput,
+                username: h.username || username,
+                bio: h.bio,
+                contactEmails: extractEmails(h.bio),
+                followerCount: h.followerCount,
+                followingCount: h.followingCount,
+                totalLikes: h.totalLikes,
+                status: 'found',
+                statusDetail:
+                    "The profile page was withheld; facts come from TikTok's public creator embed: counts are rounded as displayed (e.g. 1.9M), and display name, verified flag, links and account date are unavailable",
+            });
+            const posts =
+                maxRecentPosts > 0
+                    ? await postsFromEmbedVideos({ page, embed, profile, sourceInput, maxRecentPosts, shouldContinue })
+                    : [];
+            return { profile, posts };
+        }
         return {
             profile: makeProfileRow({
                 platform: 'tiktok',
@@ -333,53 +446,108 @@ export async function lookupProfile({
     }
 }
 
-// Recent posts, newest first (a pinned older video is sorted to where its date puts it). If the video list
-// never loads a single `blocked` post row says so, instead of an empty result that looks like "no posts".
+// Recent posts, newest first.
+// Route 1: the video-list call the profile page itself makes (already loaded, or about to be), if it carries data.
+// Route 2: the public creator embed lists the latest videos; each is read from its own video page for exact
+// stats. If neither yields a video, ONE `blocked` post row says so.
 async function loadRecentPosts({ page, capture, profile, sourceInput, maxRecentPosts, shouldContinue }) {
-    const { items, gotResponse } = await collectPaged({
-        page,
-        capture,
-        isListHit: isItemListHit,
-        readHit: (h) => parseItemList(h.data, profile.username),
-        want: maxRecentPosts,
-        shouldContinue,
-    });
-    if (!items.length) {
-        await assertNotRateLimited(page, 'tiktok', 'profile videos');
-        const listError = capture.hits.find((h) => isItemListHit(h) && h.data?.statusCode)?.data?.statusCode;
-        return [
-            makePostRow({
-                platform: 'tiktok',
-                sourceInput,
-                username: profile.username,
-                status: 'blocked',
-                statusDetail: gotResponse
-                    ? `TikTok returned an empty video list${listError ? ` (statusCode ${listError})` : ''} although the profile shows ${profile.postCount ?? 'some'} video(s)`
-                    : 'TikTok did not load the video list for a logged-out visitor (challenge, login wall, or a layout change)',
-            }),
-        ];
+    // TikTok answers the list call with an empty body to sessions it flags; wait only for the call itself.
+    const answered = await capture.waitFor(() => true, Math.min(timing.listWaitMs, 5000));
+    const hasData = answered && capture.hits.some((h) => parseItemList(h.data).items.length > 0);
+    if (hasData) {
+        const { items } = await collectPaged({
+            page,
+            capture,
+            isListHit: isItemListHit,
+            readHit: (h) => parseItemList(h.data, profile.username),
+            want: maxRecentPosts,
+            shouldContinue,
+        });
+        items.sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0));
+        return items.slice(0, maxRecentPosts).map((item) => itemToPostRow(item, { sourceInput, profile }));
     }
-    items.sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0));
-    return items.slice(0, maxRecentPosts).map((item) => itemToPostRow(item, { sourceInput, profile }));
+
+    const embed = await loadCreatorEmbed(page, profile.username);
+    if (embed?.videos.length) {
+        return postsFromEmbedVideos({ page, embed, profile, sourceInput, maxRecentPosts, shouldContinue });
+    }
+
+    const listError = capture.hits.find((h) => isItemListHit(h) && h.data?.statusCode)?.data?.statusCode;
+    return [
+        makePostRow({
+            platform: 'tiktok',
+            sourceInput,
+            username: profile.username,
+            status: 'blocked',
+            statusDetail: answered
+                ? `TikTok returned an empty video list${listError ? ` (statusCode ${listError})` : ''} although the profile shows ${profile.postCount ?? 'some'} video(s), and the public creator embed listed none`
+                : 'TikTok did not load the video list for a logged-out visitor (challenge, login wall, or a layout change), and the public creator embed listed none',
+        }),
+    ];
+}
+
+// Videos listed on the creator embed -> post rows with exact stats from each video's own page. If a video page
+// is withheld, the row keeps what the embed showed (its one count) and says so.
+async function postsFromEmbedVideos({ page, embed, profile, sourceInput, maxRecentPosts, shouldContinue }) {
+    const rows = [];
+    for (const video of embed.videos.slice(0, maxRecentPosts)) {
+        if (!shouldContinue()) break;
+        let verdict;
+        try {
+            verdict = await readVideoPage(page, video.postUrl);
+        } catch (err) {
+            if (err?.name === 'RateLimitError') throw err;
+            verdict = { state: 'error' };
+        }
+        if (verdict.state === 'ok') {
+            rows.push(itemToPostRow(verdict.item, { sourceInput, profile }));
+        } else {
+            rows.push(
+                makePostRow({
+                    platform: 'tiktok',
+                    sourceInput,
+                    username: profile.username,
+                    displayName: profile.displayName,
+                    bio: profile.bio,
+                    externalLinks: profile.externalLinks,
+                    followerCount: profile.followerCount,
+                    followingCount: profile.followingCount,
+                    verified: profile.verified,
+                    postUrl: video.postUrl,
+                    publishDate: video.createTime ? new Date(video.createTime * 1000).toISOString() : null,
+                    viewCount: parseAbbrevCount(video.embedCountText),
+                    status: 'found',
+                    statusDetail:
+                        'Listed on the creator embed, but the video page was withheld: only an approximate date (from the video id, within seconds) and the view count shown on the embed (rounded) are available',
+                }),
+            );
+        }
+    }
+    return rows;
 }
 
 // ---------- one post by URL ----------
 
-// Reads a single video's caption and counts from the data embedded in its own page. This works for any
-// public video URL, independent of the profile's video list.
-export async function fetchPost({ page, postUrl, sourceInput }) {
+// Loads one video page and reads the data embedded in it: { state, item?, statusCode? }.
+async function readVideoPage(page, postUrl) {
     const response = await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     await page.waitForTimeout(1500);
     await assertNotRateLimited(page, 'tiktok', 'post');
     const verdict = parseVideoDetail(await readRehydration(page));
+    if (response?.status() === 404 && verdict.state !== 'ok') return { state: 'not_found' };
+    return { ...verdict, httpStatus: response?.status() ?? null };
+}
+
+// Reads a single video's caption and counts from the data embedded in its own page. This works for any
+// public video URL, independent of the profile's video list.
+export async function fetchPost({ page, postUrl, sourceInput }) {
+    const verdict = await readVideoPage(page, postUrl);
     if (verdict.state === 'ok') return itemToPostRow(verdict.item, { sourceInput });
-    if (verdict.state === 'not_found' || response?.status() === 404) {
+    if (verdict.state === 'not_found')
         return makePostRow({ platform: 'tiktok', sourceInput, postUrl, status: 'not_found' });
-    }
-    if (verdict.state === 'private') {
+    if (verdict.state === 'private')
         return makePostRow({ platform: 'tiktok', sourceInput, postUrl, status: 'private' });
-    }
-    await saveDiagnostics(page, await page.content(), 'post_tiktok', { httpStatus: response?.status() ?? null });
+    await saveDiagnostics(page, await page.content(), 'post_tiktok', { httpStatus: verdict.httpStatus ?? null });
     return makePostRow({
         platform: 'tiktok',
         sourceInput,
