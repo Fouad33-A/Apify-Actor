@@ -4,24 +4,32 @@ Actor: `fouad_dp/my-actor` (private; run it through the Apify connector or a sav
 
 ## Where this Actor fits
 
-- **TikTok discovery and creator profiles come from TikTok One (for Partners).** Use its filters to get the handles; its creator profile already shows the profile facts (followers, bio, audience, etc.). You do not need this Actor for TikTok profile facts.
-- **This Actor adds what TikTok One does not give you:**
-    - **TikTok recent videos with stats**: for a handle, the latest videos with caption, likes, comment count, shares, views and date. Verified live on build 0.0.42.
-    - **One TikTok video by URL** (`posts` mode): the same fields, plus the author's follower count.
-    - **Instagram and Facebook profiles, posts and comments** (what a logged-out visitor can see).
+- **TikTok discovery and creator profiles come from TikTok One (for Partners).** Use its filters to get the handles; its creator profile already shows the profile facts (followers, bio, audience, etc.). You do not need this Actor for TikTok profile facts (it can return them, but they are redundant).
+- **What this Actor can add for TikTok is video-level stats**: caption, likes, comment count, shares, views and date per video. Two routes, both **unreliable, see "Reliability" below**:
+    - `profile` mode with `maxRecentPosts`: the Actor lists a creator's latest videos itself (via TikTok's public creator page) and reads each. Worked once live (build 0.0.42), then TikTok throttled it on the next two attempts.
+    - `posts` mode: give it video URLs (for example ones you already have from TikTok One) and it reads each video's own page. This avoids the throttled creator page. Verified live earlier; cost per video is not re-measured yet.
+- **Instagram and Facebook profiles, posts and comments** (what a logged-out visitor can see) work and are the most dependable part of this Actor.
 - **Not available, do not plan around them:**
     - **TikTok comment text.** TikTok never loads comments for a logged-out browser (tested several ways, including a logged-in cookie: TikTok rejected it). Store Actors that scrape comments cannot be used on the Creator plan, and the universal Apify scrapers (Web Scraper, Playwright, etc.) hit the same TikTok block. So score TikTok creators on captions and the counts (likes, comments, shares, views) instead.
     - **TikTok keyword/hashtag search**, and **Instagram/Facebook keyword search** (login required).
+
+## Reliability (TikTok), measured live on 2026-09-30
+
+- TikTok answers with an empty or challenge page, or with an "overload-protect triggered" throttle page. When that happens the Actor writes a `blocked` row that says so and stops the run.
+- Results over three recent attempts to list a creator's videos: 1 success (build 0.0.42), 2 throttled (builds 0.0.39, 0.0.46). Profile facts loaded in the last two runs.
+- **A throttled run is cheap** (about $0.003 in the last one), a run that loads videos is not (see Budget). Do not retry in a loop; wait, and try again later (hours, not seconds). If `blocked` persists, fall back to TikTok One's own numbers for that creator.
+- Plan the workflow so a missing TikTok video list never blocks scoring: TikTok One data first, video stats as an optional extra.
 
 ## Budget: about $2.85 per day ($85 per month)
 
 This is a guideline, not a hard block, but the cost is real, so treat it carefully:
 
-- **A TikTok lookup with recent videos cost about $0.36 in proxy traffic in a live test** (build 0.0.42), because TikTok's creator page autoplays preview videos. Version 0.8.5 blocks video/audio streams to cut this; until a test after build 0.0.43 confirms the new cost, assume up to ~$0.35 per TikTok creator with videos, i.e. no more than about 6-8 such lookups per day.
-- Cheaper: `posts` mode for a single known video URL, or Instagram/Facebook profile lookups. Check the actual cost of each before batching.
-- After **every** run read the `OUTPUT` record: `cost.platformUsage.usageTotalUsd` (the platform's figure; it can lag, so read it again a minute later if it looks too small), `cost.proxyMegabytes` (measured in the browser; may under-count streamed video), `budget.stopReason`. Add up the day's runs and stop near $2.85.
+- **A run that loads TikTok videos cost about $0.36 in proxy traffic** (build 0.0.42, 3 videos), because TikTok's creator page autoplays preview videos. Version 0.8.5+ blocks video/audio streams to cut this, but **the saving has not been measured yet** (the run that would have shown it was throttled). Until measured, assume up to about $0.35 per creator when videos load, i.e. at most 6-8 such creators per day.
+- A run that gets `blocked` costs almost nothing (about $0.003 in the latest test).
+- Instagram/Facebook profile lookups and `posts` mode: check the actual cost of the first run before batching.
+- After **every** run read the `OUTPUT` record: `cost.platformUsage.usageTotalUsd` (the platform's figure; it can lag, so read it again a minute later if it looks too small), `cost.proxyMegabytes` (measured in the browser; may under-count), `budget.stopReason`. Add up the day's runs and stop near $2.85. Cross-check with Apify Console > Billing > Usage.
 - Always pass the per-run caps: `maxItemsPerRun` and `maxProxyMegabytes` (use 40 for one TikTok creator).
-- One creator per run while costs are unknown. Never re-run a `blocked` lookup in a loop: retries cost money and a throttled TikTok stays throttled for a while.
+- One creator per run until costs are known.
 
 ## Always use
 
