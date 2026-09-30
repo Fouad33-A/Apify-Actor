@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+    accountsInText,
     buildQuery,
     classifySearchPage,
     discoverByWebSearch,
@@ -34,6 +35,7 @@ describe('buildQuery / mentionsExcluded', () => {
             'site:facebook.com debt free',
         );
         expect(buildQuery({ platform: 'tiktok', keyword: 'etf', variant: 1 })).toBe('etf tiktok followers');
+        expect(buildQuery({ platform: 'tiktok', keyword: 'etf', variant: 2 })).toBe('etf "tiktok.com"');
     });
     it('finds the first excluded word in a result (case-insensitive, leading minus ignored)', () => {
         expect(mentionsExcluded('Jane | Budget COURSE here', ['-course', 'coach'])).toBe('course');
@@ -189,6 +191,29 @@ describe('accounts from Google snippets', () => {
     });
 });
 
+describe('accounts named in the result text', () => {
+    const gap = ' filler text of another result '.repeat(8);
+    const text = `Web results Being on a debt payoff journey Instagram · thebudgetmom 900+ likes · 4 months ago${gap}Saving tips for families Instagram · the.frugal.one 2K likes${gap}Facebook · Dave Ramsey${gap}TikTok · moneymia 10K likes`;
+    it('finds every "Instagram · handle" / "TikTok · handle", once each, with the text around it', () => {
+        expect(accountsInText(text, 'instagram').map((a) => a.handle)).toEqual(['thebudgetmom', 'the.frugal.one']);
+        expect(accountsInText(text, 'tiktok').map((a) => a.handle)).toEqual(['moneymia']);
+        expect(accountsInText(text, 'facebook')).toEqual([]);
+        expect(accountsInText(text, 'instagram')[0].snippet).toContain('debt payoff');
+    });
+    it('classifySearchPage takes them as candidates even when no link names the account; excluded words still apply', () => {
+        const res = classifySearchPage({
+            title: 't',
+            text: `${text}${gap}Join my budgeting course today Instagram · coachbob 1K likes`,
+            anchors: [],
+            platform: 'instagram',
+            excludeWords: ['course'],
+        });
+        expect(res.status).toBe('ok');
+        expect(res.hits.map((h) => h.handle)).toEqual(['thebudgetmom', 'the.frugal.one']);
+        expect(res.excluded).toBe(1);
+    });
+});
+
 describe('orderCandidates', () => {
     const c = (platform, handle, o = {}) => ({
         platform,
@@ -302,8 +327,8 @@ describe('discoverByWebSearch (real page, synthetic search engines)', () => {
             {},
         );
         expect(candidates).toEqual([]);
-        // 3 engines x 2 query wordings
-        expect(report.queries[0].attempts).toHaveLength(6);
+        // 3 engines x 3 query wordings
+        expect(report.queries[0].attempts).toHaveLength(9);
         expect(report.queries[0].attempts[0]).toMatchObject({ engine: 'bing', status: 'unrecognised' });
         expect(report.queries[0].attempts[0].detail).toContain('nothing');
     }, 90_000);

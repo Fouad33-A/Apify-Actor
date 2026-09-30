@@ -34,14 +34,16 @@ export const PLATFORM_SITES = { instagram: 'instagram.com', facebook: 'facebook.
 
 // ---- pure helpers ----
 
-// Two ways to ask, simplest first. Variant 0 uses the site: operator, variant 1 has no operator at all (its results
+// Three ways to ask, simplest first (Google sometimes ignores the site: operator, and answers differ from run to run). Variant 0 uses the site: operator, variant 1 has no operator at all (its results
 // are filtered to the platform afterwards), for engines that answer an operator query with an empty page.
 // Words to leave out are NOT sent as minus operators (they made results thinner); they are applied to the results.
-export const QUERY_VARIANTS = 2;
+export const QUERY_VARIANTS = 3;
 export function buildQuery({ platform, keyword, variant = 0 }) {
     const site = PLATFORM_SITES[platform];
     const kw = String(keyword).trim();
-    return variant === 0 ? `site:${site} ${kw}` : `${kw} ${platform} followers`;
+    if (variant === 0) return `site:${site} ${kw}`;
+    if (variant === 1) return `${kw} ${platform} followers`;
+    return `${kw} "${site}"`;
 }
 
 // Pure: does a result mention one of the words the Agent wants left out (course, coach, ...)?
@@ -246,6 +248,25 @@ export function handleFromSnippet(text, platform) {
     return name && !IG_RESERVED.has(name) ? name : null;
 }
 
+// Every "Instagram · handle" / "TikTok · handle" in a result page's visible text, with the text around it.
+export function accountsInText(text, platform) {
+    const label = { instagram: 'Instagram', tiktok: 'TikTok' }[platform] ?? null;
+    if (!label) return [];
+    const re = new RegExp(`${label}\\s*[·•|]\\s*@?([A-Za-z0-9._]{1,30})`, 'g');
+    const out = [];
+    const seen = new Set();
+    for (const m of String(text ?? '').matchAll(re)) {
+        const handle = handleFromSnippet(m[0], platform);
+        if (!handle || seen.has(handle)) continue;
+        seen.add(handle);
+        out.push({
+            handle, // a result's title and description come just before its "Instagram · handle" line
+            snippet: String(text).slice(Math.max(0, m.index - 160), m.index + 60),
+        });
+    }
+    return out;
+}
+
 // The follower figure a snippet shows ("12.4K Followers, 300 Following ..."). Only a hint: never trusted or filtered on.
 export function followerHint(text) {
     const m = String(text ?? '').match(/([\d][\d.,]*\s*[KMB]?)\s+(?:Followers|followers)/);
@@ -294,6 +315,26 @@ export function classifySearchPage({ title = '', text = '', anchors = [], platfo
         if (seenKey.has(key)) continue;
         seenKey.add(key);
         hits.push({ ...found, url, snippet, hint: followerHint(a.container) });
+    }
+    // Google names the account of each Instagram / TikTok result in its text ("Instagram · thebudgetmom"), also for
+    // result blocks whose links carry no account name or are not plain links at all.
+    for (const account of accountsInText(text, platform)) {
+        if (mentionsExcluded(account.snippet, excludeWords)) {
+            excluded += 1;
+            continue;
+        }
+        const key = `${platform}:${account.handle}:post`;
+        if (seenKey.has(key)) continue;
+        seenKey.add(key);
+        resultLinks += 1;
+        hits.push({
+            platform,
+            handle: account.handle,
+            kind: 'post',
+            url: null,
+            snippet: account.snippet,
+            hint: followerHint(account.snippet),
+        });
     }
     if (hits.length) return { status: 'ok', hits, excluded };
     if (excluded) return { status: 'all_excluded', hits: [], excluded };
@@ -394,7 +435,7 @@ export async function parseSerpHtml(html) {
     const body = clean($('body').text());
     return {
         title: clean($('title').text()),
-        text: body.slice(0, 4000),
+        text: body.slice(0, 20_000),
         length: body.length,
         head: body.slice(0, 300),
         links: anchors
@@ -536,7 +577,9 @@ export async function discoverByWebSearch({
         for (const engineName of engines) {
             const engine = SEARCH_ENGINES[engineName];
             const [asked, produced] = tries.get(engineName) ?? [0, 0];
-            if (!engine || blocked.has(engineName) || (asked >= 4 && produced === 0)) continue;
+            // an engine that only ever returns nothing is dropped, but never the last one left (Google varies from run to run)
+            const others = engines.some((e) => e !== engineName && SEARCH_ENGINES[e] && !blocked.has(e));
+            if (!engine || blocked.has(engineName) || (others && asked >= 8 && produced === 0)) continue;
             for (let variant = 0; variant < QUERY_VARIANTS; variant += 1) {
                 const query = buildQuery({ platform: q.platform, keyword: q.keyword, variant });
                 const { got, outcome, detail } = await askEngine(engineName, q, query);
