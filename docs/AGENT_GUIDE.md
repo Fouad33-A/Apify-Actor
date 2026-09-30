@@ -31,6 +31,28 @@ This is a guideline, not a hard block, but the cost is real, so treat it careful
 - Always pass the per-run caps: `maxItemsPerRun` and `maxProxyMegabytes` (use 40 for one TikTok creator).
 - One creator per run until costs are known.
 
+## Batch screening of handles you already have (recommended)
+
+```json
+{
+    "mode": "profile",
+    "platform": "instagram",
+    "usernames": ["handle1", "handle2", "..."],
+    "maxRecentPosts": 0,
+    "minFollowers": 30000,
+    "maxFollowers": 150000,
+    "requireContactEmail": true,
+    "excludeBioPatterns": ["stan.store", "ebook", "e-book"],
+    "onlyPassing": true,
+    "maxItemsPerRun": 60,
+    "maxProxyMegabytes": 250,
+    "blockResourceTypes": ["image", "media", "font"],
+    "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
+}
+```
+
+Each row comes back with `passesFilters` and `filterFailures`; with `onlyPassing` only the profiles that meet every criterion are written (blocked or failed lookups are still written, marked as such). Start with 20-30 handles, read `OUTPUT.cost`, then scale.
+
 ## Discovery: `expand` mode (new in 0.9.0, needs a live check before you rely on it)
 
 There is no keyword or hashtag search (Instagram and Facebook require a login for it; this Actor never logs in). `expand` finds new creators from creators you already know fit, using only pages a logged-out visitor can see:
@@ -54,11 +76,10 @@ Honest expectations:
     - Most people who comment on a creator's posts are ordinary followers (81, 166, 348, 1,121, 1,467 followers...). The audience is not where 30-150K creators come from.
     - Some @mentions are scam-style accounts that do not exist ("invest_brittany_platform_"): they come back `not_found`.
     - Two "commenters" (`129`, `2.4k`) were like counts read as names. Fixed in 0.9.3 (such rows are now dropped).
-- **Ways to get a real yield, in order of value:**
-    1. **More seeds.** A candidate that shows up under several seeds ranks first and is far more likely to be a creator in the same space. Give 10-20 confirmed fits, not 2.
-    2. **Tagged accounts and collaborators.** From 0.9.3 Instagram posts also carry the accounts tagged in the post and its collaboration co-authors (`mentionedAccounts`); those are peers, not audience.
-    3. **Follower pre-screen (0.9.3).** When you give `minFollowers`/`maxFollowers`, each candidate's count is read first from the light embed page, and the full profile (bio, links, e-mail) is read only if the count is in range. Out-of-range candidates come back as a short row that says so, which cuts the cost per rejected candidate a lot, so you can look at 40-50 candidates per run.
-    4. Run it repeatedly: each round's passing candidates become the next round's seeds.
+- **Second live run (build 0.0.55 = code 0.9.3, same two seeds, 30 candidates, pre-screen on):** 30 candidates looked up in 12 minutes, **0 of 30 passed** the 30-150K + bio-email screen. The pre-screen worked (13 candidates were rejected from the light follower count without a full profile read). The audience is tiny accounts (3-9,000 followers); the only accounts near creator size were two _above_ the range (`carlallenofficial` 195,981, `lisasongsutton` 216,982). Seed captions gave no @mentions this time. Measured cost: **about $0.29 in total** (proxy $0.21 for 137 MB, compute $0.08), roughly $0.01 per candidate.
+- **Honest conclusion: `expand` from two seeds does not find creators in your range.** Commenters are the audience, not peers. Do not rely on it as the main source of candidates.
+- **What gives the best result: use curated lists for candidates and this Actor as the batch screener.** The Marketing Agent's web-list handles already come from creator-curated pages (its hit rate was better than 1 in 5). Put those handles in `profile` mode WITH the screening criteria and `onlyPassing: true`, in batches of 30-50: the Actor reads each profile (follower count, bio, links, e-mail), checks your criteria, and returns only the usable ones, with `filterFailures` explaining every reject if you turn `onlyPassing` off. That replaces screening 60 handles by hand. Budget about $0.01 per handle.
+- **`expand` remains useful** as a secondary source when you can give it **10-20 confirmed fits**: accounts that appear under several seeds rank first and are more likely to be creators in the same niche. Run it only on good seeds and read `OUTPUT.expand` for what it saw.
 - **Facebook (build 0.0.51, `NASA` Page, latest post only):** no candidates: the latest post tagged nobody and showed no commenter handles. Facebook yields far less than Instagram for anonymous visitors.
 - **Blocking images/video/fonts works on Instagram** (data intact): always pass `"blockResourceTypes": ["image", "media", "font"]` for Instagram. It roughly halves the traffic. Keep the default (`media` only) for TikTok (blocking images made it return an empty page) and use it cautiously on Facebook.
 - **Cost:** about $2 per GB of residential proxy (16.6 MB measured = about $0.03). The proxy line in `OUTPUT` can lag: re-read it a minute later.
