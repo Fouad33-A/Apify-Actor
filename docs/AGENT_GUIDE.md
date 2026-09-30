@@ -43,6 +43,9 @@ This is a guideline, not a hard block, but the cost is real, so treat it careful
     "maxFollowers": 150000,
     "requireContactEmail": true,
     "excludeBioPatterns": ["stan.store", "ebook", "e-book"],
+    "followLinkInBio": true,
+    "reachPosts": 5,
+    "minReachPercent": 3,
     "onlyPassing": true,
     "maxItemsPerRun": 60,
     "maxProxyMegabytes": 250,
@@ -51,7 +54,19 @@ This is a guideline, not a hard block, but the cost is real, so treat it careful
 }
 ```
 
-Each row comes back with `passesFilters` and `filterFailures`; with `onlyPassing` only the profiles that meet every criterion are written (blocked or failed lookups are still written, marked as such). Start with 20-30 handles, read `OUTPUT.cost`, then scale.
+The screen runs in stages, cheapest first, and each costly step only touches profiles that have not failed yet:
+
+1. **First screen** (no extra page loads): follower range, contact e-mail in the bio, and the `excludeBioPatterns` text in the bio and the links shown in it.
+2. **Link-in-bio pages** (`followLinkInBio`, on by default when `excludeBioPatterns` is set): for profiles that passed, the Actor opens their link-in-bio pages (linktr.ee, beacons.ai, bio.link, carrd.co, stan.store and similar; up to 2 pages, 40 links each) and checks the destination links against the same patterns. A Stan Store one click behind a Linktree is now seen: the row has `bioLinkTargets` (the destinations found) and fails with `bio or link contains "stan.store"`. A page that cannot be read or shows no links is listed in `screeningWarnings`: it is **not** counted as clean, so check those rows by hand.
+3. **Reach rule** (`reachPosts`, 0 = off; use 4-6): for profiles that passed, the latest posts are read and the row gets `postsSampled`, `medianLikes`, `medianComments`, `medianViews`, `likesPctOfFollowers`, `viewsPctOfFollowers` and `reachPctOfFollowers` (median views of the sampled posts / followers when at least 3 posts show views, otherwise median likes / followers; `reachBasis` says which). `minReachPercent` makes profiles below it fail with the numbers. If fewer than 3 posts carry counts (likes hidden, posts not read) reach is `null` and, with `minReachPercent`, the profile fails with "reach could not be computed": it is never guessed. Instagram rounds large like counts (e.g. "117K"); the median is on those displayed numbers.
+
+Each row comes back with `passesFilters` and `filterFailures`; with `onlyPassing` only the profiles that meet every criterion are written (blocked or failed lookups are still written, marked as such). Start with 20-30 handles, read `OUTPUT.cost`, then scale. The link-in-bio and reach steps add cost only for profiles that passed the first screen (link pages are light; reach costs one extra profile load plus one page per sampled post, roughly $0.02-0.03 per profile at about $2 per GB).
+
+**Not possible logged out: the Instagram "Contact" button email.** Checked live: the public profile page carries no `public_email` or business-email field for either account tested; Instagram only gives it to logged-in sessions. The Actor reads e-mail addresses written in the bio text (`contactEmails`), which is what a visitor sees. For a business email that exists only behind the Contact button, the agent must check the profile by hand or ask the creator.
+
+## Run concurrency
+
+Run **at most 2 runs of this Actor at a time** (and 1 at a time if a run uses a large batch). Parallel browser runs on the same proxy pool made page loads time out (a 60-second seed lookup timeout was seen). From 0.10.0 the Actor enforces this itself: a new run waits until fewer than `maxConcurrentRuns` (default 2) other runs that started earlier are still active, polling every 10 seconds, for up to `concurrencyWaitMinutes` (default 10). If it still has no slot it ends without doing any work and writes `OUTPUT.skipped = true` with the reason; retry later. Set `maxConcurrentRuns` to 0 to turn the limit off.
 
 ## Discovery: `expand` mode (new in 0.9.0, needs a live check before you rely on it)
 

@@ -15,6 +15,8 @@ import { log } from 'apify';
 
 import { RateLimitError } from './errors.js';
 import { applyScreening, extractMentions, normalizeHandle, rankCandidates } from './expand.js';
+import { isLinkInBioUrl, resolveBioLinks } from './linkinbio.js';
+import { computeReach } from './reach.js';
 import { makeCommentRow, makePostRow, makeProfileRow } from './schema.js';
 
 export async function runMode({ mode, mod, page, input, budget, pushData, rateLimitErrors, report = {} }) {
@@ -40,17 +42,68 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         onlyPassing = false,
         excludeUsernames = [],
         maxCandidates = 30,
+        followLinkInBio = true,
+        reachPosts = 0,
+        minReachPercent = null,
     } = input;
-    const criteria = { minFollowers, maxFollowers, requireContactEmail, excludeBioPatterns };
+    const shouldContinue = () => budget.canWriteMore();
+    // A platform throttle noticed inside the staged screen: the row is still written, then the run stops.
+    let pendingRateLimit = null;
+    const criteria = { minFollowers, maxFollowers, requireContactEmail, excludeBioPatterns, minReachPercent };
     // Adds the optional screening verdict (facts vs the given criteria; null when no criteria were given).
-    const screenRow = (row) => {
-        const { passes, failures } = applyScreening(row, criteria);
+    // The first screen has no reach numbers yet; the final one includes them.
+    const screenRow = (row, { includeReach = false } = {}) => {
+        const { passes, failures } = applyScreening(row, criteria, { includeReach });
         return { ...row, passesFilters: passes, filterFailures: failures };
     };
+    // The staged screen, cheapest first, each costly step only for profiles that have not failed yet:
+    //  1. followers / bio e-mail / bio+link text (no extra page loads)
+    //  2. link-in-bio pages, so a Stan Store one click behind a Linktree is seen (only when bio patterns are set)
+    //  3. the reach rule: the latest posts' median likes/views vs followers (only when reachPosts > 0)
+    async function finishProfile(profile) {
+        let row = screenRow(profile);
+        const alive = () => row.status === 'found' && row.passesFilters !== false;
+        if (
+            alive() &&
+            followLinkInBio !== false &&
+            excludeBioPatterns.length &&
+            (row.externalLinks ?? []).some(isLinkInBioUrl)
+        ) {
+            const { targets, warnings } = await resolveBioLinks({ page, links: row.externalLinks });
+            row = screenRow({
+                ...row,
+                bioLinkTargets: targets,
+                screeningWarnings: [...(row.screeningWarnings ?? []), ...warnings],
+            });
+        }
+        if (alive() && reachPosts > 0) {
+            const looked = await mod.lookupProfile({
+                page,
+                username: row.username,
+                sourceInput: row.sourceInput,
+                maxRecentPosts: reachPosts,
+                shouldContinue,
+            });
+            row = { ...row, ...computeReach(looked.posts, row.followerCount) };
+            if (looked.rateLimit) pendingRateLimit = looked.rateLimit;
+        }
+        const done = screenRow(row, { includeReach: true });
+        if (
+            row.reachPctOfFollowers == null &&
+            reachPosts > 0 &&
+            row.status === 'found' &&
+            done.passesFilters !== false
+        ) {
+            done.screeningWarnings = [
+                ...(done.screeningWarnings ?? []),
+                'reach not computed: too few posts with like/view counts',
+            ];
+        }
+        return done;
+    }
     // onlyPassing hides profiles that were read fine but do not meet the criteria. Rows that are not `found`
     // (blocked, error, ...) are still written: a failed lookup is never dropped silently.
     const hiddenByFilter = (row) => onlyPassing && row.status === 'found' && row.passesFilters === false;
-    const shouldContinue = () => budget.canWriteMore();
     // Comments are only fetched for posts that were really read (a blocked/not-found row has no usable URL).
     const canComment = (post) => Boolean(post.postUrl) && (post.status ?? 'found') === 'found';
 
@@ -111,16 +164,17 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     maxRecentPosts,
                     shouldContinue,
                 });
-                const screened = screenRow(profile);
+                const screened = await finishProfile(profile);
                 if (!hiddenByFilter(screened)) await write('profile', screened);
                 for (const post of posts) {
                     if (!(await write('post', post))) break;
                     if (fetchComments && canComment(post) && (await collectComments(post.postUrl, username))) return;
                 }
-                if (rateLimit) {
+                if (rateLimit || pendingRateLimit) {
                     // The rows above were written first; now stop, do not keep hitting a platform that throttled us.
-                    rateLimitErrors.push(rateLimit.toRecord());
-                    log.warning(rateLimit.message);
+                    const rl = rateLimit ?? pendingRateLimit;
+                    rateLimitErrors.push(rl.toRecord());
+                    log.warning(rl.message);
                     return;
                 }
             } catch (err) {
@@ -378,7 +432,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     maxRecentPosts: 0,
                     shouldContinue,
                 });
-                const row = screenRow({
+                const row = await finishProfile({
                     ...profile,
                     sourceInput: cand.seeds.join(', '),
                     discoveredFrom: cand.seeds,
@@ -387,9 +441,10 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     discoveryExamples: cand.examples,
                 });
                 if (!hiddenByFilter(row)) await write('profile', row);
-                if (rateLimit) {
-                    rateLimitErrors.push(rateLimit.toRecord());
-                    log.warning(rateLimit.message);
+                if (rateLimit || pendingRateLimit) {
+                    const rl = rateLimit ?? pendingRateLimit;
+                    rateLimitErrors.push(rl.toRecord());
+                    log.warning(rl.message);
                     break;
                 }
             } catch (err) {

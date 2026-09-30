@@ -39,6 +39,17 @@ export function makeProfileRow(fields) {
         discoveryExamples: fields.discoveryExamples ?? [], // up to 3 post URLs where it was seen
         passesFilters: fields.passesFilters ?? null, // null = no screening criteria were given
         filterFailures: fields.filterFailures ?? [],
+        screeningWarnings: fields.screeningWarnings ?? [], // checks that could not be completed (never a silent pass)
+        bioLinkTargets: fields.bioLinkTargets ?? [], // destinations found behind link-in-bio pages (followed on request)
+        // reach rule (computed on request, for profiles that passed the first screen): median of the latest posts
+        postsSampled: fields.postsSampled ?? null,
+        medianLikes: fields.medianLikes ?? null,
+        medianComments: fields.medianComments ?? null,
+        medianViews: fields.medianViews ?? null,
+        likesPctOfFollowers: fields.likesPctOfFollowers ?? null,
+        viewsPctOfFollowers: fields.viewsPctOfFollowers ?? null,
+        reachPctOfFollowers: fields.reachPctOfFollowers ?? null,
+        reachBasis: fields.reachBasis ?? null,
 
         status: fields.status, // "found" | "not_found" | "private"
         statusDetail: fields.statusDetail ?? null,

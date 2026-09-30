@@ -129,6 +129,26 @@
             "default": false,
             "description": "Profiles that were read fine but fail the criteria are left out. Blocked or failed lookups are still written, never dropped silently."
         },
+        "followLinkInBio": {
+            "title": "Screening: follow link-in-bio pages",
+            "type": "boolean",
+            "default": true,
+            "description": "When you give 'fail if bio or link contains' patterns, profiles that pass the first checks have their link-in-bio pages (linktr.ee, beacons.ai, bio.link, carrd.co, stan.store and similar) opened and the destination links checked against the same patterns, so a shop hidden one click behind a Linktree is seen. A page that cannot be read is reported in screeningWarnings, never counted as clean."
+        },
+        "reachPosts": {
+            "title": "Reach rule: number of latest posts to sample",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 12,
+            "description": "0 = off. When 4-6, profiles that pass the first screen get the median likes (and views, where shown) of their latest posts, as a percentage of followers: likesPctOfFollowers, viewsPctOfFollowers, reachPctOfFollowers. Costs one extra profile load plus one page per post, only for profiles that passed."
+        },
+        "minReachPercent": {
+            "title": "Screening: minimum reach (% of followers)",
+            "type": "number",
+            "minimum": 0,
+            "description": "Optional, needs 'Reach rule' above. Profiles whose reachPctOfFollowers is below this (or cannot be computed) get passesFilters=false with the reason."
+        },
         "enrichSearchAuthors": {
             "title": "Load each creator's profile page in search (Mode B)",
             "type": "boolean",
@@ -218,6 +238,20 @@
             "type": "boolean",
             "description": "Leaves out Chromium's 'controlled by automation' flag (navigator.webdriver). Experiment for TikTok. Changes nothing else.",
             "default": false
+        },
+        "maxConcurrentRuns": {
+            "title": "Max runs of this Actor working at once",
+            "type": "integer",
+            "default": 2,
+            "minimum": 0,
+            "description": "A new run waits until fewer than this many OTHER runs that started earlier are still active (parallel browser runs made page loads time out). 0 = no limit."
+        },
+        "concurrencyWaitMinutes": {
+            "title": "How long a run may wait for a free slot (minutes)",
+            "type": "integer",
+            "default": 10,
+            "minimum": 1,
+            "description": "After this the run ends without doing any work (OUTPUT.skipped = true) so the caller can retry later."
         }
     },
     "required": ["mode", "platform"]

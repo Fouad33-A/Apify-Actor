@@ -85,12 +85,19 @@ export function rankCandidates(events, { seeds = [], exclude = [] } = {}) {
         );
 }
 
-// Optional screening of a profile row. Returns { passes, failures }; passes is null when no criterion is set.
+// Optional screening of a profile row. Returns { passes, failures }; passes is null when no criterion applies.
 // It only reports facts about the row against the criteria given; it never guesses a missing value as a pass.
-export function applyScreening(row, criteria = {}) {
-    const { minFollowers, maxFollowers, requireContactEmail, excludeBioPatterns } = criteria;
+// includeReach=false is the first screen (before the post-based reach numbers exist).
+export function applyScreening(row, criteria = {}, { includeReach = true } = {}) {
+    const { minFollowers, maxFollowers, requireContactEmail, excludeBioPatterns, minReachPercent } = criteria;
     const patterns = (excludeBioPatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
-    const active = minFollowers != null || maxFollowers != null || Boolean(requireContactEmail) || patterns.length > 0;
+    const reachActive = includeReach && minReachPercent != null;
+    const active =
+        minFollowers != null ||
+        maxFollowers != null ||
+        Boolean(requireContactEmail) ||
+        patterns.length > 0 ||
+        reachActive;
     if (!active) return { passes: null, failures: [] };
 
     const failures = [];
@@ -108,8 +115,18 @@ export function applyScreening(row, criteria = {}) {
     }
     if (requireContactEmail && !(row.contactEmails ?? []).length) failures.push('no contact email in the bio');
     if (patterns.length) {
-        const haystack = [row.bio, ...(row.externalLinks ?? [])].filter(Boolean).join(' \n ').toLowerCase();
+        // The bio, the links in it, and (when followed) the destinations behind link-in-bio pages.
+        const haystack = [row.bio, ...(row.externalLinks ?? []), ...(row.bioLinkTargets ?? [])]
+            .filter(Boolean)
+            .join(' \n ')
+            .toLowerCase();
         for (const p of patterns) if (haystack.includes(p)) failures.push(`bio or link contains "${p}"`);
+    }
+    if (reachActive) {
+        if (row.reachPctOfFollowers == null) failures.push('reach could not be computed (too few posts with counts)');
+        else if (row.reachPctOfFollowers < minReachPercent) {
+            failures.push(`reach ${row.reachPctOfFollowers}% of followers is below ${minReachPercent}%`);
+        }
     }
     return { passes: failures.length === 0, failures };
 }

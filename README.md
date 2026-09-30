@@ -28,22 +28,24 @@ Start small: `maxRecentPosts` 1-3 and `maxItemsPerRun` 5 costs a few cents.
 
 ## Input
 
-| Field                  | Meaning                                                                                      |
-| ---------------------- | -------------------------------------------------------------------------------------------- |
-| `mode`                 | `profile`, `posts` (known post URLs, TikTok), `comments`, `search`, or `probe` (diagnostics) |
-| `platform`             | `instagram`, `facebook` or `tiktok`                                                          |
-| `usernames`            | Handles without `@` (Mode A)                                                                 |
-| `postUrls`             | Post URLs (`posts` and `comments` modes)                                                     |
-| `maxRecentPosts`       | Posts per profile                                                                            |
-| `fetchComments`        | Also fetch comments for each post returned                                                   |
-| `maxCommentsPerPost`   | Comment cap per post                                                                         |
-| `topLevelCommentsOnly` | Skip replies                                                                                 |
-| `maxItemsPerRun`       | Hard cap on rows written                                                                     |
-| `maxProxyMegabytes`    | Hard cap on proxy traffic; the run stops cleanly when reached (default 300, 0 = none)        |
-| `proxyPricePerGbUsd`   | Optional: adds an estimated proxy cost in dollars to the cost report                         |
-| `blockHeavyResources`  | Skip images/video/fonts to save traffic. Off by default (TikTok returns an empty page if on) |
-| `proxyConfiguration`   | Apify Proxy settings                                                                         |
-| `sessionCookies`       | Optional, secret. Not needed for anything above.                                             |
+| Field                                                | Meaning                                                                                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`                                               | `profile`, `posts` (known post URLs, TikTok), `comments`, `search`, or `probe` (diagnostics)                                    |
+| `platform`                                           | `instagram`, `facebook` or `tiktok`                                                                                             |
+| `usernames`                                          | Handles without `@` (Mode A)                                                                                                    |
+| `postUrls`                                           | Post URLs (`posts` and `comments` modes)                                                                                        |
+| `maxRecentPosts`                                     | Posts per profile                                                                                                               |
+| `fetchComments`                                      | Also fetch comments for each post returned                                                                                      |
+| `maxCommentsPerPost`                                 | Comment cap per post                                                                                                            |
+| `topLevelCommentsOnly`                               | Skip replies                                                                                                                    |
+| `maxItemsPerRun`                                     | Hard cap on rows written                                                                                                        |
+| `maxProxyMegabytes`                                  | Hard cap on proxy traffic; the run stops cleanly when reached (default 300, 0 = none)                                           |
+| `proxyPricePerGbUsd`                                 | Optional: adds an estimated proxy cost in dollars to the cost report                                                            |
+| `blockHeavyResources`                                | Skip images/video/fonts to save traffic. Off by default (TikTok returns an empty page if on)                                    |
+| `proxyConfiguration`                                 | Apify Proxy settings                                                                                                            |
+| `followLinkInBio` / `reachPosts` / `minReachPercent` | Screening stages: follow link-in-bio pages; sample the latest posts' median likes/views as % of followers; fail below a minimum |
+| `maxConcurrentRuns`                                  | How many runs of this Actor may work at once (default 2); others wait their turn                                                |
+| `sessionCookies`                                     | Optional, secret. Not needed for anything above.                                                                                |
 
 ## Output
 

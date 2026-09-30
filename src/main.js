@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 
 import { BudgetTracker } from './budget.js';
 import { makeCharger } from './charging.js';
+import { waitForSlot } from './concurrency.js';
 import { parseCookieHeader, resolveSessionCookies } from './cookies.js';
 import { CostTracker } from './cost.js';
 import { runtimeInfo } from './diagnostics.js';
@@ -35,6 +36,8 @@ const {
     standardUserAgent = false,
     fullChromium = false,
     hideAutomationFlag = false,
+    maxConcurrentRuns = 2,
+    concurrencyWaitMinutes = 10,
     sessionCookies = '',
     proxyConfiguration: proxyInput = { useApifyProxy: true },
 } = input;
@@ -43,6 +46,28 @@ if (!PLATFORM_MODULES[platform]) {
     throw new Error(`Unknown platform "${platform}" - expected tiktok, instagram or facebook`);
 }
 const mod = PLATFORM_MODULES[platform];
+
+// Wait for a free slot if too many runs of this Actor are already working (parallel runs made page loads time out).
+const slot = await waitForSlot({
+    client: Actor.apifyClient,
+    actorId: process.env.ACTOR_ID,
+    selfRunId: process.env.ACTOR_RUN_ID,
+    limit: maxConcurrentRuns,
+    maxWaitMs: concurrencyWaitMinutes * 60_000,
+    log: (m) => log.info(m),
+});
+if (slot.gaveUp) {
+    const message = `Skipped: still ${maxConcurrentRuns} or more other runs of this Actor active after waiting ${concurrencyWaitMinutes} minutes. Start fewer runs at once, or raise maxConcurrentRuns.`;
+    log.warning(message);
+    await Actor.setValue('OUTPUT', {
+        mode,
+        platform,
+        skipped: true,
+        skippedReason: 'too_many_concurrent_runs',
+        message,
+    });
+    await Actor.exit({ statusMessage: message });
+}
 const budget = new BudgetTracker(maxItemsPerRun);
 const cost = new CostTracker({
     budget,
