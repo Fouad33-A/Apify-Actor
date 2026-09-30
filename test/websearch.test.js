@@ -339,6 +339,22 @@ describe('Google through the SERP proxy (HTTP, no browser)', () => {
         ]);
     });
 
+    it('finds accounts in a result page whose links are redirects with an empty q= or only in the page source', async () => {
+        const odd = `<html><head><title>x - Google Search</title><style>:root{--a:#fff}</style></head><body>
+          <div><a href="/url?esrc=s&q=&rct=j&url=https://www.instagram.com/zoe.saves/&ved=1"><h3>Zoe</h3></a><div>12K Followers - money</div></div>
+          <script>window.data={"u":"https:\\/\\/www.tiktok.com\\/@moneymia\\/video\\/123"};</script>
+          <a href="/imgres?imgurl=https%3A%2F%2Fwww.instagram.com%2Fp%2FABC%2F">img</a>
+          <span data-u="https%3A%2F%2Fwww.instagram.com%2Fjoe_budget%2F">x</span></body></html>`;
+        const parsed = await parseSerpHtml(odd);
+        expect(parsed.text).not.toContain('--a');
+        expect(parsed.diag).toMatch(/platform addresses in source: \d+/);
+        const { candidates } = await run({ serpFetch: async () => parsed, excludeWords: [] });
+        expect(candidates.map((c) => c.handle).sort()).toEqual(['joe_budget', 'zoe.saves']);
+        expect(unwrapSearchUrl('https://www.google.com/url?esrc=s&q=&url=https%3A%2F%2Fwww.instagram.com%2Fa%2F')).toBe(
+            'https://www.instagram.com/a/',
+        );
+    });
+
     it('a Google block page is reported as blocked and the engine is not used again', async () => {
         const blocked = await parseSerpHtml(
             '<html><head><title>Sorry</title></head><body>Our systems have detected unusual traffic from your computer network.</body></html>',

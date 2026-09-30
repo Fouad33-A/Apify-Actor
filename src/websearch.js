@@ -84,7 +84,7 @@ export function unwrapSearchUrl(href) {
             return v && /^https?:\/\//i.test(v) ? v : null;
         }
         if (/(^|\.)google\.[a-z.]+$/.test(host) && u.pathname === '/url') {
-            const v = u.searchParams.get('q') ?? u.searchParams.get('url');
+            const v = u.searchParams.get('q') || u.searchParams.get('url');
             return v && /^https?:\/\//i.test(v) ? v : null;
         }
     } catch {
@@ -305,7 +305,34 @@ export function domSearchPageInfo() {
     };
 }
 
-// Result page HTML (from the SERP proxy) -> { title, text, length, head, links, anchors } like the browser reads it.
+// Every Instagram / Facebook / TikTok address written anywhere in the page source (plain, JSON-escaped or
+// percent-encoded inside a redirect). A safety net for result pages whose links are not ordinary anchors.
+export function platformUrlsInText(html) {
+    const text = String(html ?? '')
+        .replace(/\\u003d/gi, '=')
+        .replace(/\\u0026/gi, '&')
+        .replace(/\\u002F/gi, '/')
+        .replace(/&amp;/g, '&');
+    const found = [];
+    const add = (u) => {
+        const cleaned = u.replace(/[).,;'"\\]+$/, '');
+        if (!found.includes(cleaned)) found.push(cleaned);
+    };
+    for (const m of text.matchAll(/https?:\/\/(?:www\.|m\.)?(?:instagram|facebook|tiktok)\.com\/[^\s"'<>\\)&]+/gi))
+        add(m[0]);
+    for (const m of text.matchAll(
+        /https?%3A%2F%2F(?:www\.|m\.)?(?:instagram|facebook|tiktok)\.com%2F[^&"'<>\s\\]+/gi,
+    )) {
+        try {
+            add(decodeURIComponent(m[0]));
+        } catch {
+            // not decodable: skip
+        }
+    }
+    return found.slice(0, 200);
+}
+
+// Result page HTML (from the SERP proxy) -> { title, text, length, head, links, diag, anchors } like the browser reads it.
 export async function parseSerpHtml(html) {
     // cheerio and got-scraping come with crawlee (already installed, hoisted to the top level by the lockfile)
     // eslint-disable-next-line import-x/no-extraneous-dependencies
@@ -328,6 +355,11 @@ export async function parseSerpHtml(html) {
         }
         anchors.push({ href, text, container: clean(block.text()).slice(0, 400) });
     });
+    // addresses found anywhere in the source that no anchor carried
+    const seen = new Set(anchors.map((a) => a.href));
+    const extra = platformUrlsInText(html).filter((u) => !seen.has(u));
+    for (const u of extra) anchors.push({ href: u, text: '', container: '' });
+    $('style, script, noscript').remove();
     const body = clean($('body').text());
     return {
         title: clean($('title').text()),
@@ -338,6 +370,7 @@ export async function parseSerpHtml(html) {
             .map((a) => a.href)
             .filter((h) => /^https?:/.test(h) && !/google\./.test(h))
             .slice(0, 8),
+        diag: `html ${String(html ?? '').length} bytes, ${anchors.length} links (${extra.length} from the page source), platform addresses in source: ${platformUrlsInText(html).length}, asks for JavaScript: ${/enablejs|enable javascript/i.test(String(html))}`,
         anchors,
     };
 }
@@ -441,7 +474,11 @@ export async function discoverByWebSearch({
                 outcome = res.status;
                 if (res.status !== 'ok') {
                     const links = info.links.map((h) => unwrapSearchUrl(h) ?? h).map((h) => h.slice(0, 100));
-                    detail = `${info.title} | ${info.head} | links: ${links.join(' ')}`.slice(0, 700);
+                    detail =
+                        `${info.title} | ${info.head} | ${info.diag ? `${info.diag} | ` : ''}links: ${links.join(' ')}`.slice(
+                            0,
+                            900,
+                        );
                     break;
                 }
                 const before = got;
