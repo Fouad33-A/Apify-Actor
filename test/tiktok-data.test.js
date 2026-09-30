@@ -206,6 +206,7 @@ describe('TikTok flows (real Chromium, synthetic pages)', () => {
     let browser;
     beforeAll(async () => {
         browser = await launchBrowser();
+        tiktok.timing.pageDataWaitMs = 1200;
         Object.assign(tiktok.timing, {
             listWaitMs: 2500,
             commentWaitMs: 2000,
@@ -544,6 +545,7 @@ describe('fetchPost (real Chromium, synthetic page)', () => {
     let browser;
     beforeAll(async () => {
         browser = await launchBrowser();
+        tiktok.timing.pageDataWaitMs = 1200;
     });
     afterAll(async () => {
         await browser?.close();
@@ -657,6 +659,7 @@ describe('creator embed route (real Chromium, synthetic pages)', () => {
     let browser;
     beforeAll(async () => {
         browser = await launchBrowser();
+        tiktok.timing.pageDataWaitMs = 1200;
         Object.assign(tiktok.timing, {
             listWaitMs: 2500,
             commentWaitMs: 2000,

@@ -139,6 +139,7 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
     let browser;
     beforeAll(async () => {
         browser = await launchBrowser();
+        tiktok.timing.pageDataWaitMs = 1200;
     });
     afterAll(async () => {
         await browser?.close();
@@ -218,4 +219,38 @@ describe('lookupProfile (full flow, synthetic pages)', () => {
         expect(profile.status).toBe('private');
         expect(profile.statusDetail).toMatch(/private/i);
     });
+});
+
+describe('lookupProfile: a challenge page that reloads itself once (as TikTok does)', () => {
+    let browser;
+    beforeAll(async () => {
+        browser = await launchBrowser();
+        tiktok.timing.pageDataWaitMs = 4000;
+    });
+    afterAll(async () => {
+        await browser?.close();
+    });
+
+    // First response: a bare shell whose script reloads the page; the reload has the embedded data.
+    const reloading = (fullBody) => `<!doctype html><html><body>
+        <script>
+        if (!sessionStorage.getItem('seen')) { sessionStorage.setItem('seen', '1'); setTimeout(() => location.reload(), 300); }
+        else { document.write(${JSON.stringify(fullBody).replaceAll('</', '<\\/')}); document.close(); }
+        </script></body></html>`;
+
+    it('waits for the reload and reads the real page instead of failing or reporting a shell', async () => {
+        const full = page({ json: detail() });
+        const context = await browser.newContext();
+        try {
+            await serve(context, [{ match: /tiktok\.com\/@nasa$/, body: reloading(full) }]);
+            const { profile } = await tiktok.lookupProfile({
+                page: await context.newPage(),
+                username: 'nasa',
+                sourceInput: 'nasa',
+            });
+            expect(profile).toMatchObject({ status: 'found', followerCount: 1_871_927 });
+        } finally {
+            await context.close();
+        }
+    }, 60_000);
 });

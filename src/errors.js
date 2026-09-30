@@ -55,7 +55,22 @@ export function checkPageForRateLimit(platform, endpoint, pageText) {
 // Checks what a visitor would actually see. Scanning raw HTML is wrong: normal pages carry
 // words like "captcha" or "rate limit" inside script bundles (TikTok's page does), which
 // would falsely stop a healthy run.
+// Runs page.evaluate, retrying when the page navigates or reloads underneath it (TikTok's first response is
+// often a small challenge page that reloads itself once).
+export async function evaluateStable(page, fn, arg, { retries = 3, settleMs = 1500 } = {}) {
+    for (let attempt = 0; ; attempt += 1) {
+        try {
+            return await page.evaluate(fn, arg);
+        } catch (err) {
+            const navigating = /Execution context was destroyed|navigation/i.test(String(err?.message));
+            if (!navigating || attempt >= retries) throw err;
+            await page.waitForLoadState('domcontentloaded').catch(() => {});
+            await page.waitForTimeout(settleMs);
+        }
+    }
+}
+
 export async function assertNotRateLimited(page, platform, endpoint) {
-    const text = await page.evaluate(() => (document.body ? document.body.innerText : ''));
+    const text = await evaluateStable(page, () => (document.body ? document.body.innerText : ''));
     checkPageForRateLimit(platform, endpoint, text);
 }

@@ -13,7 +13,7 @@
 
 import { captureJson } from '../capture.js';
 import { saveDiagnostics } from '../diagnostics.js';
-import { assertNotRateLimited } from '../errors.js';
+import { assertNotRateLimited, evaluateStable } from '../errors.js';
 import { extractEmails, makeCommentRow, makePostRow, makeProfileRow, parseAbbrevCount } from '../schema.js';
 
 const DOMAIN = 'www.tiktok.com';
@@ -25,6 +25,7 @@ export const timing = {
     commentRetryWaitMs: 8000,
     nextPageWaitMs: 8000,
     embedWaitMs: 10_000,
+    pageDataWaitMs: 10_000,
 };
 
 export function normalizeTiktokUsername(input) {
@@ -200,8 +201,15 @@ function itemToPostRow(item, { sourceInput, profile = {} }) {
 
 // ---------- page helpers ----------
 
+// TikTok often answers first with a small challenge page that sets a cookie and reloads itself; the real page
+// (with the embedded data) follows. Wait for the data script to exist instead of reading the first response.
 async function readRehydration(page) {
-    const text = await page.evaluate(() => {
+    await page
+        .waitForSelector('#__UNIVERSAL_DATA_FOR_REHYDRATION__', { state: 'attached', timeout: timing.pageDataWaitMs })
+        .catch(() => {
+            // not there (yet): read whatever is on the page, the caller reports what it finds
+        });
+    const text = await evaluateStable(page, () => {
         const el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
         return el ? el.textContent : null;
     });
@@ -358,7 +366,7 @@ async function loadCreatorEmbed(page, username) {
             if (err?.name === 'RateLimitError') return { header: null, videos: [], throttled: err };
             throw err;
         }
-        const { text, anchors } = await page.evaluate(domExtractCreatorEmbed);
+        const { text, anchors } = await evaluateStable(page, domExtractCreatorEmbed);
         const result = { header: parseCreatorEmbedText(text), videos: parseEmbedVideos(anchors) };
         if (!result.videos.length) {
             await saveDiagnostics(page, await page.content(), `embed_${username}`, {
