@@ -1,16 +1,27 @@
-# Agent guide: Verity Social Actor (one page)
+# Agent guide: Verity Social Actor
 
-Actor: `fouad_dp/my-actor` (private, run through the Apify connector or a saved Task). It fetches raw public data from TikTok, Instagram and Facebook. It does no scoring or judging: that stays with you.
+Actor: `fouad_dp/my-actor` (private; run it through the Apify connector or a saved Task). It fetches raw public data from TikTok, Instagram and Facebook. It does no scoring or judging: that stays with you.
 
-## Budget: stay within about $2.85 per day
+## Where this Actor fits
 
-The monthly budget is $85, which is about **$2.85 per day**. This is a guideline, not a hard block, but keep it in mind on every run:
+- **TikTok discovery and creator profiles come from TikTok One (for Partners).** Use its filters to get the handles; its creator profile already shows the profile facts (followers, bio, audience, etc.). You do not need this Actor for TikTok profile facts.
+- **This Actor adds what TikTok One does not give you:**
+    - **TikTok recent videos with stats**: for a handle, the latest videos with caption, likes, comment count, shares, views and date. Verified live on build 0.0.42.
+    - **One TikTok video by URL** (`posts` mode): the same fields, plus the author's follower count.
+    - **Instagram and Facebook profiles, posts and comments** (what a logged-out visitor can see).
+- **Not available, do not plan around them:**
+    - **TikTok comment text.** TikTok never loads comments for a logged-out browser (tested several ways, including a logged-in cookie: TikTok rejected it). Store Actors that scrape comments cannot be used on the Creator plan, and the universal Apify scrapers (Web Scraper, Playwright, etc.) hit the same TikTok block. So score TikTok creators on captions and the counts (likes, comments, shares, views) instead.
+    - **TikTok keyword/hashtag search**, and **Instagram/Facebook keyword search** (login required).
 
-- Start small: 1-3 usernames, `maxRecentPosts` 3, `maxItemsPerRun` 20-30. Scale up only if the earlier run was cheap.
-- One profile lookup moves about 6-7 MB of residential proxy traffic. Check the real cost before batching dozens.
-- After every run read the `OUTPUT` record (key-value store): `cost.proxyMegabytes`, `cost.platformUsage.usageTotalUsd`, `budget.stopReason`. Add the day's runs up yourself and stop for the day when you are near $2.85.
-- Always pass `maxItemsPerRun` and `maxProxyMegabytes` (the Actor's own hard caps per run).
-- Never re-run a `blocked` lookup in a loop: a blocked platform stays blocked and each retry costs money.
+## Budget: about $2.85 per day ($85 per month)
+
+This is a guideline, not a hard block, but the cost is real, so treat it carefully:
+
+- **A TikTok lookup with recent videos cost about $0.36 in proxy traffic in a live test** (build 0.0.42), because TikTok's creator page autoplays preview videos. Version 0.8.5 blocks video/audio streams to cut this; until a test after build 0.0.43 confirms the new cost, assume up to ~$0.35 per TikTok creator with videos, i.e. no more than about 6-8 such lookups per day.
+- Cheaper: `posts` mode for a single known video URL, or Instagram/Facebook profile lookups. Check the actual cost of each before batching.
+- After **every** run read the `OUTPUT` record: `cost.platformUsage.usageTotalUsd` (the platform's figure; it can lag, so read it again a minute later if it looks too small), `cost.proxyMegabytes` (measured in the browser; may under-count streamed video), `budget.stopReason`. Add up the day's runs and stop near $2.85.
+- Always pass the per-run caps: `maxItemsPerRun` and `maxProxyMegabytes` (use 40 for one TikTok creator).
+- One creator per run while costs are unknown. Never re-run a `blocked` lookup in a loop: retries cost money and a throttled TikTok stays throttled for a while.
 
 ## Always use
 
@@ -20,46 +31,31 @@ The monthly budget is $85, which is about **$2.85 per day**. This is a guideline
 
 ## Recipes
 
-| Goal                                | Input                                                                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Creator profile (any platform)      | `{"mode":"profile","platform":"tiktok","usernames":["nasa"],"maxRecentPosts":0,"maxItemsPerRun":10,"maxProxyMegabytes":60}`    |
-| Instagram profile + recent posts    | `{"mode":"profile","platform":"instagram","usernames":["nasa"],"maxRecentPosts":5,"maxItemsPerRun":10,"maxProxyMegabytes":60}` |
-| Instagram/Facebook posts + comments | same, plus `"fetchComments":true,"maxCommentsPerPost":10`                                                                      |
-| One TikTok video's metrics          | `{"mode":"posts","platform":"tiktok","postUrls":["https://www.tiktok.com/@user/video/123"],"maxItemsPerRun":5}`                |
-| Comments on known post URLs (IG/FB) | `{"mode":"comments","platform":"instagram","postUrls":["https://www.instagram.com/p/XXXX/"],"maxCommentsPerPost":10}`          |
+| Goal                                 | Input                                                                                                                                  |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| TikTok: recent videos of one creator | `{"mode":"profile","platform":"tiktok","usernames":["handle"],"maxRecentPosts":3,"maxItemsPerRun":6,"maxProxyMegabytes":40}`           |
+| TikTok: one video's metrics          | `{"mode":"posts","platform":"tiktok","postUrls":["https://www.tiktok.com/@user/video/123"],"maxItemsPerRun":3,"maxProxyMegabytes":20}` |
+| Instagram profile + recent posts     | `{"mode":"profile","platform":"instagram","usernames":["handle"],"maxRecentPosts":5,"maxItemsPerRun":10,"maxProxyMegabytes":60}`       |
+| Instagram/Facebook posts + comments  | the same, plus `"fetchComments":true,"maxCommentsPerPost":10`                                                                          |
+| Comments on known IG/FB post URLs    | `{"mode":"comments","platform":"instagram","postUrls":["https://www.instagram.com/p/XXXX/"],"maxCommentsPerPost":10}`                  |
 
 Read rows with `get-dataset-items`; read the run report with `get-key-value-store-record` (record `OUTPUT`).
-
-## What works, and what does not (verified live)
-
-- Profiles (followers, bio, links, contact email, verified): TikTok, Instagram, Facebook Pages. Yes.
-- **TikTok recent videos (`profile` mode with `maxRecentPosts`)**: yes, since 0.8.1. The Actor reads TikTok's public creator embed for the latest video ids, then each video's own page for caption, likes, comments count, shares, views, date. If a video page is withheld the row says so and keeps only what the embed showed.
-- TikTok video by URL (`posts` mode): yes, same fields plus the author's follower count.
-- Instagram posts (caption, likes, comment count, date) and comments: yes (what a logged-out visitor sees).
-- Facebook: latest post(s) and a few comments with commenter handle: yes.
-- **Not available logged out, on any run: TikTok comment text, TikTok keyword/hashtag search, Instagram/Facebook keyword search.** TikTok never loads comments or search results for a logged-out browser (tested several ways); the hashtag and keyword pages come back empty. Rows for these say `blocked`/`error`.
-
-## Discovery and comments: recommended TikTok workflow
-
-1. **Discover with TikTok One (for Partners)**: apply the audience filters there and collect the creators' TikTok handles. This replaces keyword/hashtag search, which TikTok does not serve to logged-out browsers. (Fallback: your own web search limited to TikTok, e.g. `site:tiktok.com/@ "etf investing"`.)
-2. **This Actor, `profile` mode** on those handles with `"platform":"tiktok","maxRecentPosts":3-5`: exact followers, bio, links, contact email, and recent videos with caption, likes, comments, shares, views. TikTok sometimes withholds pages or throttles ("overload-protect"); a `blocked` row means "try again later", not "no data". Do not loop.
-3. **Comment text** is not available from this Actor. If comment scoring is needed, run a Store Actor for it on the video URLs from step 2 (for example `clockworks/tiktok-comments-scraper`, about $0.001 per comment, or `apidojo/tiktok-comments-scraper`, about $0.0003 per comment) and join the rows yourself. Keep counts small (5-10 comments per video) to stay within the daily budget.
-4. Score the raw rows with Verity's own rules.
 
 ## Reading the rows
 
 Every row has `recordType` (`profile`, `post`, `comment`) and `status`:
 
-- `found`: real data. Missing individual fields are `null` (never guessed).
+- `found`: real data. A missing individual field is `null` (never guessed).
 - `private`: only public header facts.
-- `not_found`: the account/post does not exist.
-- `blocked`: the platform withheld it (login wall or bot check). Treat as **data unavailable**, not as "empty".
+- `not_found`: the account or post does not exist.
+- `blocked`: the platform withheld it (empty page, login wall, throttle such as TikTok's "overload-protect"). Treat as **data unavailable**, not as "empty". Try again later, not in a loop.
 - `error`: the lookup failed; `statusDetail` says why.
 
-Rounded numbers are flagged in `statusDetail` (Instagram likes such as "117K"). Facebook has relative times only (`publishDate` null).
+Notes: TikTok video dates from a withheld page are approximate (taken from the video id). Instagram likes such as "117K" are rounded and flagged in `statusDetail`. Facebook shows relative times only (`publishDate` null).
 
 ## Rules
 
 - Public data only. No logins, cookies or tokens in prompts, chats or the repo.
 - Do not score inside the Actor; take the raw rows and apply Verity's own keyword and audience-fit rules elsewhere.
-- Report `blocked`/`error` rows to the user instead of hiding them.
+- Report `blocked` and `error` rows to the user instead of hiding them.
+- Never hammer a platform that throttled you: stop and report.

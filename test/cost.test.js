@@ -130,6 +130,29 @@ describe('CostTracker (real Chromium, local server)', () => {
         expect(blocked.bytes).toBeLessThan(50_000);
     });
 
+    it('blockTypes blocks only the listed types: media alone leaves images loading', async () => {
+        const mediaOnly = new CostTracker();
+        const ctx = await browser.newContext();
+        await mediaOnly.attach(ctx, { blockTypes: ['media'] });
+        const page = await ctx.newPage();
+        await page.goto(`${base}/page`, { waitUntil: 'load' });
+        await mediaOnly.settle();
+        await ctx.close();
+        expect(mediaOnly.blockedRequests).toBe(0); // the page has images, no media
+        expect(mediaOnly.bytes).toBeGreaterThan(150_000);
+    });
+
+    it('blocking nothing is the default', async () => {
+        const c = new CostTracker();
+        const ctx = await browser.newContext();
+        await c.attach(ctx);
+        const page = await ctx.newPage();
+        await page.goto(`${base}/page`, { waitUntil: 'load' });
+        await c.settle();
+        await ctx.close();
+        expect(c.blockedRequests).toBe(0);
+    });
+
     it('does not block data requests (fetch/xhr) and stops the run when the cap is passed', async () => {
         const budget = new BudgetTracker(100);
         const c = new CostTracker({ budget, maxProxyMegabytes: 0.004 });

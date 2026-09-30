@@ -31,6 +31,7 @@ const {
     maxProxyMegabytes = 300,
     proxyPricePerGbUsd = null,
     blockHeavyResources = false,
+    blockResourceTypes = ['media'],
     standardUserAgent = false,
     fullChromium = false,
     hideAutomationFlag = false,
@@ -119,7 +120,7 @@ const context = await browser.newContext({
     extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
 });
 
-await cost.attach(context, { blockHeavyResources });
+await cost.attach(context, { blockHeavyResources, blockTypes: blockResourceTypes });
 
 // Never logged: only how many cookies were applied and where they came from.
 const session = resolveSessionCookies({ input: sessionCookies, platform });

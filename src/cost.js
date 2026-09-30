@@ -41,10 +41,13 @@ export class CostTracker {
         }
     }
 
-    async attach(context, { blockHeavyResources = true } = {}) {
-        if (blockHeavyResources) {
+    // blockTypes: resource types to abort (any of 'image', 'media', 'font'). blockHeavyResources=true means all three.
+    // 'media' (video/audio streams) is what the TikTok creator embed autoplays: unmeasured and expensive.
+    async attach(context, { blockHeavyResources = false, blockTypes = [] } = {}) {
+        const blocked = blockHeavyResources ? BLOCKED_TYPES : new Set(blockTypes.filter((t) => BLOCKED_TYPES.has(t)));
+        if (blocked.size) {
             await context.route('**/*', (route) => {
-                if (BLOCKED_TYPES.has(route.request().resourceType())) {
+                if (blocked.has(route.request().resourceType())) {
                     this.blockedRequests += 1;
                     return route.abort();
                 }
