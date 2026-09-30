@@ -94,6 +94,20 @@ export function unwrapSearchUrl(href) {
 }
 
 const IG_RESERVED = new Set([
+    'popular',
+    'nametag',
+    'topics',
+    'hashtag',
+    'channel',
+    'shop',
+    'business',
+    'lite',
+    'press',
+    'blog',
+    'help',
+    'safety',
+    'terms',
+    'developers',
     'p',
     'reel',
     'reels',
@@ -219,6 +233,19 @@ export function handleFromTitle(text, platform) {
     return m[1].toLowerCase();
 }
 
+// Google shows an Instagram/TikTok result's account as "Instagram · thebudgetmom" above the snippet, even when the
+// address is a reel or post link with no account name in it.
+export function handleFromSnippet(text, platform) {
+    const patterns = {
+        instagram: /Instagram\s*[·•|]\s*@?([A-Za-z0-9._]{1,30})/,
+        tiktok: /TikTok\s*[·•|]\s*@?([A-Za-z0-9._]{2,24})/,
+    };
+    const m = patterns[platform] ? String(text ?? '').match(patterns[platform]) : null;
+    if (!m) return null;
+    const name = m[1].replace(/\.+$/, '').toLowerCase();
+    return name && !IG_RESERVED.has(name) ? name : null;
+}
+
 // The follower figure a snippet shows ("12.4K Followers, 300 Following ..."). Only a hint: never trusted or filtered on.
 export function followerHint(text) {
     const m = String(text ?? '').match(/([\d][\d.,]*\s*[KMB]?)\s+(?:Followers|followers)/);
@@ -250,7 +277,10 @@ export function classifySearchPage({ title = '', text = '', anchors = [], platfo
             } catch {
                 host = '';
             }
-            const named = host === site ? handleFromTitle(a.text, platform) : null;
+            const named =
+                host === site
+                    ? (handleFromTitle(a.text, platform) ?? handleFromSnippet(`${a.text} ${a.container}`, platform))
+                    : null;
             if (named) found = { platform, handle: named, kind: 'post' };
         }
         if (found) resultLinks += 1;
@@ -337,7 +367,8 @@ export async function parseSerpHtml(html) {
     // cheerio and got-scraping come with crawlee (already installed, hoisted to the top level by the lockfile)
     // eslint-disable-next-line import-x/no-extraneous-dependencies
     const { load } = await import('cheerio');
-    const $ = load(html);
+    // a space after closing tags, so neighbouring elements' text does not run together ("thebudgetmom900+ likes")
+    const $ = load(String(html ?? '').replace(/<\/(span|div|a|p|li|cite|h3|b|td)>/gi, '$& '));
     const clean = (t) =>
         String(t ?? '')
             .replace(/\s+/g, ' ')
@@ -379,7 +410,9 @@ export async function parseSerpHtml(html) {
 export async function fetchSerpPage({ url, proxyUrl }) {
     // eslint-disable-next-line import-x/no-extraneous-dependencies
     const { gotScraping } = await import('got-scraping');
-    const response = await gotScraping({ url, proxyUrl, timeout: { request: 30_000 }, throwHttpErrors: false });
+    const get = () => gotScraping({ url, proxyUrl, timeout: { request: 60_000 }, throwHttpErrors: false });
+    // the search proxy is sometimes slow: one more try after a timeout
+    const response = await get().catch((err) => (/timeout/i.test(String(err?.message)) ? get() : Promise.reject(err)));
     if (response.statusCode >= 400) throw new Error(`HTTP ${response.statusCode} from the search proxy`);
     return parseSerpHtml(response.body);
 }

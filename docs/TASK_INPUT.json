@@ -4,7 +4,7 @@
     "searchKeywords": ["budgeting for beginners"],
     "excludeWords": ["course", "coach"],
     "discoverPlatforms": ["instagram", "facebook", "tiktok"],
-    "searchEngines": ["google", "bing"],
+    "searchEngines": ["google"],
     "maxSearchPages": 3,
     "maxCandidates": 30,
     "excludeUsernames": [],

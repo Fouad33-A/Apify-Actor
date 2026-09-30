@@ -5,6 +5,7 @@ import {
     classifySearchPage,
     discoverByWebSearch,
     followerHint,
+    handleFromSnippet,
     handleFromTitle,
     handleFromUrl,
     mentionsExcluded,
@@ -160,6 +161,31 @@ describe('classifySearchPage: titles and excluded words', () => {
     it('handleFromTitle only for instagram and tiktok', () => {
         expect(handleFromTitle('Jane (@Jane.B) | TikTok', 'tiktok')).toBe('jane.b');
         expect(handleFromTitle('Jane (@jane)', 'facebook')).toBeNull();
+    });
+});
+
+describe('accounts from Google snippets', () => {
+    it('reads "Instagram · handle" / "TikTok · handle" for reel and video links without an account name', () => {
+        expect(handleFromSnippet('Being on a debt journey Instagram · thebudgetmom 900+ likes', 'instagram')).toBe(
+            'thebudgetmom',
+        );
+        expect(handleFromSnippet('x TikTok · Her.Money 12K likes', 'tiktok')).toBe('her.money');
+        expect(handleFromSnippet('Instagram · popular', 'instagram')).toBeNull();
+        expect(handleFromSnippet('nothing', 'instagram')).toBeNull();
+    });
+    it('a reel result becomes a candidate through its snippet; /popular/ is not an account', async () => {
+        const html = `<html><head><title>x</title></head><body>
+          <div><a href="https://www.instagram.com/reel/DdZ/"><h3>Debt payoff journey</h3></a><div><span>Instagram</span> · <span>thebudgetmom</span><span>900+ likes</span></div></div>
+          <div><a href="https://www.instagram.com/popular/"><h3>Popular</h3></a></div></body></html>`;
+        const parsed = await parseSerpHtml(html);
+        const res = classifySearchPage({
+            title: parsed.title,
+            text: parsed.text,
+            anchors: parsed.anchors,
+            platform: 'instagram',
+        });
+        expect(res.hits.map((h) => [h.handle, h.kind])).toEqual([['thebudgetmom', 'post']]);
+        expect(handleFromUrl('https://www.instagram.com/popular/')).toBeNull();
     });
 });
 
