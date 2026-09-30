@@ -1,4 +1,6 @@
-# Test brief for the Marketing Agent: verify the screening stages on build 0.0.58
+# Test brief for the Marketing Agent: verify the screening stages (rerun on the build with code version 0.10.1 or later)
+
+Round 1 (build 0.0.59) found two Actor bugs (bio e-mails were not extracted; long bios were cut at "... more"), so stages 2 and 3 never ran. They are fixed in 0.10.1. Rerun Step 1 below after the new build; check `runtime.codeVersion` is 0.10.1 or higher.
 
 Goal: one real batch that checks the three new stages (link-in-bio following, reach rule, concurrency) on real handles, and measures cost. Read `docs/AGENT_GUIDE.md` first (it is the current version).
 
@@ -8,7 +10,7 @@ Run **one run at a time** (do not start a second run until the first has finishe
 
 ### Step 1: the batch (Instagram, about 20 handles)
 
-Use 20 handles from your own list. Include, if you have them: a few you already know **pass** everything, a few you know **fail because of a Stan Store or ebook hidden behind a Linktree/Beacons link**, and a few with follower counts outside 30-150K. Input:
+Use about 20 handles from your own list, **most of them with an e-mail visible in the bio** (round 1 had none that passed the e-mail check, so the later stages never ran). Include, if you have them: a few you already know **pass** everything, a few you know **fail because of a Stan Store or ebook hidden behind a Linktree/Beacons link**, and a few with follower counts outside 30-150K. Input:
 
 ```json
 {
@@ -39,7 +41,7 @@ From the dataset and from the `OUTPUT` record, report back **exactly** (paste, d
 
 1. For each handle: `username`, `status`, `followerCount`, `contactEmails`, `passesFilters`, `filterFailures`, `screeningWarnings`, `bioLinkTargets`, `postsSampled`, `medianLikes`, `medianViews`, `reachPctOfFollowers`, `reachBasis`.
 2. From `OUTPUT`: `cost.proxyMegabytes`, `cost.platformUsage.usageTotalUsd` (read it again a minute later if it looks tiny), `budget.stopReason`, `cost.runtimeSecs`, `runtime.codeVersion` (must be 0.10.0), and `rateLimitErrors`.
-3. Your own judgement on these checks:
+3. Your own judgement on these checks (new in this round: does `contactEmails` now match the e-mail you can see in the bio, including e-mails that were behind "... more"?):
     - Did a Stan Store / ebook hidden behind a link-in-bio page get caught (`bioLinkTargets` contains it and `filterFailures` says so)?
     - Are there rows with `screeningWarnings` about link-in-bio pages that could not be read? Which hosts (linktr.ee, beacons.ai, ...)?
     - Do the `reachPctOfFollowers` numbers look right when you check two or three profiles by hand (median of the last 5 posts' likes / followers)?

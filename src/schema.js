@@ -23,7 +23,8 @@ export function makeProfileRow(fields) {
         displayName: fields.displayName ?? null,
         bio: fields.bio ?? null, // full text, unescaped - never truncated
         externalLinks: fields.externalLinks ?? [],
-        contactEmails: fields.contactEmails ?? [], // emails shown publicly on the profile/bio
+        // e-mail addresses shown publicly: those the platform gave plus any written out in the bio text
+        contactEmails: [...new Set([...(fields.contactEmails ?? []), ...extractEmails(fields.bio)])],
         followerCount: fields.followerCount ?? null,
         followingCount: fields.followingCount ?? null,
         postCount: fields.postCount ?? null,

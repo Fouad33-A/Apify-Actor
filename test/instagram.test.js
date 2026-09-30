@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { RateLimitError } from '../src/errors.js';
 import {
+    domExpandBio,
     domExtractComments,
     domExtractPostMetrics,
     domExtractProfile,
@@ -911,5 +912,58 @@ describe('domExtractComments on the REAL post layout (all comments share one lis
 
     it("skips the post's own time and respects maxComments", async () => {
         expect(await evaluate(html, domExtractComments, 2)).toHaveLength(2);
+    });
+});
+
+describe('cut-off bios ("... more") and contact e-mails', () => {
+    const bioExpandable = {
+        short: 'Budget coach \u{1F4B8}\nHelping you get out of debt\n\u{1F4E7}...',
+        full: 'Budget coach \u{1F4B8}\nHelping you get out of debt\n\u{1F4E7} Hello@Coach-Example.com',
+    };
+
+    it('an unexpanded header reports the bio as truncated and does not treat "more" as bio text', async () => {
+        const dom = await evaluate(igHeaderReal({ bioExpandable, linkLine: null }), domExtractProfile);
+        expect(dom.bioTruncated).toBe(true);
+        expect(dom.bio).toBe('Budget coach \u{1F4B8}\nHelping you get out of debt\n\u{1F4E7}...');
+    });
+
+    it('domExpandBio clicks "more" and the whole bio, with its e-mail, is then read', async () => {
+        const page = await browser.newPage();
+        try {
+            await page.setContent(igHeaderReal({ bioExpandable, linkLine: null }));
+            expect(await page.evaluate(domExpandBio)).toBe(true);
+            const dom = await page.evaluate(domExtractProfile);
+            expect(dom.bioTruncated).toBe(false);
+            expect(dom.bio).toContain('Hello@Coach-Example.com');
+        } finally {
+            await page.close();
+        }
+    });
+
+    it('nothing to expand: returns false and leaves the page alone', async () => {
+        expect(await evaluate(igHeaderReal(), domExpandBio)).toBe(false);
+        expect(await evaluate('<html><body>no header</body></html>', domExpandBio)).toBe(false);
+    });
+
+    it('lookupProfile expands the bio and returns the e-mail in contactEmails', async () => {
+        const routes = [{ match: PROFILE_URL, body: igHeaderReal({ bioExpandable, linkLine: null }) }];
+        const { profile } = await withContext(routes, ({ page }) =>
+            lookupProfile({ page, username: 'nasa', sourceInput: 'nasa', maxRecentPosts: 0 }),
+        );
+        expect(profile.bio).toContain('Hello@Coach-Example.com');
+        expect(profile.contactEmails).toEqual(['hello@coach-example.com']);
+        expect(profile.screeningWarnings).toEqual([]);
+    });
+
+    it('a bio that stays cut off is reported in screeningWarnings, never presented as complete', async () => {
+        const stuck = igHeaderReal({
+            bioExpandable: { short: 'Coach\n\u{1F4E9}jenny@moneybestie...', full: '', stuck: true },
+            linkLine: null,
+        });
+        const { profile } = await withContext([{ match: PROFILE_URL, body: stuck }], ({ page }) =>
+            lookupProfile({ page, username: 'nasa', sourceInput: 'nasa', maxRecentPosts: 0 }),
+        );
+        expect(profile.contactEmails).toEqual([]); // a cut-off address is not guessed
+        expect(profile.screeningWarnings[0]).toMatch(/bio is cut off/);
     });
 });

@@ -142,3 +142,32 @@ describe('contactEmails on profile rows', () => {
         ).toEqual(['a@b.co']);
     });
 });
+
+describe('makeProfileRow contactEmails', () => {
+    it('picks up e-mail addresses written in the bio, lower-cased and de-duplicated', () => {
+        const row = makeProfileRow({
+            platform: 'instagram',
+            status: 'found',
+            bio: 'Get back to the basics!\n\u2709\uFE0F Planbudgetdream@gmail.com\nalso planbudgetdream@gmail.com.',
+        });
+        expect(row.contactEmails).toEqual(['planbudgetdream@gmail.com']);
+    });
+
+    it('merges what the platform gave with the bio text, without duplicates', () => {
+        const row = makeProfileRow({
+            platform: 'facebook',
+            status: 'found',
+            bio: 'write to b@example.com',
+            contactEmails: ['a@example.com', 'b@example.com'],
+        });
+        expect(row.contactEmails).toEqual(['a@example.com', 'b@example.com']);
+    });
+
+    it('a cut-off address ("jenny@moneybestie...") is not guessed, and no bio gives an empty list', () => {
+        expect(
+            makeProfileRow({ platform: 'instagram', status: 'found', bio: '\u{1F4E9}jenny@moneybestie...' })
+                .contactEmails,
+        ).toEqual([]);
+        expect(makeProfileRow({ platform: 'instagram', status: 'found' }).contactEmails).toEqual([]);
+    });
+});

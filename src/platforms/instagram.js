@@ -110,6 +110,29 @@ export function findUserNode(json) {
 // external link(s) / verified badge - in that order, but located by regex
 // on each line rather than fixed indices, so a missing full name or an
 // extra line doesn't shift everything else out of place.
+// Runs in the page. Instagram cuts a long bio with "... more"; clicking it shows the rest (an e-mail is often at
+// the end). Returns true when something was clicked.
+export function domExpandBio() {
+    const header = document.querySelector('header');
+    if (!header) return false;
+    const isMore = (el) => /^(…|\.\.\.)?\s*more$/i.test((el.textContent || '').trim());
+    const leaf = [...header.querySelectorAll('span, div, button, a')].find(
+        (el) => el.children.length === 0 && isMore(el),
+    );
+    if (leaf) {
+        leaf.click();
+        return true;
+    }
+    const button = [...header.querySelectorAll('[role="button"]')].find((el) =>
+        /(…|\.\.\.)\s*more$/i.test((el.innerText || '').trim().replace(/\s+/g, ' ')),
+    );
+    if (button) {
+        button.click();
+        return true;
+    }
+    return false;
+}
+
 export function domExtractProfile() {
     const header = document.querySelector('header');
     if (!header) return null;
@@ -212,9 +235,12 @@ export function domExtractProfile() {
         if (rest[0] === usernameLine) rest = rest.slice(1);
     }
     const linkLine = rest.length && isLinkLine(rest[rest.length - 1]) ? rest[rest.length - 1] : null;
-    const bioLines = (linkLine ? rest.slice(0, -1) : rest).filter(
+    const bioCandidates = (linkLine ? rest.slice(0, -1) : rest).filter(
         (l) => l !== usernameLine && !controlWords.has(l.toLowerCase()),
     );
+    // A long bio is cut off with "..." and a separate "more" line; the "more"/"less" control is not bio text.
+    const bioTruncated = bioCandidates.some((l) => /^(…|\.\.\.)?\s*more$/i.test(l));
+    const bioLines = bioCandidates.filter((l) => !/^(…|\.\.\.)?\s*(more|less)$/i.test(l));
     const bio = bioLines.length ? bioLines.join('\n') : null;
 
     // External link(s): real anchors first (excluding Instagram/Threads' own
@@ -268,6 +294,7 @@ export function domExtractProfile() {
         username: usernameLine,
         fullName,
         bio,
+        bioTruncated,
         externalLinks,
         followerCount,
         followingCount,
@@ -481,6 +508,12 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
         };
     }
 
+    // Show the whole bio before reading it (a contact e-mail is often past the "... more" cut).
+    try {
+        if (await page.evaluate(domExpandBio)) await page.waitForTimeout(500);
+    } catch {
+        // the page navigated or the control is not there: read the bio as shown
+    }
     const dom = await page.evaluate(domExtractProfile);
 
     if (dom) {
@@ -498,6 +531,11 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
             verified: dom.verified,
             accountCreatedDate: null, // not exposed publicly
             status: 'found',
+            screeningWarnings: dom.bioTruncated
+                ? [
+                      'bio is cut off ("... more") and could not be expanded: an e-mail or link further down is not visible',
+                  ]
+                : [],
         });
 
         const gridPosts = dom.posts.slice(0, maxRecentPosts);

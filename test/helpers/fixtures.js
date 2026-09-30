@@ -47,7 +47,18 @@ export function igHeaderReal({
     linkLine = 'www.nasa.gov and 4 more',
     verified = true,
     ogDescription = '104M Followers, 93 Following, 4,937 Posts - See Instagram photos and videos from NASA (@nasa)',
+    bioExpandable = null, // { short, full }: a cut-off bio with a "more" control that shows the rest when clicked
 } = {}) {
+    let bioHtml = '';
+    if (bioExpandable) {
+        const full = esc(bioExpandable.full).replace(/\n/g, '<br>');
+        const short = esc(bioExpandable.short).replace(/\n/g, '<br>');
+        // stuck: true = the "more" control does nothing (the bio cannot be expanded)
+        const onclick = bioExpandable.stuck ? '' : ` onclick="this.innerHTML = '<span>${full}</span>'"`;
+        bioHtml = `<div role="button"${onclick}><span style="display:block">${short}</span><span style="display:block">more</span></div>`;
+    } else if (bio) {
+        bioHtml = `<div role="button"><span>${esc(bio)}</span></div>`;
+    }
     return `<!doctype html><html><head>${
         ogDescription ? `<meta property="og:description" content="${esc(ogDescription)}">` : ''
     }</head><body><main role="main"><div>
@@ -60,7 +71,7 @@ export function igHeaderReal({
       <div><div>
         <span style="display:block">${esc(fullName)}</span>
         <a role="link" href="https://www.threads.com/@${username}?xmt=x" style="display:block"><span>${esc(username)}</span></a>
-        ${bio ? `<div role="button"><span>${esc(bio)}</span></div>` : ''}
+        ${bioHtml}
         ${linkLine ? `<div><span>${esc(linkLine)}</span></div>` : ''}
       </div></div>
       <div role="menu"><div role="presentation"><ul><a role="link" aria-label="View Roman highlight" href="/stories/highlights/1/"><div role="button"><span>Roman</span></div></a></ul></div></div>
