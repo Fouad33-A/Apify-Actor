@@ -39,13 +39,12 @@ Read rows with `get-dataset-items`; read the run report with `get-key-value-stor
 - Facebook: latest post(s) and a few comments with commenter handle: yes.
 - **Not available logged out, on any run: TikTok comment text, TikTok keyword/hashtag search, Instagram/Facebook keyword search.** TikTok never loads comments or search results for a logged-out browser (tested several ways); the hashtag and keyword pages come back empty. Rows for these say `blocked`/`error`.
 
-## Discovery without a search mode (works today)
+## Discovery and comments: recommended TikTok workflow
 
-1. Use your own web search, limited to TikTok, with the audience keywords, for example `site:tiktok.com/@ "etf investing"` or `site:tiktok.com "index funds for beginners"`. Collect the `@handles` and video URLs in the results.
-2. Run `profile` mode for those handles with `"platform":"tiktok","maxRecentPosts":5` (about 6-7 MB per profile plus a few MB per video: keep batches small, see the budget section).
-3. Score the raw rows (followers, bio, captions, likes/comments/shares/views) with Verity's own rules.
-
-This finds creators the web index knows about, not every creator. Comment text cannot be collected this way.
+1. **Discover with TikTok One (for Partners)**: apply the audience filters there and collect the creators' TikTok handles. This replaces keyword/hashtag search, which TikTok does not serve to logged-out browsers. (Fallback: your own web search limited to TikTok, e.g. `site:tiktok.com/@ "etf investing"`.)
+2. **This Actor, `profile` mode** on those handles with `"platform":"tiktok","maxRecentPosts":3-5`: exact followers, bio, links, contact email, and recent videos with caption, likes, comments, shares, views. TikTok sometimes withholds pages or throttles ("overload-protect"); a `blocked` row means "try again later", not "no data". Do not loop.
+3. **Comment text** is not available from this Actor. If comment scoring is needed, run a Store Actor for it on the video URLs from step 2 (for example `clockworks/tiktok-comments-scraper`, about $0.001 per comment, or `apidojo/tiktok-comments-scraper`, about $0.0003 per comment) and join the rows yourself. Keep counts small (5-10 comments per video) to stay within the daily budget.
+4. Score the raw rows with Verity's own rules.
 
 ## Reading the rows
 
