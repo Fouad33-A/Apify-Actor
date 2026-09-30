@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { destinationsFromAnchors, isLinkInBioUrl, looksLikeErrorPage, resolveBioLinks } from '../src/linkinbio.js';
+import {
+    destinationsFromAnchors,
+    emailsFromAnchors,
+    isLinkInBioUrl,
+    looksLikeErrorPage,
+    resolveBioLinks,
+} from '../src/linkinbio.js';
 import { launchBrowser, serve } from './helpers/browser.js';
 
 describe('isLinkInBioUrl', () => {
@@ -115,6 +121,19 @@ describe('resolveBioLinks (real Chromium, synthetic pages)', () => {
 
     it('follows at most maxPages pages and ignores ordinary links', async () => {
         const r = await run([], ['https://example.com/a', 'https://example.org/b']);
-        expect(r).toEqual({ targets: [], warnings: [] });
+        expect(r).toEqual({ targets: [], emails: [], warnings: [] });
+    });
+});
+
+describe('emailsFromAnchors', () => {
+    it('reads addresses from mailto links (with subject parameters), once each', () => {
+        expect(
+            emailsFromAnchors([
+                { href: 'mailto:Hello@Jane.com?subject=Hi' },
+                { href: 'mailto:hello@jane.com' },
+                { href: 'https://example.com' },
+                { href: 'mailto:pr%40jane.com' },
+            ]),
+        ).toEqual(['hello@jane.com', 'pr@jane.com']);
     });
 });

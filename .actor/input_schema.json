@@ -7,16 +7,17 @@
             "title": "Mode",
             "type": "string",
             "editor": "select",
-            "enum": ["profile", "search", "posts", "expand", "comments", "probe"],
+            "enum": ["profile", "search", "posts", "expand", "comments", "probe", "discover"],
             "enumTitles": [
                 "A - Profile lookup",
                 "B - Keyword/search discovery",
                 "Posts by URL (metrics for known post/video URLs)",
                 "Discover from known creators (expand)",
                 "C - Comment retrieval",
-                "Diagnostic probe (fetch a few public URLs and report)"
+                "Diagnostic probe (fetch a few public URLs and report)",
+                "Discover by web search (keywords -> accounts -> screening and score)"
             ],
-            "description": "A: look up known usernames. B: discover posts/creators by keyword. Posts: read metrics of known post/video URLs (TikTok). C: pull comments for known post URLs. To get comments alongside A, B or Posts in one run, use that mode and set fetchComments=true instead of running C separately. Expand: give known-good creators as usernames; the Actor reads their recent posts and comments, collects the accounts they mention and who interacts with them, then looks up and (optionally) screens those candidates.",
+            "description": "A: look up known usernames. B: discover posts/creators by keyword. Posts: read metrics of known post/video URLs (TikTok). C: pull comments for known post URLs. To get comments alongside A, B or Posts in one run, use that mode and set fetchComments=true instead of running C separately. Expand: give known-good creators as usernames; the Actor reads their recent posts and comments, collects the accounts they mention and who interacts with them, then looks up and (optionally) screens those candidates. Discover: give topic keywords (searchKeywords); the Actor searches the public web for Instagram, Facebook and TikTok accounts on those topics, opens every account found and applies the screening and score settings. The platform field is ignored in this mode.",
             "default": "profile"
         },
         "platform": {
@@ -98,6 +99,42 @@
             "default": [],
             "description": "Accounts you have already screened. They are never returned as candidates."
         },
+        "searchKeywords": {
+            "title": "Discover: search keywords",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Topic keywords for mode 'discover', e.g. budgeting for beginners, debt free journey. Each keyword is searched on the public web once per platform."
+        },
+        "excludeWords": {
+            "title": "Discover: words to leave out of the search",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Added to every search as minus words, e.g. course, coach, 'my book'."
+        },
+        "discoverPlatforms": {
+            "title": "Discover: platforms to search",
+            "type": "array",
+            "editor": "stringList",
+            "default": ["instagram", "facebook", "tiktok"],
+            "description": "Any of instagram, facebook, tiktok."
+        },
+        "searchEngines": {
+            "title": "Discover: search engines, in order",
+            "type": "array",
+            "editor": "stringList",
+            "default": ["bing", "duckduckgo", "brave"],
+            "description": "Tried in this order for each search; one that answers with a bot check is reported as blocked and not used again in the run (nothing is solved or clicked through)."
+        },
+        "maxSearchPages": {
+            "title": "Discover: result pages per search",
+            "type": "integer",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 5,
+            "description": "How many result pages are read per keyword and platform."
+        },
         "minFollowers": {
             "title": "Screening: minimum followers",
             "type": "integer",
@@ -169,6 +206,75 @@
             "type": "number",
             "minimum": 0,
             "description": "Optional, needs 'Reach rule' above. Profiles whose measured reachPctOfFollowers is below this get passesFilters=false with the reason. When the reach cannot be computed (hidden likes, too few posts read) the profile is not failed: the row carries a warning instead."
+        },
+        "scorecard": {
+            "title": "Score: apply the Marketing Agent's scorecard",
+            "type": "boolean",
+            "default": false,
+            "description": "For profiles that pass the hard filters, read the latest 10 posts and compute the mechanical score B1-B5 (not monetised 20, engagement 15, size 10, reachable by e-mail 10, posts per week 5; maximum 60) with the points per rule. Also switches on the management/agency e-mail fail rule (A3). Rules the platform does not show are listed in scoreUnknownRules and warned about."
+        },
+        "minScore": {
+            "title": "Score: minimum total to pass",
+            "type": "number",
+            "minimum": 0,
+            "description": "Profiles scoring below this get passesFilters=false with the reason. Needs 'apply the scorecard'."
+        },
+        "agencyEmailPatterns": {
+            "title": "Score: management/agency e-mail words",
+            "type": "array",
+            "editor": "stringList",
+            "default": [
+                "management",
+                "mgmt",
+                "talent",
+                "agency",
+                "represent",
+                "entertainment",
+                "collective",
+                "artists",
+                "viralnation",
+                "bookings"
+            ],
+            "description": "A fail if an e-mail written in the BIO contains one of these words (A3). Needs 'apply the scorecard'."
+        },
+        "monetisationPatterns": {
+            "title": "Score: shop/course/coaching link words (B1)",
+            "type": "array",
+            "editor": "stringList",
+            "default": [
+                "shop",
+                "store",
+                "merch",
+                "etsy",
+                "checkout",
+                "liketoknow",
+                "ltk.",
+                "course",
+                "coaching",
+                "mentorship"
+            ],
+            "description": "B1 (not monetised) scores 0 if a bio link, a link-in-bio destination or the creator's website text contains one of these."
+        },
+        "warnPatterns": {
+            "title": "Score: words that only raise a warning",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "For example crypto, trading. Found in the bio, links or creator website: a warning to check the fit by hand, never a fail."
+        },
+        "maxSponsoredPosts": {
+            "title": "Score: sponsored posts allowed in the last 10 (B1)",
+            "type": "integer",
+            "default": 1,
+            "minimum": 0,
+            "description": "More than this scores 0 on B1. A post counts as sponsored with #ad, #sponsored, #paidpartnership, the words 'paid partnership', or the platform's own label."
+        },
+        "unknownFullScorePlatforms": {
+            "title": "Score: platforms where unknown rules get full points",
+            "type": "array",
+            "editor": "stringList",
+            "default": ["tiktok"],
+            "description": "On these platforms a rule whose data is not shown (TikTok hides most post data when logged out) is given its full points and listed in scoreUnknownRules, for the Marketing Agent to fill in by hand. On every other platform an unknown rule counts 0."
         },
         "enrichSearchAuthors": {
             "title": "Load each creator's profile page in search (Mode B)",

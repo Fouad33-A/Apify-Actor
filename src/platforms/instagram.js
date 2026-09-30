@@ -397,6 +397,8 @@ export function domExtractPostMetrics() {
         publishDate: publishTime ? publishTime.getAttribute('datetime') : null,
         likeCount,
         viewCount,
+        // Instagram labels branded-content posts "Paid partnership with <brand>" on the post page.
+        paidPartnership: /paid partnership with/i.test(document.body ? document.body.innerText : ''),
         ogDescription: (document.querySelector('meta[property="og:description"]') || {}).content ?? null,
     };
 }
@@ -647,7 +649,13 @@ async function lookupProfileOnce({ page, username, sourceInput, maxRecentPosts }
         const posts = [];
         for (const gp of gridPosts) {
             const postUrl = new URL(gp.href, `https://${DOMAIN}`).toString();
-            let metrics = { publishDate: null, likeCount: null, viewCount: null, ogDescription: null };
+            let metrics = {
+                publishDate: null,
+                likeCount: null,
+                viewCount: null,
+                paidPartnership: false,
+                ogDescription: null,
+            };
             let loadFailed = false;
             // One more try for a post page that did not load (a timeout is usually transient); reach needs these counts.
             for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -694,7 +702,8 @@ async function lookupProfileOnce({ page, username, sourceInput, maxRecentPosts }
                         : postNote(described, metrics),
                     shareCount: null, // Instagram does not expose share counts
                     viewCount: metrics.viewCount,
-                    isSponsored: null, // not reliably exposed in the current DOM; left honest-null rather than guessed
+                    // true only when the post page carries the "Paid partnership" label; otherwise unknown (the caption is checked for #ad later)
+                    isSponsored: metrics.paidPartnership ? true : null,
                 }),
             );
         }

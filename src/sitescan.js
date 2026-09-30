@@ -164,6 +164,7 @@ async function load(page, url) {
 export async function scanCreatorSites({ page, urls, max = 2 }) {
     const sites = [];
     const emails = [];
+    const emailSources = [];
     const warnings = [];
     for (const url of (urls ?? []).slice(0, max)) {
         try {
@@ -188,7 +189,11 @@ export async function scanCreatorSites({ page, urls, max = 2 }) {
                     // the contact page did not load: the home page result stands
                 }
             }
-            for (const e of found) if (!emails.includes(e)) emails.push(e);
+            for (const e of found) {
+                if (emails.includes(e)) continue;
+                emails.push(e);
+                emailSources.push({ email: e, source: 'site', url });
+            }
             sites.push({
                 url,
                 title: info.title || null,
@@ -203,5 +208,5 @@ export async function scanCreatorSites({ page, urls, max = 2 }) {
             );
         }
     }
-    return { sites, emails, warnings };
+    return { sites, emails, emailSources, warnings };
 }

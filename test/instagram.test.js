@@ -179,6 +179,7 @@ describe('domExtractPostMetrics (in-page)', () => {
             publishDate: '2026-09-20T12:00:00.000Z',
             likeCount: 1234,
             viewCount: 12_500,
+            paidPartnership: false,
             ogDescription: null,
         });
     });
@@ -189,8 +190,17 @@ describe('domExtractPostMetrics (in-page)', () => {
             publishDate: '2026-09-20T12:00:00.000Z',
             likeCount: null,
             viewCount: null,
+            paidPartnership: false,
             ogDescription: null,
         });
+    });
+
+    it('sees the "Paid partnership with" label of a branded-content post', async () => {
+        const m = await evaluate(
+            igPost({}).replace('</body>', '<div><span>Paid partnership with somebrand</span></div></body>'),
+            domExtractPostMetrics,
+        );
+        expect(m.paidPartnership).toBe(true);
     });
 
     it('returns the post og:description so caption, likes and comments can be read from it', async () => {

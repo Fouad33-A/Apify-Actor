@@ -44,6 +44,21 @@ export function makeProfileRow(fields) {
         bioLinkTargets: fields.bioLinkTargets ?? [], // destinations found behind link-in-bio pages (followed on request)
         creatorSites: fields.creatorSites ?? [], // the creator's own website(s) as read on request: [{ url, title, description, text }]
         siteContactEmails: fields.siteContactEmails ?? [], // public e-mails found on those sites (also merged into contactEmails)
+        contactEmailSources: fields.contactEmailSources ?? [], // where each e-mail was found: [{ email, source: "bio" | "link-in-bio" | "site" }]
+        // web-search discovery (mode "discover"): what the search showed; the follower hint is NOT trusted
+        searchSnippet: fields.searchSnippet ?? null,
+        searchFollowerHint: fields.searchFollowerHint ?? null,
+        // the Agent's mechanical score (computed on request, for profiles that passed the hard filters)
+        postsReadForScore: fields.postsReadForScore ?? null,
+        sponsoredPosts: fields.sponsoredPosts ?? null,
+        medianInteractions: fields.medianInteractions ?? null,
+        engagementPctOfFollowers: fields.engagementPctOfFollowers ?? null,
+        postsPerWeek: fields.postsPerWeek ?? null,
+        scorecard: fields.scorecard ?? null,
+        scoreTotal: fields.scoreTotal ?? null,
+        scoreMax: fields.scoreMax ?? null,
+        scoreUnknownRules: fields.scoreUnknownRules ?? [],
+        scoreUnknownTreatedAsFull: fields.scoreUnknownTreatedAsFull ?? null,
         // reach rule (computed on request, for profiles that passed the first screen): median of the latest posts
         postsSampled: fields.postsSampled ?? null,
         medianLikes: fields.medianLikes ?? null,

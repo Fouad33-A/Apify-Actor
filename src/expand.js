@@ -95,10 +95,12 @@ export function applyScreening(row, criteria = {}, { includeReach = true } = {})
         requireContactEmail,
         excludeBioPatterns,
         excludeSitePatterns,
+        agencyEmailPatterns,
         minReachPercent,
     } = criteria;
     const patterns = (excludeBioPatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
     const sitePatterns = (excludeSitePatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
+    const agencyPatterns = (agencyEmailPatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
     const reachActive = includeReach && minReachPercent != null;
     const active =
         minFollowers != null ||
@@ -106,6 +108,7 @@ export function applyScreening(row, criteria = {}, { includeReach = true } = {})
         Boolean(requireContactEmail) ||
         patterns.length > 0 ||
         sitePatterns.length > 0 ||
+        agencyPatterns.length > 0 ||
         reachActive;
     if (!active) return { passes: null, failures: [] };
 
@@ -130,6 +133,16 @@ export function applyScreening(row, criteria = {}, { includeReach = true } = {})
             .join(' \n ')
             .toLowerCase();
         for (const p of patterns) if (haystack.includes(p)) failures.push(`bio or link contains "${p}"`);
+    }
+    if (agencyPatterns.length) {
+        // A3: a management / agency e-mail written in the BIO (not one found later on a website).
+        const bioEmails = row.contactEmailSources
+            ? row.contactEmailSources.filter((x) => x.source === 'bio').map((x) => x.email)
+            : (row.contactEmails ?? []);
+        for (const email of bioEmails) {
+            const hit = agencyPatterns.find((p) => email.toLowerCase().includes(p));
+            if (hit) failures.push(`bio e-mail ${email} looks like a management/agency address ("${hit}")`);
+        }
     }
     if (sitePatterns.length) {
         // What the creator's own website says first (title, description, headings, menu/button labels), when it was read.

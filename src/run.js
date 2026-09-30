@@ -18,9 +18,11 @@ import { applyScreening, extractMentions, normalizeHandle, rankCandidates } from
 import { isLinkInBioUrl, resolveBioLinks } from './linkinbio.js';
 import { computeReach } from './reach.js';
 import { makeCommentRow, makePostRow, makeProfileRow } from './schema.js';
+import { DEFAULT_SCORECARD, postStats, scoreRow, warnHits } from './scorecard.js';
 import { pickSiteUrls, scanCreatorSites } from './sitescan.js';
+import { DEFAULT_ENGINES, discoverByWebSearch, orderCandidates } from './websearch.js';
 
-export async function runMode({ mode, mod, page, input, budget, pushData, rateLimitErrors, report = {} }) {
+export async function runMode({ mode, mod, mods = {}, page, input, budget, pushData, rateLimitErrors, report = {} }) {
     const platform = input.platform ?? null;
     const reason = (err) =>
         String(err?.message ?? err)
@@ -49,7 +51,29 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         followCreatorSite = false,
         excludeSitePatterns = [],
         maxSitePages = 2,
+        searchKeywords = [],
+        excludeWords = [],
+        discoverPlatforms = ['instagram', 'facebook', 'tiktok'],
+        searchEngines = DEFAULT_ENGINES,
+        maxSearchPages = 2,
+        scorecard = false,
+        minScore = null,
+        agencyEmailPatterns = DEFAULT_SCORECARD.agencyEmailPatterns,
+        monetisationPatterns = DEFAULT_SCORECARD.monetisationPatterns,
+        warnPatterns = [],
+        maxSponsoredPosts = DEFAULT_SCORECARD.maxSponsoredPosts,
+        unknownFullScorePlatforms = DEFAULT_SCORECARD.unknownFullScorePlatforms,
     } = input;
+    // The score needs the latest 10 posts: sample them even when reachPosts was left at 0.
+    const wantedPosts = scorecard ? Math.max(reachPosts, 10) : reachPosts;
+    const scoreConfig = {
+        minScore,
+        agencyEmailPatterns,
+        monetisationPatterns,
+        warnPatterns,
+        maxSponsoredPosts,
+        unknownFullScorePlatforms,
+    };
     const shouldContinue = () => budget.canWriteMore();
     // A platform throttle noticed inside the staged screen: the row is still written, then the run stops.
     let pendingRateLimit = null;
@@ -59,6 +83,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         requireContactEmail,
         excludeBioPatterns,
         excludeSitePatterns,
+        agencyEmailPatterns: scorecard ? agencyEmailPatterns : [],
         minReachPercent,
     };
     // Adds the optional screening verdict (facts vs the given criteria; null when no criteria were given).
@@ -74,18 +99,32 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
     //  2. link-in-bio pages, so a Stan Store one click behind a Linktree is seen (only when bio patterns are set)
     //  3. the creator's own website (followCreatorSite): what it sells, and a public contact e-mail
     //  4. the reach rule: the latest posts' median likes/views vs followers (only when reachPosts > 0)
-    async function finishProfile(profile) {
-        let row = screenRow(profile, { deferEmail: followCreatorSite });
+    async function finishProfile(profile, { mod: m = mod, platformName = platform, preloadedPosts = null } = {}) {
+        // Where each e-mail came from (the Agent wants "e-mail found and where"). A3 judges only the bio ones.
+        const sources = (profile.contactEmails ?? []).map((email) => ({ email, source: 'bio' }));
+        let row = screenRow({ ...profile, contactEmailSources: sources }, { deferEmail: followCreatorSite });
         const alive = () => row.status === 'found' && row.passesFilters !== false;
+        const addEmails = (found, source, url = null) => {
+            const known = new Set((row.contactEmails ?? []).map((e) => e.toLowerCase()));
+            const fresh = (found ?? []).filter((e) => !known.has(e.toLowerCase()));
+            return {
+                contactEmails: [...(row.contactEmails ?? []), ...fresh],
+                contactEmailSources: [
+                    ...(row.contactEmailSources ?? []),
+                    ...fresh.map((email) => ({ email, source, ...(url ? { url } : {}) })),
+                ],
+            };
+        };
         if (
             alive() &&
             followLinkInBio !== false &&
             excludeBioPatterns.length &&
             (row.externalLinks ?? []).some(isLinkInBioUrl)
         ) {
-            const { targets, warnings } = await resolveBioLinks({ page, links: row.externalLinks });
+            const { targets, emails, warnings } = await resolveBioLinks({ page, links: row.externalLinks });
             row = screenRow({
                 ...row,
+                ...addEmails(emails, 'link-in-bio'),
                 bioLinkTargets: targets,
                 screeningWarnings: [...(row.screeningWarnings ?? []), ...warnings],
             });
@@ -98,12 +137,24 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 isLinkInBioUrl,
             );
             if (urls.length) {
-                const { sites, emails, warnings } = await scanCreatorSites({ page, urls, max: maxSitePages });
+                const { sites, emails, emailSources, warnings } = await scanCreatorSites({
+                    page,
+                    urls,
+                    max: maxSitePages,
+                });
+                const fromSite = addEmails(emails, 'site');
+                // keep the site each e-mail was read on
+                fromSite.contactEmailSources = [
+                    ...(row.contactEmailSources ?? []),
+                    ...fromSite.contactEmailSources
+                        .slice((row.contactEmailSources ?? []).length)
+                        .map((x) => ({ ...x, url: emailSources?.find((e) => e.email === x.email)?.url ?? null })),
+                ];
                 row = screenRow({
                     ...row,
                     creatorSites: sites,
                     siteContactEmails: emails,
-                    contactEmails: [...new Set([...(row.contactEmails ?? []), ...emails])],
+                    ...fromSite,
                     screeningWarnings: [...(row.screeningWarnings ?? []), ...warnings],
                 });
             } else {
@@ -116,28 +167,35 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 });
             }
         }
-        if (alive() && reachPosts > 0) {
-            const looked = await mod.lookupProfile({
-                page,
-                username: row.username,
-                sourceInput: row.sourceInput,
-                maxRecentPosts: reachPosts,
-                shouldContinue,
-            });
-            row = { ...row, ...computeReach(looked.posts, row.followerCount) };
-            const failedLoads = (looked.posts ?? []).filter((p) =>
-                /could not be loaded/.test(p.statusDetail ?? ''),
-            ).length;
+        let sampled = null;
+        if (alive() && wantedPosts > 0) {
+            const looked = preloadedPosts
+                ? { posts: preloadedPosts }
+                : await m.lookupProfile({
+                      page,
+                      username: row.username,
+                      sourceInput: row.sourceInput,
+                      maxRecentPosts: wantedPosts,
+                      shouldContinue,
+                  });
+            sampled = looked.posts ?? [];
+            row = {
+                ...row,
+                ...computeReach(sampled, row.followerCount),
+                ...postStats(sampled, row.followerCount),
+            };
+            const failedLoads = sampled.filter((p) => /could not be loaded/.test(p.statusDetail ?? '')).length;
             if (failedLoads) {
                 row.screeningWarnings = [
                     ...(row.screeningWarnings ?? []),
-                    `${failedLoads} of ${looked.posts.length} post pages could not be loaded (timeout or block)`,
+                    `${failedLoads} of ${sampled.length} post pages could not be loaded (timeout or block)`,
                 ];
             }
             if (looked.rateLimit) pendingRateLimit = looked.rateLimit;
         }
-        const done = screenRow(row, { includeReach: true });
+        let done = screenRow(row, { includeReach: true });
         if (
+            !scorecard &&
             row.reachPctOfFollowers == null &&
             reachPosts > 0 &&
             row.status === 'found' &&
@@ -147,6 +205,27 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 ...(done.screeningWarnings ?? []),
                 'reach not computed (likes hidden by the creator, or too few posts read): check the reach by hand',
             ];
+        }
+        if (scorecard && done.status === 'found' && done.passesFilters !== false) {
+            const scored = scoreRow(done, { platform: platformName, config: scoreConfig });
+            const hits = warnHits(done, scoreConfig.warnPatterns);
+            done = {
+                ...done,
+                scorecard: scored.scorecard,
+                scoreTotal: scored.scoreTotal,
+                scoreMax: scored.scoreMax,
+                scoreUnknownRules: scored.scoreUnknownRules,
+                scoreUnknownTreatedAsFull: scored.scoreUnknownTreatedAsFull,
+                screeningWarnings: [
+                    ...(done.screeningWarnings ?? []),
+                    ...scored.scoreWarnings,
+                    ...hits.map((w) => `"${w}" appears in the bio, links or website: check the fit by hand`),
+                ],
+            };
+            if (scored.failures.length) {
+                done.filterFailures = [...(done.filterFailures ?? []), ...scored.failures];
+                done.passesFilters = false;
+            }
         }
         return done;
     }
@@ -512,6 +591,121 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                         discoveredFrom: cand.seeds,
                         discoverySignals: cand.signals,
                         timesSeen: cand.timesSeen,
+                        status: 'error',
+                        statusDetail: `Lookup failed: ${reason(err)}`,
+                    }),
+                );
+            }
+        }
+    } else if (mode === 'discover') {
+        // Web-search discovery: keywords -> public search engines -> account handles on Instagram / Facebook /
+        // TikTok -> every account opened and screened/scored like any other profile.
+        if (!searchKeywords.length)
+            throw new Error('mode "discover" needs at least one search keyword (searchKeywords)');
+        const discoveryReport = {
+            keywords: searchKeywords,
+            excludeWords,
+            platforms: discoverPlatforms,
+            lookedUp: 0,
+            preScreened: 0,
+            blockedPlatforms: [],
+        };
+        Object.assign(report, { discovery: discoveryReport });
+        const found = await discoverByWebSearch({
+            page,
+            keywords: searchKeywords,
+            excludeWords,
+            platforms: discoverPlatforms,
+            engines: searchEngines,
+            maxPages: maxSearchPages,
+            shouldContinue,
+            log: (m) => log.warning(m),
+        });
+        const { ordered, skippedDuplicates } = orderCandidates(found.candidates, {
+            exclude: excludeUsernames,
+            limit: maxCandidates,
+            platforms: discoverPlatforms,
+        });
+        Object.assign(discoveryReport, {
+            search: found.report,
+            candidatesFound: found.candidates.length,
+            toLookUp: ordered.length,
+            skippedDuplicates,
+        });
+        log.info(`Discover: ${found.candidates.length} account(s) found by web search, ${ordered.length} to look up`);
+        const stoppedPlatforms = new Set();
+        const stopPlatform = (platformName, rl) => {
+            rateLimitErrors.push(rl.toRecord());
+            log.warning(rl.message);
+            stoppedPlatforms.add(platformName);
+            discoveryReport.blockedPlatforms.push(platformName);
+        };
+        for (const cand of ordered) {
+            if (!shouldContinue()) break;
+            const m = mods[cand.platform];
+            if (!m || stoppedPlatforms.has(cand.platform)) continue;
+            discoveryReport.lookedUp += 1;
+            const sightings = {
+                discoveredFrom: cand.queries,
+                discoverySignals: ['web-search', ...cand.engines],
+                timesSeen: cand.timesSeen,
+                searchSnippet: cand.snippet,
+                searchFollowerHint: cand.hint,
+            };
+            const sourceInput = cand.queries.join(' | ');
+            try {
+                // Cheap pre-screen (Instagram's public embed page shows the exact follower count): an account outside
+                // the follower range is not opened in full.
+                if ((minFollowers != null || maxFollowers != null) && typeof m.quickProfile === 'function') {
+                    const quick = await m.quickProfile({ page, username: cand.handle, sourceInput });
+                    const n = quick?.followerCount;
+                    if (
+                        quick?.status === 'found' &&
+                        n != null &&
+                        ((minFollowers != null && n < minFollowers) || (maxFollowers != null && n > maxFollowers))
+                    ) {
+                        discoveryReport.preScreened += 1;
+                        const light = screenRow({
+                            ...quick,
+                            ...sightings,
+                            sourceInput,
+                            statusDetail:
+                                'Follower count read from the public embed page and outside the requested range: the full profile (bio, links, e-mail) was not read',
+                        });
+                        if (!hiddenByFilter(light)) await write('profile', light);
+                        continue;
+                    }
+                }
+                // TikTok's recent posts come with the same page load, so they are taken in one go.
+                const wantNow = cand.platform === 'tiktok' ? wantedPosts : 0;
+                const { profile, posts, rateLimit } = await m.lookupProfile({
+                    page,
+                    username: cand.handle,
+                    sourceInput,
+                    maxRecentPosts: wantNow,
+                    shouldContinue,
+                });
+                const row = await finishProfile(
+                    { ...profile, ...sightings, sourceInput },
+                    { mod: m, platformName: cand.platform, preloadedPosts: wantNow ? (posts ?? []) : null },
+                );
+                if (!hiddenByFilter(row)) await write('profile', row);
+                const rl = rateLimit ?? pendingRateLimit;
+                pendingRateLimit = null;
+                if (rl) stopPlatform(cand.platform, rl);
+            } catch (err) {
+                if (err instanceof RateLimitError) {
+                    stopPlatform(cand.platform, err);
+                    continue;
+                }
+                log.exception(err, `Candidate ${cand.platform}:${cand.handle} failed`);
+                await write(
+                    'profile',
+                    makeProfileRow({
+                        platform: cand.platform,
+                        sourceInput,
+                        username: cand.handle,
+                        ...sightings,
                         status: 'error',
                         statusDetail: `Lookup failed: ${reason(err)}`,
                     }),

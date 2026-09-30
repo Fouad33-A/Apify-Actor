@@ -42,10 +42,11 @@ const {
     proxyConfiguration: proxyInput = { useApifyProxy: true },
 } = input;
 
-if (!PLATFORM_MODULES[platform]) {
+// "discover" works across platforms (every account found by the web search is read with its own platform's module).
+if (mode !== 'discover' && !PLATFORM_MODULES[platform]) {
     throw new Error(`Unknown platform "${platform}" - expected tiktok, instagram or facebook`);
 }
-const mod = PLATFORM_MODULES[platform];
+const mod = PLATFORM_MODULES[platform] ?? null;
 
 // Wait for a free slot if too many runs of this Actor are already working (parallel runs made page loads time out).
 const slot = await waitForSlot({
@@ -149,7 +150,10 @@ const context = await browser.newContext({
 await cost.attach(context, { blockHeavyResources, blockTypes: blockResourceTypes });
 
 // Never logged: only how many cookies were applied and where they came from.
-const session = resolveSessionCookies({ input: sessionCookies, platform });
+const session =
+    platform && mode !== 'discover'
+        ? resolveSessionCookies({ input: sessionCookies, platform })
+        : { header: '', source: null };
 let sessionCookiesApplied = 0;
 if (session.header) {
     const cookies = parseCookieHeader(session.header, PLATFORM_DOMAINS[platform]);
@@ -172,6 +176,7 @@ try {
         await runMode({
             mode,
             mod,
+            mods: PLATFORM_MODULES,
             page,
             input,
             budget,
@@ -202,7 +207,7 @@ try {
 
 const summary = makeRunSummary({
     mode,
-    platform,
+    platform: mode === 'discover' ? 'instagram+facebook+tiktok' : platform,
     startedAt,
     counts: budget.counts,
     budget: budget.summary(),
@@ -213,6 +218,7 @@ await Actor.setValue('OUTPUT', {
     cost: cost.report({ platformUsage }),
     charging: charger.summary(),
     expand: report.expand ? { ...report.expand, stopReason: budget.summary().stopReason } : null,
+    discovery: report.discovery ?? null,
     runtime: {
         ...runtimeInfo(),
         sessionCookiesApplied,

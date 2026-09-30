@@ -1,3 +1,5 @@
+import { extractEmails } from './schema.js';
+
 // Link-in-bio pages (linktr.ee, beacons.ai, ...): creators hide their real destinations (a Stan Store, an ebook
 // shop) one click behind the link in the bio. This module follows those pages and returns the destinations so
 // the bio/link screening can see them. It only reads the public page; it never logs in or clicks through.
@@ -78,6 +80,18 @@ export function destinationsFromAnchors(anchors, pageUrl, { maxLinks = 40 } = {}
     return out;
 }
 
+// Pure: e-mail addresses in mailto: links on a link-in-bio page.
+export function emailsFromAnchors(anchors) {
+    const out = [];
+    for (const a of anchors ?? []) {
+        if (!/^mailto:/i.test(a.href ?? '')) continue;
+        for (const e of extractEmails(decodeURIComponent(a.href.replace(/^mailto:/i, '').split('?')[0]))) {
+            if (!out.includes(e)) out.push(e);
+        }
+    }
+    return out;
+}
+
 // Runs in the page.
 export function domExtractAnchors() {
     return [...document.querySelectorAll('a[href]')].map((a) => ({ href: a.href }));
@@ -114,6 +128,7 @@ export function looksLikeErrorPage({ title = '', text = '', length = text.length
 export async function resolveBioLinks({ page, links, maxPages = 2, maxLinks = 40, settleMs = 1500 }) {
     const pages = (links ?? []).filter(isLinkInBioUrl).slice(0, maxPages);
     const targets = [];
+    const emails = [];
     const warnings = [];
     for (const link of pages) {
         const url = normalizeUrl(link).href;
@@ -134,6 +149,7 @@ export async function resolveBioLinks({ page, links, maxPages = 2, maxLinks = 40
                 continue;
             }
             const anchors = await page.evaluate(domExtractAnchors);
+            for (const e of emailsFromAnchors(anchors)) if (!emails.includes(e)) emails.push(e);
             const found = destinationsFromAnchors(anchors, page.url(), { maxLinks });
             if (!found.length)
                 warnings.push(`link-in-bio page ${url} showed no outgoing links (empty, blocked or not rendered)`);
@@ -146,5 +162,5 @@ export async function resolveBioLinks({ page, links, maxPages = 2, maxLinks = 40
             );
         }
     }
-    return { targets: targets.slice(0, maxLinks), warnings };
+    return { targets: targets.slice(0, maxLinks), emails, warnings };
 }
