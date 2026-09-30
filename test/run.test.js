@@ -406,6 +406,22 @@ describe('runMode: posts by URL', () => {
     });
 });
 
+describe('runMode: a platform throttle reported together with rows', () => {
+    it('writes the profile and post rows first, records the rate limit, then stops before the next username', async () => {
+        const rateLimit = new RateLimitError('tiktok', 'creator embed', 'overload-protect');
+        const lookupProfile = vi.fn(async () => ({
+            profile: { recordType: 'profile', status: 'blocked' },
+            posts: [{ recordType: 'post', status: 'blocked', postUrl: null }],
+            rateLimit,
+        }));
+        const h = harness({ input: { usernames: ['a', 'b'] }, mod: { lookupProfile } });
+        await h.run('profile');
+        expect(h.pushed.map((r) => r.recordType)).toEqual(['profile', 'post']);
+        expect(h.rateLimitErrors).toHaveLength(1);
+        expect(lookupProfile).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('runMode: rows without a URL never trigger a comment fetch', () => {
     it('a blocked post row (no postUrl) from a profile lookup is written but not commented on', async () => {
         const h = harness({

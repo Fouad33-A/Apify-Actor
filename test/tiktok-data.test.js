@@ -828,11 +828,14 @@ describe('creator embed route (real Chromium, synthetic pages)', () => {
         expect(posts).toEqual([]);
     }, 90_000);
 
-    it('a visible challenge on the embed page stops the run (RateLimitError)', async () => {
+    it('a throttled embed page ("overload-protect") still returns the blocked profile row, plus the rate limit so the run can stop', async () => {
         const routes = [
-            { match: /tiktok\.com\/embed\/@nasa$/, body: '<html><body>Verify to continue</body></html>' },
+            { match: /tiktok\.com\/embed\/@nasa$/, body: '<html><body>overload-protect triggered</body></html>' },
             { match: /tiktok\.com\/@nasa$/, body: '<html><body>shell</body></html>' },
         ];
-        await expect(run(routes)).rejects.toBeInstanceOf(RateLimitError);
+        const result = await run(routes);
+        expect(result.profile).toMatchObject({ status: 'blocked', username: 'nasa' });
+        expect(result.profile.statusDetail).toMatch(/overload-protect/);
+        expect(result.rateLimit).toBeInstanceOf(RateLimitError);
     }, 90_000);
 });

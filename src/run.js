@@ -87,7 +87,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         for (const username of usernames) {
             if (!budget.canWriteMore()) break;
             try {
-                const { profile, posts } = await mod.lookupProfile({
+                const { profile, posts, rateLimit } = await mod.lookupProfile({
                     page,
                     username,
                     sourceInput: username,
@@ -98,6 +98,12 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 for (const post of posts) {
                     if (!(await write('post', post))) break;
                     if (fetchComments && canComment(post) && (await collectComments(post.postUrl, username))) return;
+                }
+                if (rateLimit) {
+                    // The rows above were written first; now stop, do not keep hitting a platform that throttled us.
+                    rateLimitErrors.push(rateLimit.toRecord());
+                    log.warning(rateLimit.message);
+                    return;
                 }
             } catch (err) {
                 if (err instanceof RateLimitError) {

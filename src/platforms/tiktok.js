@@ -352,7 +352,12 @@ async function loadCreatorEmbed(page, username) {
             .catch(() => {
                 // no video links yet: read whatever the page shows
             });
-        await assertNotRateLimited(page, 'tiktok', 'creator embed');
+        try {
+            await assertNotRateLimited(page, 'tiktok', 'creator embed');
+        } catch (err) {
+            if (err?.name === 'RateLimitError') return { header: null, videos: [], throttled: err };
+            throw err;
+        }
         const { text, anchors } = await page.evaluate(domExtractCreatorEmbed);
         const result = { header: parseCreatorEmbedText(text), videos: parseEmbedVideos(anchors) };
         if (!result.videos.length) {
@@ -363,7 +368,6 @@ async function loadCreatorEmbed(page, username) {
         }
         return result;
     } catch (err) {
-        if (err?.name === 'RateLimitError') throw err;
         failure = String(err?.message ?? err).split('\n')[0];
     }
     try {
@@ -421,11 +425,27 @@ export async function lookupProfile({
                 status: parsed.state === 'private' ? 'private' : 'found',
                 statusDetail: parsed.state === 'private' ? 'Private account: only public header facts returned' : null,
             });
-            const posts =
+            const loaded =
                 capture && parsed.state === 'ok' && parsed.postCount !== 0
                     ? await loadRecentPosts({ page, capture, profile, sourceInput, maxRecentPosts, shouldContinue })
                     : [];
-            return { profile, posts };
+            if (loaded.throttled) {
+                return {
+                    profile,
+                    posts: [
+                        makePostRow({
+                            platform: 'tiktok',
+                            sourceInput,
+                            username: profile.username,
+                            status: 'blocked',
+                            statusDetail:
+                                'The video list was empty and TikTok then throttled the public creator embed ("overload-protect"); the run stops here so TikTok is not hit further',
+                        }),
+                    ],
+                    rateLimit: loaded.throttled,
+                };
+            }
+            return { profile, posts: loaded };
         }
 
         const html = await page.content();
@@ -435,6 +455,19 @@ export async function lookupProfile({
         });
         // The main profile page was withheld: the public creator embed still shows the header facts.
         const embed = await loadCreatorEmbed(page, username);
+        if (embed?.throttled) {
+            return {
+                profile: makeProfileRow({
+                    platform: 'tiktok',
+                    sourceInput,
+                    username,
+                    status: 'blocked',
+                    statusDetail: `TikTok withheld the profile page${response && response.status() !== 200 ? ` (HTTP ${response.status()})` : ''} and then throttled the public creator embed ("overload-protect"); the run stops here so TikTok is not hit further - see DIAG_profile record`,
+                }),
+                posts: [],
+                rateLimit: embed.throttled,
+            };
+        }
         if (embed?.header) {
             const h = embed.header;
             const profile = makeProfileRow({
@@ -495,6 +528,9 @@ async function loadRecentPosts({ page, capture, profile, sourceInput, maxRecentP
     const embed = await loadCreatorEmbed(page, profile.username);
     if (embed?.videos.length) {
         return postsFromEmbedVideos({ page, embed, profile, sourceInput, maxRecentPosts, shouldContinue });
+    }
+    if (embed?.throttled) {
+        return { throttled: embed.throttled };
     }
 
     const listError = capture.hits.find((h) => isItemListHit(h) && h.data?.statusCode)?.data?.statusCode;
