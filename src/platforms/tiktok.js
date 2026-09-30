@@ -462,8 +462,7 @@ export async function lookupProfile({
                 sourceInput,
                 username,
                 status: 'blocked',
-                statusDetail:
-                    'TikTok page loaded but the embedded profile data was missing or unrecognised (block, challenge, or a layout change) - see DIAG_profile record',
+                statusDetail: `TikTok page loaded${response && response.status() !== 200 ? ` (HTTP ${response.status()})` : ''} but the embedded profile data was missing or unrecognised (block, challenge, or a layout change) - see DIAG_profile record`,
             }),
             posts: [],
         };

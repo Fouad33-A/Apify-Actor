@@ -30,6 +30,12 @@ describe('checkPageForRateLimit', () => {
         expect(() => checkPageForRateLimit(platform, 'profile', `<html>${text}</html>`)).toThrow(RateLimitError);
     });
 
+    it('TikTok\'s "overload-protect triggered" throttle page (seen live 2026-09-30) stops the run', () => {
+        expect(() => checkPageForRateLimit('tiktok', 'creator embed', 'overload-protect triggered')).toThrow(
+            RateLimitError,
+        );
+    });
+
     it('does not flag an ordinary page', () => {
         expect(() => checkPageForRateLimit('instagram', 'profile', '<html>NASA 104M followers</html>')).not.toThrow();
     });

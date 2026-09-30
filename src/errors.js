@@ -38,7 +38,7 @@ export function checkHttpStatusForRateLimit(platform, endpoint, statusCode) {
 // (see Marketing Scraper README's "What actually works" section for the
 // anonymous-vs-cookie findings this is built on).
 const MARKERS = {
-    tiktok: [/Verify to continue/i, /captcha/i, /unusual traffic/i],
+    tiktok: [/Verify to continue/i, /captcha/i, /unusual traffic/i, /overload-protect/i],
     instagram: [/Please wait a few minutes/i, /Try Again Later/i, /rate limit/i],
     facebook: [/you.?ve been temporarily blocked/i, /unusual activity/i, /try again later/i],
 };
