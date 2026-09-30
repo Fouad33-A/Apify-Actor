@@ -89,14 +89,23 @@ export function rankCandidates(events, { seeds = [], exclude = [] } = {}) {
 // It only reports facts about the row against the criteria given; it never guesses a missing value as a pass.
 // includeReach=false is the first screen (before the post-based reach numbers exist).
 export function applyScreening(row, criteria = {}, { includeReach = true } = {}) {
-    const { minFollowers, maxFollowers, requireContactEmail, excludeBioPatterns, minReachPercent } = criteria;
+    const {
+        minFollowers,
+        maxFollowers,
+        requireContactEmail,
+        excludeBioPatterns,
+        excludeSitePatterns,
+        minReachPercent,
+    } = criteria;
     const patterns = (excludeBioPatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
+    const sitePatterns = (excludeSitePatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
     const reachActive = includeReach && minReachPercent != null;
     const active =
         minFollowers != null ||
         maxFollowers != null ||
         Boolean(requireContactEmail) ||
         patterns.length > 0 ||
+        sitePatterns.length > 0 ||
         reachActive;
     if (!active) return { passes: null, failures: [] };
 
@@ -121,6 +130,19 @@ export function applyScreening(row, criteria = {}, { includeReach = true } = {})
             .join(' \n ')
             .toLowerCase();
         for (const p of patterns) if (haystack.includes(p)) failures.push(`bio or link contains "${p}"`);
+    }
+    if (sitePatterns.length) {
+        // What the creator's own website says first (title, description, headings, menu/button labels), when it was read.
+        for (const site of row.creatorSites ?? []) {
+            const said = [site.title, site.description, site.text].filter(Boolean).join(' \n ').toLowerCase();
+            let host = site.url;
+            try {
+                host = new URL(site.url).hostname.replace(/^www\./, '');
+            } catch {
+                // keep the raw text
+            }
+            for (const p of sitePatterns) if (said.includes(p)) failures.push(`website ${host} mentions "${p}"`);
+        }
     }
     if (reachActive) {
         // Unknown reach (hidden likes, too few posts read) is not a failure: it cannot be judged either way. The

@@ -42,6 +42,8 @@ export function makeProfileRow(fields) {
         filterFailures: fields.filterFailures ?? [],
         screeningWarnings: fields.screeningWarnings ?? [], // checks that could not be completed (never a silent pass)
         bioLinkTargets: fields.bioLinkTargets ?? [], // destinations found behind link-in-bio pages (followed on request)
+        creatorSites: fields.creatorSites ?? [], // the creator's own website(s) as read on request: [{ url, title, description, text }]
+        siteContactEmails: fields.siteContactEmails ?? [], // public e-mails found on those sites (also merged into contactEmails)
         // reach rule (computed on request, for profiles that passed the first screen): median of the latest posts
         postsSampled: fields.postsSampled ?? null,
         medianLikes: fields.medianLikes ?? null,

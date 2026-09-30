@@ -273,7 +273,8 @@ export function domExtractProfile() {
     // photo posts). No like/comment counts are exposed in the grid itself
     // (only on hover, which isn't reflected in the static DOM) - those are
     // fetched per-post by the caller when maxRecentPosts > 0.
-    const postAnchors = [...document.querySelectorAll('main a[href*="/p/"]')];
+    // Photo/carousel posts live under /p/, reels under /reel/: a reel-heavy profile's grid has no /p/ links at all.
+    const postAnchors = [...document.querySelectorAll('main a[href*="/p/"], main a[href*="/reel/"]')];
     const seenHref = new Set();
     const posts = [];
     for (const a of postAnchors) {
@@ -512,6 +513,24 @@ async function readProfileDom(page) {
     return dom;
 }
 
+// The grid shows only its first rows until the page is scrolled. When more posts are wanted than are listed, scroll
+// a few times and read the list again (stops as soon as there are enough, or when scrolling adds nothing).
+async function loadMoreGridPosts(page, dom, want) {
+    let current = dom;
+    for (let i = 0; i < 3 && current && current.posts.length < want; i += 1) {
+        const before = current.posts.length;
+        try {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+            await page.waitForTimeout(1000);
+            current = (await page.evaluate(domExtractProfile)) ?? current;
+        } catch {
+            break;
+        }
+        if (current.posts.length <= before) break;
+    }
+    return current;
+}
+
 // Instagram sometimes serves a profile whose header renders only after a second try; one fresh load before giving up.
 const UNRECOGNISED_LAYOUT = 'Page loaded but neither the current DOM layout';
 export async function lookupProfile(args) {
@@ -599,7 +618,8 @@ async function lookupProfileOnce({ page, username, sourceInput, maxRecentPosts }
         };
     }
 
-    const dom = await readProfileDom(page);
+    let dom = await readProfileDom(page);
+    dom = await loadMoreGridPosts(page, dom, maxRecentPosts);
 
     if (dom) {
         const profile = makeProfileRow({

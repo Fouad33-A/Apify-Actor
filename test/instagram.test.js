@@ -916,6 +916,32 @@ describe('domExtractComments on the REAL post layout (all comments share one lis
     });
 });
 
+describe('profile grid: reels and scrolling', () => {
+    it('reel links count as posts, so a reel-heavy profile is not read as having none', async () => {
+        const dom = await evaluate(
+            igPage(igHeader() + igGrid([{ href: '/reel/R1/' }, { href: '/p/P1/' }, { href: '/reel/R2/' }])),
+            domExtractProfile,
+        );
+        expect(dom.posts.map((p) => p.href)).toEqual(['/reel/R1/', '/p/P1/', '/reel/R2/']);
+    });
+
+    it('scrolls to list more posts when fewer than wanted are shown at first', async () => {
+        const lazy = igPage(
+            `${
+                igHeader() + igGrid([{ href: '/p/A/' }])
+            }<script>window.addEventListener("scroll", () => { if (!window.__more) { window.__more = true; document.querySelector("main").insertAdjacentHTML("beforeend", '<a href="/p/B/"></a><a href="/p/C/"></a><a href="/p/D/"></a>'); } }); document.body.style.minHeight = "4000px";</script>`,
+        );
+        const { posts } = await withContext(
+            [
+                { match: PROFILE_URL, body: lazy },
+                { match: /\/p\/[A-D]\/$/, body: igPost({ postIso: '2026-09-19T12:00:00.000Z' }) },
+            ],
+            ({ page }) => lookupProfile({ page, username: 'nasa', sourceInput: 'nasa', maxRecentPosts: 3 }),
+        );
+        expect(posts.map((p) => p.postUrl.split('/p/')[1])).toEqual(['A/', 'B/', 'C/']);
+    }, 60_000);
+});
+
 describe('cut-off bios ("... more") and contact e-mails', () => {
     const bioExpandable = {
         short: 'Budget coach \u{1F4B8}\nHelping you get out of debt\n\u{1F4E7}...',

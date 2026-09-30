@@ -18,6 +18,7 @@ import { applyScreening, extractMentions, normalizeHandle, rankCandidates } from
 import { isLinkInBioUrl, resolveBioLinks } from './linkinbio.js';
 import { computeReach } from './reach.js';
 import { makeCommentRow, makePostRow, makeProfileRow } from './schema.js';
+import { pickSiteUrls, scanCreatorSites } from './sitescan.js';
 
 export async function runMode({ mode, mod, page, input, budget, pushData, rateLimitErrors, report = {} }) {
     const platform = input.platform ?? null;
@@ -45,23 +46,36 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         followLinkInBio = true,
         reachPosts = 0,
         minReachPercent = null,
+        followCreatorSite = false,
+        excludeSitePatterns = [],
+        maxSitePages = 2,
     } = input;
     const shouldContinue = () => budget.canWriteMore();
     // A platform throttle noticed inside the staged screen: the row is still written, then the run stops.
     let pendingRateLimit = null;
-    const criteria = { minFollowers, maxFollowers, requireContactEmail, excludeBioPatterns, minReachPercent };
+    const criteria = {
+        minFollowers,
+        maxFollowers,
+        requireContactEmail,
+        excludeBioPatterns,
+        excludeSitePatterns,
+        minReachPercent,
+    };
     // Adds the optional screening verdict (facts vs the given criteria; null when no criteria were given).
     // The first screen has no reach numbers yet; the final one includes them.
-    const screenRow = (row, { includeReach = false } = {}) => {
-        const { passes, failures } = applyScreening(row, criteria, { includeReach });
+    // deferEmail: the creator's website may still supply the e-mail, so a missing one is not judged yet.
+    const screenRow = (row, { includeReach = false, deferEmail = false } = {}) => {
+        const used = deferEmail ? { ...criteria, requireContactEmail: false } : criteria;
+        const { passes, failures } = applyScreening(row, used, { includeReach });
         return { ...row, passesFilters: passes, filterFailures: failures };
     };
     // The staged screen, cheapest first, each costly step only for profiles that have not failed yet:
     //  1. followers / bio e-mail / bio+link text (no extra page loads)
     //  2. link-in-bio pages, so a Stan Store one click behind a Linktree is seen (only when bio patterns are set)
-    //  3. the reach rule: the latest posts' median likes/views vs followers (only when reachPosts > 0)
+    //  3. the creator's own website (followCreatorSite): what it sells, and a public contact e-mail
+    //  4. the reach rule: the latest posts' median likes/views vs followers (only when reachPosts > 0)
     async function finishProfile(profile) {
-        let row = screenRow(profile);
+        let row = screenRow(profile, { deferEmail: followCreatorSite });
         const alive = () => row.status === 'found' && row.passesFilters !== false;
         if (
             alive() &&
@@ -75,6 +89,32 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 bioLinkTargets: targets,
                 screeningWarnings: [...(row.screeningWarnings ?? []), ...warnings],
             });
+        }
+        if (alive() && followCreatorSite) {
+            const urls = pickSiteUrls(
+                [...(row.externalLinks ?? []), ...(row.bioLinkTargets ?? [])],
+                row.username,
+                maxSitePages,
+                isLinkInBioUrl,
+            );
+            if (urls.length) {
+                const { sites, emails, warnings } = await scanCreatorSites({ page, urls, max: maxSitePages });
+                row = screenRow({
+                    ...row,
+                    creatorSites: sites,
+                    siteContactEmails: emails,
+                    contactEmails: [...new Set([...(row.contactEmails ?? []), ...emails])],
+                    screeningWarnings: [...(row.screeningWarnings ?? []), ...warnings],
+                });
+            } else {
+                row = screenRow({
+                    ...row,
+                    screeningWarnings: [
+                        ...(row.screeningWarnings ?? []),
+                        'no website of the creator found behind the bio links: nothing to read there',
+                    ],
+                });
+            }
         }
         if (alive() && reachPosts > 0) {
             const looked = await mod.lookupProfile({

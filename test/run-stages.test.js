@@ -12,7 +12,24 @@ vi.mock('../src/linkinbio.js', async (original) => ({
             : { targets: ['https://www.youtube.com/@ok'], warnings: [] },
     ),
 }));
+vi.mock('../src/sitescan.js', async (original) => ({
+    ...(await original()),
+    scanCreatorSites: vi.fn(async ({ urls }) =>
+        urls[0].includes('coachsite')
+            ? {
+                  sites: [{ url: urls[0], title: 'Coach', description: null, text: 'Courses | Blog' }],
+                  emails: [],
+                  warnings: [],
+              }
+            : {
+                  sites: [{ url: urls[0], title: 'Blog', description: null, text: 'Recipes' }],
+                  emails: ['hello@blog.test'],
+                  warnings: [],
+              },
+    ),
+}));
 const { resolveBioLinks } = await import('../src/linkinbio.js');
+const { scanCreatorSites } = await import('../src/sitescan.js');
 
 const profile = (username, over = {}) => ({
     recordType: 'profile',
@@ -197,5 +214,57 @@ describe('staged screen: the reach rule', () => {
         await h.run();
         expect(h.lookupProfile).toHaveBeenCalledTimes(1);
         expect(h.pushed[0].postsSampled ?? null).toBeNull();
+    });
+});
+
+describe("staged screen: the creator's own website", () => {
+    const lookup = async ({ username }) => ({
+        profile: profile(username, {
+            contactEmails: [],
+            externalLinks: [`https://${username}.test/`],
+        }),
+        posts: [],
+    });
+
+    it('a site that says "Courses" fails the profile; a clean site supplies the e-mail that satisfies requireContactEmail', async () => {
+        scanCreatorSites.mockClear();
+        const h = harness(
+            {
+                usernames: ['coachsite', 'blogger'],
+                requireContactEmail: true,
+                followCreatorSite: true,
+                excludeSitePatterns: ['course'],
+            },
+            lookup,
+        );
+        await h.run();
+        const [coach, blogger] = h.pushed;
+        expect(coach.passesFilters).toBe(false);
+        expect(coach.filterFailures).toContain('website coachsite.test mentions "course"');
+        expect(blogger).toMatchObject({
+            passesFilters: true,
+            contactEmails: ['hello@blog.test'],
+            siteContactEmails: ['hello@blog.test'],
+        });
+        expect(blogger.creatorSites[0]).toMatchObject({ title: 'Blog' });
+    });
+
+    it('sites are read only for profiles that passed the first checks, and only when switched on', async () => {
+        scanCreatorSites.mockClear();
+        const off = harness({ usernames: ['blogger'], excludeSitePatterns: ['course'] }, lookup);
+        await off.run();
+        expect(scanCreatorSites).not.toHaveBeenCalled();
+        const big = harness({ usernames: ['blogger'], followCreatorSite: true, maxFollowers: 1000 }, lookup);
+        await big.run();
+        expect(scanCreatorSites).not.toHaveBeenCalled();
+    });
+
+    it('a profile with no website behind its links gets a warning, not a silent pass', async () => {
+        const h = harness({ usernames: ['x'], followCreatorSite: true }, async ({ username }) => ({
+            profile: profile(username, { externalLinks: ['https://www.instagram.com/x'] }),
+            posts: [],
+        }));
+        await h.run();
+        expect(h.pushed[0].screeningWarnings.join(' ')).toMatch(/no website of the creator found/);
     });
 });

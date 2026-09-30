@@ -135,6 +135,27 @@
             "default": true,
             "description": "When you give 'fail if bio or link contains' patterns, profiles that pass the first checks have their link-in-bio pages (linktr.ee, beacons.ai, bio.link, carrd.co, stan.store and similar) opened and the destination links checked against the same patterns, so a shop hidden one click behind a Linktree is seen. A page that cannot be read is reported in screeningWarnings, never counted as clean."
         },
+        "followCreatorSite": {
+            "title": "Screening: read the creator's own website",
+            "type": "boolean",
+            "default": false,
+            "description": "For profiles that pass the first checks, open the creator's own site (the domain behind the bio link, not a platform or a link-in-bio page), read what a visitor sees first (title, description, headings, menu and button labels) and any public contact e-mail. The e-mail fills contactEmails (and siteContactEmails); the text is returned in creatorSites and checked against 'fail if website mentions'. With 'require contact e-mail' on, a missing bio e-mail is judged only after the site was read. Pages that cannot be read, or domains parked or for sale, are reported in screeningWarnings."
+        },
+        "excludeSitePatterns": {
+            "title": "Screening: fail if website mentions",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Needs 'read the creator's own website'. For example course, masterclass, academy, coaching, my book, shop. Case-insensitive match on the site's title, description, headings and menu/button labels."
+        },
+        "maxSitePages": {
+            "title": "Screening: websites to read per creator",
+            "type": "integer",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 5,
+            "description": "How many different sites per creator are read (the creator's own domain first). Each costs one light page load, plus one contact page when no e-mail is on the home page."
+        },
         "reachPosts": {
             "title": "Reach rule: number of latest posts to sample",
             "type": "integer",
@@ -147,7 +168,7 @@
             "title": "Screening: minimum reach (% of followers)",
             "type": "number",
             "minimum": 0,
-            "description": "Optional, needs 'Reach rule' above. Profiles whose reachPctOfFollowers is below this (or cannot be computed) get passesFilters=false with the reason."
+            "description": "Optional, needs 'Reach rule' above. Profiles whose measured reachPctOfFollowers is below this get passesFilters=false with the reason. When the reach cannot be computed (hidden likes, too few posts read) the profile is not failed: the row carries a warning instead."
         },
         "enrichSearchAuthors": {
             "title": "Load each creator's profile page in search (Mode B)",

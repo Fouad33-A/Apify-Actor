@@ -42,10 +42,27 @@ This is a guideline, not a hard block, but the cost is real, so treat it careful
     "minFollowers": 30000,
     "maxFollowers": 150000,
     "requireContactEmail": true,
-    "excludeBioPatterns": ["stan.store", "ebook", "e-book"],
+    "excludeBioPatterns": [
+        "stan.store",
+        "ebook",
+        "e-book",
+        "patreon",
+        "kajabi",
+        "teachable",
+        "thinkific",
+        "podia",
+        "gumroad",
+        "selar.co",
+        "course",
+        "coach",
+        "author of"
+    ],
     "followLinkInBio": true,
+    "followCreatorSite": true,
+    "excludeSitePatterns": ["course", "masterclass", "academy", "coaching", "my book", "membership", "patreon"],
+    "maxSitePages": 2,
     "reachPosts": 5,
-    "minReachPercent": 3,
+    "minReachPercent": 1,
     "onlyPassing": true,
     "maxItemsPerRun": 60,
     "maxProxyMegabytes": 250,
@@ -58,7 +75,8 @@ The screen runs in stages, cheapest first, and each costly step only touches pro
 
 1. **First screen** (no extra page loads): follower range, contact e-mail in the bio, and the `excludeBioPatterns` text in the bio and the links shown in it.
 2. **Link-in-bio pages** (`followLinkInBio`, on by default when `excludeBioPatterns` is set): for profiles that passed, the Actor opens their link-in-bio pages (linktr.ee, beacons.ai, bio.link, carrd.co, stan.store and similar; up to 2 pages, 40 links each) and checks the destination links against the same patterns. A Stan Store one click behind a Linktree is now seen: the row has `bioLinkTargets` (the destinations found) and fails with `bio or link contains "stan.store"`. A page that cannot be read, shows no links, or answers with an error or bot-check page (a Beacons page once answered with a Cloudflare 5xx page) is listed in `screeningWarnings` and its links are not used: it is **not** counted as clean, so check those rows by hand. Verified live on Linktree (planbudgetdream: Amazon storefront and amzn.to links found; savvymoneygirl: 9 destinations); Beacons was blocked in that test.
-3. **Reach rule** (`reachPosts`, 0 = off; use 4-6): for profiles that passed, the latest posts are read and the row gets `postsSampled`, `medianLikes`, `medianComments`, `medianViews`, `likesPctOfFollowers`, `viewsPctOfFollowers` and `reachPctOfFollowers` (median views of the sampled posts / followers when at least 3 posts show views, otherwise median likes / followers; `reachBasis` says which). `minReachPercent` makes profiles below it fail with the numbers. If fewer than 3 posts carry counts (creators often **hide post likes**: Instagram then shows only the comment count) reach is `null`: it is never guessed, it does **not** fail the profile, and the row gets a `screeningWarnings` entry ("reach not computed ... check the reach by hand"). Only a measured reach below `minReachPercent` fails. So **a row with `screeningWarnings` passed every check that could be run; check the listed ones by hand.** Each post row says when its likes are hidden, or when its page could not be loaded; in that case the row warns "N of M post pages could not be loaded" so a failed load is not mistaken for hidden likes. `commentsPctOfFollowers` (median comments / followers) is returned as well: it is available even when likes are hidden. From 0.10.3 post pages are read as soon as they have loaded (before, a 30-second wait for network silence could throw away a page that had loaded, which left reach empty). Instagram rounds large like counts (e.g. "117K"); the median is on those displayed numbers.
+3. **Creator's own website** (new in 0.11.0, `followCreatorSite`, off by default): for profiles that passed, the Actor opens the creator's own site (the domain behind the bio link or behind the link-in-bio page; platforms, trackers and link-in-bio pages are skipped; their own domain is read first; up to `maxSitePages`, default 2) and reads what a first-time visitor sees: title, description, headings and menu/button labels. Two uses: (a) `excludeSitePatterns` (e.g. `course`, `masterclass`, `academy`, `coaching`, `my book`, `shop`, `membership`) fails a profile whose site says one of those words, with the reason `website zerotoamillion.com mentions "course"`; the row keeps `creatorSites` ([{ url, title, description, text }]) so you can read what the site says and judge the rest yourself. (b) Public contact e-mails found on the site (mailto links or written text; one contact page is read when the home page shows none) go into `siteContactEmails` and are merged into `contactEmails`; with `requireContactEmail` on, a missing bio e-mail is judged only after the site was read. A site that is parked or for sale, blocked, or down is listed in `screeningWarnings` and is not counted as clean. A profile with no website behind its links gets a warning too. Cost: one light page load per site (images and media are blocked), plus one for a contact page. What it cannot see: a creator with no link at all, or a course/book that is mentioned nowhere on the pages read (for example an author whose site only says "Home | About"): those still need your own judgement.
+4. **Reach rule** (`reachPosts`, 0 = off; use 4-6): for profiles that passed, the latest posts are read and the row gets `postsSampled`, `medianLikes`, `medianComments`, `medianViews`, `likesPctOfFollowers`, `viewsPctOfFollowers` and `reachPctOfFollowers` (median views of the sampled posts / followers when at least 3 posts show views, otherwise median likes / followers; `reachBasis` says which). `minReachPercent` makes profiles below it fail with the numbers. If fewer than 3 posts carry counts (creators often **hide post likes**: Instagram then shows only the comment count) reach is `null`: it is never guessed, it does **not** fail the profile, and the row gets a `screeningWarnings` entry ("reach not computed ... check the reach by hand"). Only a measured reach below `minReachPercent` fails. So **a row with `screeningWarnings` passed every check that could be run; check the listed ones by hand.** Each post row says when its likes are hidden, or when its page could not be loaded; in that case the row warns "N of M post pages could not be loaded" so a failed load is not mistaken for hidden likes. `commentsPctOfFollowers` (median comments / followers) is returned as well: it is available even when likes are hidden. From 0.10.3 post pages are read as soon as they have loaded (before, a 30-second wait for network silence could throw away a page that had loaded, which left reach empty). Instagram rounds large like counts (e.g. "117K"); the median is on those displayed numbers.
 
 Bios are read in full (the Actor clicks Instagram's "... more"), and e-mails written in the bio fill `contactEmails` (verified live: planbudgetdream, cazza_time, savvymoneygirl). Each row comes back with `passesFilters` and `filterFailures`; with `onlyPassing` only the profiles that meet every criterion are written (blocked or failed lookups are still written, marked as such). Start with 20-30 handles, read `OUTPUT.cost`, then scale. Measured on 20 handles with every stage on (build 0.0.63): $0.18 in total (about $0.009 per handle), 125 MB of traffic; it took 25 minutes, which 0.10.3 should cut a lot (it no longer waits for network silence on profile and post pages).
 
