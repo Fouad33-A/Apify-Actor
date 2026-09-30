@@ -72,6 +72,7 @@ export function makePostRow(fields) {
         shareCount: fields.shareCount ?? null,
         viewCount: fields.viewCount ?? null, // null if the platform has no view/play metric
         isSponsored: fields.isSponsored ?? null,
+        mentionedAccounts: fields.mentionedAccounts ?? [], // handles tagged/linked in the post, when the platform shows them
 
         status: fields.status ?? 'found',
         statusDetail: fields.statusDetail ?? null,

@@ -113,7 +113,8 @@
         "requireContactEmail": {
             "title": "Screening: require a contact email in the bio",
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Optional screening. When on, profiles without an e-mail address written in the bio get passesFilters=false with the reason. The Actor still returns the raw data."
         },
         "excludeBioPatterns": {
             "title": "Screening: fail if bio or link contains",

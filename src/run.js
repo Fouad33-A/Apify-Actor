@@ -258,7 +258,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     break;
                 }
                 for (const post of posts) {
-                    for (const handle of extractMentions(post.caption)) {
+                    for (const handle of [...extractMentions(post.caption), ...(post.mentionedAccounts ?? [])]) {
                         events.push({ handle, signal: 'mention', seed, postUrl: post.postUrl });
                     }
                 }

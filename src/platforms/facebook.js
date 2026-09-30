@@ -200,7 +200,15 @@ export function domExtractPosts(maxPosts) {
             const text = label.parentElement.innerText.replace(label.innerText, '').trim();
             reactions = parseAbbrev(text.split(/\s+/)[0]);
         }
-        out.push({ postUrl, caption, captionTruncated: truncated, relativeTime, reactions });
+        // Accounts linked from the post (tagged Pages/people, collaborators): hrefs without tracking parameters.
+        const mentionedHrefs = [
+            ...new Set(
+                links
+                    .filter((a) => a !== postAnchor && a.closest('[role="button"]') === null)
+                    .map((a) => a.href.split('?')[0].split('#')[0]),
+            ),
+        ];
+        out.push({ postUrl, caption, captionTruncated: truncated, relativeTime, reactions, mentionedHrefs });
     }
     return out;
 }
@@ -281,6 +289,23 @@ const NOT_A_HANDLE = new Set([
     'share',
     'login',
     'l.php',
+    'hashtag',
+    'events',
+    'pages',
+    'marketplace',
+    'gaming',
+    'stories',
+    'help',
+    'policies',
+    'business',
+    'ads',
+    'about',
+    'privacy',
+    'public',
+    'sharer',
+    'sharer.php',
+    'plugins',
+    'dialog',
 ]);
 
 // A commenter's profile link -> their @handle (vanity URL) and a clean profile URL. Accounts without a vanity
@@ -433,7 +458,16 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
             }
         }
 
+        const ownHandle = String(username ?? '').toLowerCase();
         const posts = rawPosts.map((p) => {
+            const mentionedAccounts = [
+                ...new Set(
+                    (p.mentionedHrefs ?? [])
+                        .map((h) => parseFacebookProfileHref(h).username)
+                        .filter((h) => h && h.toLowerCase() !== ownHandle)
+                        .map((h) => h.toLowerCase()),
+                ),
+            ];
             const notes = [
                 'Anonymous visitors see only the latest post(s)',
                 p.relativeTime ? `posted "${p.relativeTime}" (relative time; no exact date is exposed)` : null,
@@ -460,6 +494,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                 shareCount: p.shareCount ?? null,
                 viewCount: p.viewCount ?? null,
                 isSponsored: null,
+                mentionedAccounts,
                 statusDetail: notes.join('; '),
             });
         });

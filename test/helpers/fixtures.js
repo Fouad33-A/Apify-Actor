@@ -154,10 +154,11 @@ export const fbPost = ({
     truncated = true,
     reactions = '1.7K',
     comments = [],
+    tagged = [], // hrefs of accounts tagged/linked in the caption
 } = {}) => `<div role="article"><div><div>
     <div><span><a role="link" href="https://www.facebook.com/NASA?__cft__[0]=x"><span>NASA</span></a></span>
       <span><span>a day ago</span><a role="link" aria-label="${ago}" href="${url}">${ago}</a></span></div>
-    ${caption === null ? '' : `<div>${esc(caption)}${truncated ? ' … <div role="button">See more</div>' : ''}</div>`}
+    ${caption === null ? '' : `<div>${esc(caption)}${truncated ? ' … <div role="button">See more</div>' : ''}${tagged.map((h) => ` <a role="link" href="${h}"><span>tagged</span></a>`).join('')}</div>`}
     <div><div><div>All reactions:</div><span>${reactions}</span></div><div role="button"><span>92</span></div><div role="button"><span>159</span></div></div>
     ${comments.join('')}
   </div></div></div>`;

@@ -47,7 +47,9 @@ Screening criteria (optional, also work in `profile` mode): `minFollowers`, `max
 Honest expectations:
 
 - Most commenters are ordinary followers, not creators. The strongest signals are accounts the seed **mentions or tags** and accounts that appear under **several** seeds' posts. Expect a modest yield per round, more with more seeds.
-- Instagram works best. Facebook is not supported in `expand`. TikTok can only use caption @mentions (comments are not available).
+- **Instagram** signals: accounts @mentioned in captions and comments, and commenters.
+- **Facebook** works too (seeds are Page names such as `NASA`). Signals: accounts tagged or linked in the Page's latest post, and commenters (with their `@handle` when they have one). Anonymous visitors see only the latest post(s) and a few comments per Page, so each seed gives fewer candidates than on Instagram, and many commenters are personal profiles, which the Actor cannot read as Pages (those rows come back as `not_found`, `private` or `blocked`, marked as such). Use a small `maxCandidates` on Facebook; tagged Pages are the useful signal.
+- **TikTok** can only use @mentions in captions (comments are not available).
 - **Not yet verified live**, and the cost per candidate is not measured. Start with 2 seeds, `maxRecentPosts` 3, `maxCandidates` 10, `maxProxyMegabytes` 60, read the `OUTPUT` cost, then scale.
 
 Example:

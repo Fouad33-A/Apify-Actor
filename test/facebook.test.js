@@ -124,6 +124,7 @@ describe('domExtractPosts (in-page)', () => {
             captionTruncated: true,
             relativeTime: '1d',
             reactions: 1700,
+            mentionedHrefs: ['https://www.facebook.com/NASA'], // the Page's own header link
         });
     });
 
@@ -701,4 +702,44 @@ describe('parseFacebookProfileHref', () => {
     ])('%s', (href, username, profileUrl) => {
         expect(parseFacebookProfileHref(href)).toEqual({ username, profileUrl });
     });
+});
+
+describe('accounts tagged in a Facebook post (used by expand mode)', () => {
+    const tagged = [
+        'https://www.facebook.com/NASA?__cft__[0]=x', // the Page itself
+        'https://www.facebook.com/some.creator?__cft__[0]=x&__tn__=-]K-R',
+        'https://www.facebook.com/Another.Page/?ref=nf',
+        'https://www.facebook.com/profile.php?id=1000123', // numeric id only: no handle
+        'https://www.facebook.com/hashtag/space',
+        'https://www.facebook.com/some.creator', // duplicate
+    ];
+
+    it('domExtractPosts returns the cleaned hrefs linked from the post (own post link excluded)', async () => {
+        const html = fbPage({ posts: [fbPost({ tagged })] });
+        const posts = await evaluate(html, domExtractPosts, 5);
+        expect(posts[0].mentionedHrefs).toEqual(
+            expect.arrayContaining([
+                'https://www.facebook.com/some.creator',
+                'https://www.facebook.com/Another.Page/',
+                'https://www.facebook.com/profile.php',
+            ]),
+        );
+        expect(posts[0].mentionedHrefs).not.toContain(posts[0].postUrl);
+    });
+
+    it('lookupProfile turns them into mentionedAccounts: lower-case handles, without the Page itself, hashtags, ids or duplicates', async () => {
+        const body = fbPage({ posts: [fbPost({ tagged })] });
+        const { posts } = await withContext([{ match: PAGE_URL, body }], ({ page }) =>
+            lookupProfile({ page, username: 'NASA', sourceInput: 'NASA', maxRecentPosts: 5 }),
+        );
+        expect(posts[0].mentionedAccounts).toEqual(['some.creator', 'another.page']);
+    }, 60_000);
+
+    it('a post that tags nobody has an empty list', async () => {
+        const body = fbPage({ posts: [fbPost()] });
+        const { posts } = await withContext([{ match: PAGE_URL, body }], ({ page }) =>
+            lookupProfile({ page, username: 'NASA', sourceInput: 'NASA', maxRecentPosts: 5 }),
+        );
+        expect(posts[0].mentionedAccounts).toEqual([]);
+    }, 60_000);
 });
