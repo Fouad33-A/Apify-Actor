@@ -439,6 +439,156 @@ describe('runMode: rows without a URL never trigger a comment fetch', () => {
     });
 });
 
+describe('runMode: expand (discovery from seeds)', () => {
+    const seedPosts = [
+        {
+            recordType: 'post',
+            status: 'found',
+            postUrl: 'https://x/p/1/',
+            caption: 'collab with @newfriend and @known_one',
+        },
+        { recordType: 'post', status: 'found', postUrl: 'https://x/p/2/', caption: 'no mentions here' },
+    ];
+    const comment = (u, text = 'nice') => ({
+        recordType: 'comment',
+        status: 'found',
+        commenterUsername: u,
+        commentText: text,
+    });
+    const profileFor = (username, over = {}) => ({
+        recordType: 'profile',
+        status: 'found',
+        username,
+        followerCount: 50_000,
+        contactEmails: ['a@b.co'],
+        bio: 'hello',
+        externalLinks: [],
+        ...over,
+    });
+    function expandHarness(input, over = {}) {
+        const lookupProfile = vi.fn(async ({ username }) =>
+            username === 'seedone'
+                ? { profile: profileFor('seedone'), posts: seedPosts }
+                : { profile: profileFor(username), posts: [] },
+        );
+        const fetchComments = vi.fn(async ({ postUrl }) =>
+            postUrl.endsWith('/1/')
+                ? [
+                      comment('newfriend'),
+                      comment('commenter_a', 'love it @tagged_by_comment'),
+                      comment('seedone', 'thanks!'),
+                  ]
+                : [comment('commenter_a')],
+        );
+        return harness({ input: { usernames: ['SeedOne'], ...input }, mod: { lookupProfile, fetchComments, ...over } });
+    }
+
+    it('collects mentions and commenters, drops the seed and known accounts, ranks by sightings, then looks each up', async () => {
+        const h = expandHarness({ excludeUsernames: ['known_one'], maxRecentPosts: 2 });
+        await h.run('expand');
+        const rows = h.pushed.filter((r) => r.recordType === 'profile');
+        // newfriend and commenter_a are each seen twice; newfriend was also deliberately mentioned, so it ranks first
+        expect(rows.map((r) => r.username)).toEqual(['newfriend', 'commenter_a', 'tagged_by_comment']);
+        expect(rows[0]).toMatchObject({
+            discoveredFrom: ['seedone'],
+            discoverySignals: ['commenter', 'mention'],
+            timesSeen: 2,
+        });
+        expect(rows[1].discoverySignals).toEqual(['commenter']);
+        expect(rows[1].discoveryExamples).toEqual(['https://x/p/1/', 'https://x/p/2/']);
+        expect(rows[1].sourceInput).toBe('seedone');
+        // candidate lookups skip posts
+        expect(h.mod.lookupProfile).toHaveBeenCalledWith(
+            expect.objectContaining({ username: 'newfriend', maxRecentPosts: 0 }),
+        );
+    });
+
+    it('screening flags each candidate; onlyPassing leaves out found profiles that fail (never blocked ones)', async () => {
+        const lookupProfile = vi.fn(async ({ username }) => {
+            if (username === 'seedone') return { profile: profileFor('seedone'), posts: seedPosts };
+            if (username === 'newfriend')
+                return { profile: profileFor(username, { followerCount: 900_000 }), posts: [] };
+            if (username === 'commenter_a')
+                return { profile: { recordType: 'profile', status: 'blocked', username }, posts: [] };
+            return { profile: profileFor(username), posts: [] };
+        });
+        const h = expandHarness(
+            {
+                excludeUsernames: ['known_one'],
+                maxRecentPosts: 2,
+                maxFollowers: 150_000,
+                requireContactEmail: true,
+                onlyPassing: true,
+            },
+            { lookupProfile },
+        );
+        await h.run('expand');
+        const rows = h.pushed.filter((r) => r.recordType === 'profile');
+        expect(rows.map((r) => [r.username, r.passesFilters])).toEqual([
+            ['commenter_a', false], // blocked: still written, marked as not passing
+            ['tagged_by_comment', true],
+        ]);
+    });
+
+    it('maxCandidates caps the number of profile lookups', async () => {
+        const h = expandHarness({ maxCandidates: 1, maxRecentPosts: 2 });
+        await h.run('expand');
+        // 1 seed lookup + 1 candidate lookup
+        expect(h.mod.lookupProfile).toHaveBeenCalledTimes(2);
+    });
+
+    it('a seed that cannot be read is written as a row with the reason and yields no candidates', async () => {
+        const h = expandHarness(
+            {},
+            {
+                lookupProfile: vi.fn(async () => ({
+                    profile: { recordType: 'profile', status: 'blocked', username: 'seedone' },
+                    posts: [],
+                })),
+            },
+        );
+        await h.run('expand');
+        expect(h.pushed).toHaveLength(1);
+        expect(h.pushed[0].statusDetail).toMatch(/Seed could not be read \(blocked\)/);
+    });
+
+    it('unavailable comments do not stop discovery: mentions from captions still produce candidates', async () => {
+        const h = expandHarness({ maxRecentPosts: 2 }, { fetchComments: vi.fn().mockRejectedValue(new Error('boom')) });
+        await h.run('expand');
+        expect(h.pushed.filter((r) => r.recordType === 'profile').map((r) => r.username)).toEqual([
+            'known_one',
+            'newfriend',
+        ]);
+    });
+
+    it('a rate limit while reading a seed stops the run and writes what was found so far', async () => {
+        const lookupProfile = vi.fn().mockRejectedValue(new RateLimitError('instagram', 'profile', 'x'));
+        const h = expandHarness({}, { lookupProfile });
+        await h.run('expand');
+        expect(h.rateLimitErrors).toHaveLength(1);
+        expect(h.pushed).toEqual([]);
+        expect(lookupProfile).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('runMode: profile mode screening', () => {
+    it('adds the verdict to each profile row when criteria are given, and null when not', async () => {
+        const lookupProfile = vi.fn(async ({ username }) => ({
+            profile: { recordType: 'profile', status: 'found', username, followerCount: 500_000, contactEmails: [] },
+            posts: [],
+        }));
+        const withCriteria = harness({ input: { usernames: ['a'], maxFollowers: 150_000 }, mod: { lookupProfile } });
+        await withCriteria.run('profile');
+        expect(withCriteria.pushed[0]).toMatchObject({
+            passesFilters: false,
+            filterFailures: ['followers 500000 above 150000'],
+        });
+        const without = harness({ input: { usernames: ['a'] }, mod: { lookupProfile } });
+        await without.run('profile');
+        expect(without.pushed[0]).toMatchObject({ passesFilters: null, filterFailures: [] });
+    });
+});
+
 describe('runMode: validation', () => {
     it('throws on an unknown mode', async () => {
         const h = harness();

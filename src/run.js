@@ -14,6 +14,7 @@
 import { log } from 'apify';
 
 import { RateLimitError } from './errors.js';
+import { applyScreening, extractMentions, normalizeHandle, rankCandidates } from './expand.js';
 import { makeCommentRow, makePostRow, makeProfileRow } from './schema.js';
 
 export async function runMode({ mode, mod, page, input, budget, pushData, rateLimitErrors }) {
@@ -32,7 +33,23 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         maxCommentsPerPost = 20,
         topLevelCommentsOnly = true,
         enrichSearchAuthors = true,
+        minFollowers = null,
+        maxFollowers = null,
+        requireContactEmail = false,
+        excludeBioPatterns = [],
+        onlyPassing = false,
+        excludeUsernames = [],
+        maxCandidates = 30,
     } = input;
+    const criteria = { minFollowers, maxFollowers, requireContactEmail, excludeBioPatterns };
+    // Adds the optional screening verdict (facts vs the given criteria; null when no criteria were given).
+    const screenRow = (row) => {
+        const { passes, failures } = applyScreening(row, criteria);
+        return { ...row, passesFilters: passes, filterFailures: failures };
+    };
+    // onlyPassing hides profiles that were read fine but do not meet the criteria. Rows that are not `found`
+    // (blocked, error, ...) are still written: a failed lookup is never dropped silently.
+    const hiddenByFilter = (row) => onlyPassing && row.status === 'found' && row.passesFilters === false;
     const shouldContinue = () => budget.canWriteMore();
     // Comments are only fetched for posts that were really read (a blocked/not-found row has no usable URL).
     const canComment = (post) => Boolean(post.postUrl) && (post.status ?? 'found') === 'found';
@@ -94,7 +111,8 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                     maxRecentPosts,
                     shouldContinue,
                 });
-                await write('profile', profile);
+                const screened = screenRow(profile);
+                if (!hiddenByFilter(screened)) await write('profile', screened);
                 for (const post of posts) {
                     if (!(await write('post', post))) break;
                     if (fetchComments && canComment(post) && (await collectComments(post.postUrl, username))) return;
@@ -208,6 +226,135 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                         sourceInput: q.query,
                         status: 'error',
                         statusDetail: `Search failed: ${reason(err)}`,
+                    }),
+                );
+            }
+        }
+    } else if (mode === 'expand') {
+        // Discovery from known-good creators (seeds): who do they mention, and who interacts with their posts?
+        const seeds = usernames.map((u) => normalizeHandle(u)).filter(Boolean);
+        const events = [];
+        let stopped = false;
+        for (const seed of seeds) {
+            if (stopped || !shouldContinue()) break;
+            try {
+                const { profile, posts, rateLimit } = await mod.lookupProfile({
+                    page,
+                    username: seed,
+                    sourceInput: seed,
+                    maxRecentPosts,
+                    shouldContinue,
+                });
+                if (profile.status !== 'found') {
+                    await write('profile', {
+                        ...profile,
+                        statusDetail: `Seed could not be read (${profile.status}): ${profile.statusDetail ?? 'no detail'}`,
+                    });
+                }
+                if (rateLimit) {
+                    rateLimitErrors.push(rateLimit.toRecord());
+                    log.warning(rateLimit.message);
+                    stopped = true;
+                    break;
+                }
+                for (const post of posts) {
+                    for (const handle of extractMentions(post.caption)) {
+                        events.push({ handle, signal: 'mention', seed, postUrl: post.postUrl });
+                    }
+                }
+                for (const post of posts.filter(canComment).slice(0, maxRecentPosts)) {
+                    if (!shouldContinue()) break;
+                    try {
+                        const comments = await mod.fetchComments({
+                            page,
+                            postUrl: post.postUrl,
+                            sourceInput: seed,
+                            maxComments: maxCommentsPerPost,
+                            topLevelOnly: false,
+                            shouldContinue,
+                        });
+                        for (const c of comments.filter((x) => (x.status ?? 'found') === 'found')) {
+                            if (c.commenterUsername) {
+                                events.push({
+                                    handle: c.commenterUsername,
+                                    signal: 'commenter',
+                                    seed,
+                                    postUrl: post.postUrl,
+                                });
+                            }
+                            for (const handle of extractMentions(c.commentText)) {
+                                events.push({ handle, signal: 'mention', seed, postUrl: post.postUrl });
+                            }
+                        }
+                    } catch (err) {
+                        if (err instanceof RateLimitError) throw err;
+                        log.warning(`Comments for ${post.postUrl} unavailable: ${reason(err)}`);
+                    }
+                }
+            } catch (err) {
+                if (err instanceof RateLimitError) {
+                    rateLimitErrors.push(err.toRecord());
+                    log.warning(err.message);
+                    stopped = true;
+                    break;
+                }
+                log.exception(err, `Seed ${seed} failed`);
+                await write(
+                    'profile',
+                    makeProfileRow({
+                        platform,
+                        sourceInput: seed,
+                        username: seed,
+                        status: 'error',
+                        statusDetail: `Seed lookup failed: ${reason(err)}`,
+                    }),
+                );
+            }
+        }
+        const ranked = rankCandidates(events, { seeds, exclude: excludeUsernames }).slice(0, maxCandidates);
+        log.info(`Expand: ${events.length} sightings -> ${ranked.length} candidate(s) to look up`);
+        for (const cand of ranked) {
+            if (stopped || !shouldContinue()) break;
+            try {
+                const { profile, rateLimit } = await mod.lookupProfile({
+                    page,
+                    username: cand.handle,
+                    sourceInput: cand.seeds.join(', '),
+                    maxRecentPosts: 0,
+                    shouldContinue,
+                });
+                const row = screenRow({
+                    ...profile,
+                    sourceInput: cand.seeds.join(', '),
+                    discoveredFrom: cand.seeds,
+                    discoverySignals: cand.signals,
+                    timesSeen: cand.timesSeen,
+                    discoveryExamples: cand.examples,
+                });
+                if (!hiddenByFilter(row)) await write('profile', row);
+                if (rateLimit) {
+                    rateLimitErrors.push(rateLimit.toRecord());
+                    log.warning(rateLimit.message);
+                    break;
+                }
+            } catch (err) {
+                if (err instanceof RateLimitError) {
+                    rateLimitErrors.push(err.toRecord());
+                    log.warning(err.message);
+                    break;
+                }
+                log.exception(err, `Candidate ${cand.handle} failed`);
+                await write(
+                    'profile',
+                    makeProfileRow({
+                        platform,
+                        sourceInput: cand.seeds.join(', '),
+                        username: cand.handle,
+                        discoveredFrom: cand.seeds,
+                        discoverySignals: cand.signals,
+                        timesSeen: cand.timesSeen,
+                        status: 'error',
+                        statusDetail: `Lookup failed: ${reason(err)}`,
                     }),
                 );
             }

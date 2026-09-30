@@ -31,6 +31,46 @@ This is a guideline, not a hard block, but the cost is real, so treat it careful
 - Always pass the per-run caps: `maxItemsPerRun` and `maxProxyMegabytes` (use 40 for one TikTok creator).
 - One creator per run until costs are known.
 
+## Discovery: `expand` mode (new in 0.9.0, needs a live check before you rely on it)
+
+There is no keyword or hashtag search (Instagram and Facebook require a login for it; this Actor never logs in). `expand` finds new creators from creators you already know fit, using only pages a logged-out visitor can see:
+
+1. You give **seeds**: creators that are already good fits (for example `planbudgetdream`, `easy_budget`).
+2. The Actor reads each seed's recent posts and comments and collects **the accounts they @mention and the accounts that comment**.
+3. It ranks those accounts (seen by more seeds first, then most sightings, deliberate @mentions above plain comments), skips the seeds and anything in `excludeUsernames`, and looks up the top `maxCandidates`.
+4. Each candidate comes back as a normal profile row plus: `discoveredFrom` (which seeds), `discoverySignals` (`mention` and/or `commenter`), `timesSeen`, `discoveryExamples` (post URLs) and, if you give criteria, `passesFilters` and `filterFailures` (the reasons).
+
+Then repeat: candidates that pass become the next round's seeds. Pass every handle you have already screened in `excludeUsernames` so nothing is looked up twice.
+
+Screening criteria (optional, also work in `profile` mode): `minFollowers`, `maxFollowers`, `requireContactEmail`, `excludeBioPatterns` (text matched in the bio and link URLs, e.g. `stan.store`, `ebook`), `onlyPassing`. The Actor reports facts against your criteria; it never guesses a missing value as a pass. `onlyPassing` leaves out profiles that were read fine but fail; blocked or failed lookups are always written.
+
+Honest expectations:
+
+- Most commenters are ordinary followers, not creators. The strongest signals are accounts the seed **mentions or tags** and accounts that appear under **several** seeds' posts. Expect a modest yield per round, more with more seeds.
+- Instagram works best. Facebook is not supported in `expand`. TikTok can only use caption @mentions (comments are not available).
+- **Not yet verified live**, and the cost per candidate is not measured. Start with 2 seeds, `maxRecentPosts` 3, `maxCandidates` 10, `maxProxyMegabytes` 60, read the `OUTPUT` cost, then scale.
+
+Example:
+
+```json
+{
+    "mode": "expand",
+    "platform": "instagram",
+    "usernames": ["planbudgetdream", "easy_budget"],
+    "maxRecentPosts": 3,
+    "maxCommentsPerPost": 30,
+    "maxCandidates": 10,
+    "excludeUsernames": ["already", "screened", "handles"],
+    "minFollowers": 30000,
+    "maxFollowers": 150000,
+    "requireContactEmail": true,
+    "excludeBioPatterns": ["stan.store", "ebook", "e-book"],
+    "maxItemsPerRun": 30,
+    "maxProxyMegabytes": 60,
+    "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
+}
+```
+
 ## Always use
 
 ```json

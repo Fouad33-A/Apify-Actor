@@ -32,6 +32,14 @@ export function makeProfileRow(fields) {
         accountCreatedDate: fields.accountCreatedDate ?? null,
 
         // required explicit status - never silently drop a failed lookup
+        // filled by discovery (expand) mode and by the optional screening criteria; null/[] otherwise
+        discoveredFrom: fields.discoveredFrom ?? [], // the seed creators whose posts/comments led here
+        discoverySignals: fields.discoverySignals ?? [], // "mention" and/or "commenter"
+        timesSeen: fields.timesSeen ?? null,
+        discoveryExamples: fields.discoveryExamples ?? [], // up to 3 post URLs where it was seen
+        passesFilters: fields.passesFilters ?? null, // null = no screening criteria were given
+        filterFailures: fields.filterFailures ?? [],
+
         status: fields.status, // "found" | "not_found" | "private"
         statusDetail: fields.statusDetail ?? null,
     };

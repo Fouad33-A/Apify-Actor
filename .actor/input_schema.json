@@ -7,15 +7,16 @@
             "title": "Mode",
             "type": "string",
             "editor": "select",
-            "enum": ["profile", "search", "posts", "comments", "probe"],
+            "enum": ["profile", "search", "posts", "expand", "comments", "probe"],
             "enumTitles": [
                 "A - Profile lookup",
                 "B - Keyword/search discovery",
                 "Posts by URL (metrics for known post/video URLs)",
+                "Discover from known creators (expand)",
                 "C - Comment retrieval",
                 "Diagnostic probe (fetch a few public URLs and report)"
             ],
-            "description": "A: look up known usernames. B: discover posts/creators by keyword. Posts: read metrics of known post/video URLs (TikTok). C: pull comments for known post URLs. To get comments alongside A, B or Posts in one run, use that mode and set fetchComments=true instead of running C separately.",
+            "description": "A: look up known usernames. B: discover posts/creators by keyword. Posts: read metrics of known post/video URLs (TikTok). C: pull comments for known post URLs. To get comments alongside A, B or Posts in one run, use that mode and set fetchComments=true instead of running C separately. Expand: give known-good creators as usernames; the Actor reads their recent posts and comments, collects the accounts they mention and who interacts with them, then looks up and (optionally) screens those candidates.",
             "default": "profile"
         },
         "platform": {
@@ -82,6 +83,50 @@
             "type": "boolean",
             "default": true,
             "description": "If enabled, only fetch top-level comments and skip replies."
+        },
+        "maxCandidates": {
+            "title": "Max candidates to look up (expand mode)",
+            "type": "integer",
+            "default": 30,
+            "minimum": 1,
+            "description": "Expand mode looks up the most frequently seen accounts, up to this many. Each lookup costs proxy traffic."
+        },
+        "excludeUsernames": {
+            "title": "Already-known usernames to skip (expand mode)",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Accounts you have already screened. They are never returned as candidates."
+        },
+        "minFollowers": {
+            "title": "Screening: minimum followers",
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional. Rows get passesFilters/filterFailures set against the screening criteria you give. The Actor still returns the raw data."
+        },
+        "maxFollowers": {
+            "title": "Screening: maximum followers",
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional, see minimum followers."
+        },
+        "requireContactEmail": {
+            "title": "Screening: require a contact email in the bio",
+            "type": "boolean",
+            "default": false
+        },
+        "excludeBioPatterns": {
+            "title": "Screening: fail if bio or link contains",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "For example stan.store, ebook, e-book. Case-insensitive text match on the bio and link URLs."
+        },
+        "onlyPassing": {
+            "title": "Only write profiles that pass the screening",
+            "type": "boolean",
+            "default": false,
+            "description": "Profiles that were read fine but fail the criteria are left out. Blocked or failed lookups are still written, never dropped silently."
         },
         "enrichSearchAuthors": {
             "title": "Load each creator's profile page in search (Mode B)",
