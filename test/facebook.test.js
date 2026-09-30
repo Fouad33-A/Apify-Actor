@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RateLimitError } from '../src/errors.js';
 import {
     domExtractComments,
+    domExtractPluginPosts,
     domExtractPosts,
     domExtractProfile,
     fetchComments,
@@ -742,4 +743,147 @@ describe('accounts tagged in a Facebook post (used by expand mode)', () => {
         );
         expect(posts[0].mentionedAccounts).toEqual([]);
     }, 60_000);
+});
+
+// ---- the Page plugin (public embed of the timeline): structure captured live 2026-10-01 from a large Page ----
+const pluginPost = ({ utime, href, text, like, comment, share, seeMore = false }) => `
+  <div><div><div><a target="_blank" class="_39g5" href="${href}?ref=embed_page"><abbr data-utime="${utime}" data-tooltip-content="x" class="timestamp"><span class="timestampContent">3 hours ago</span></abbr></a></div></div>
+    <div data-testid="post_message" class="_5pbx userContent"><div class="text_exposed_root">${text
+        .split('\n')
+        .map((l) => `<p>${l}</p>`)
+        .join('')}${seeMore ? '<span>...</span><span>See more</span>' : ''}</div></div>
+    <table class="uiGrid"><tbody><tr>
+      <td><span role="button" class="embeddedLikeButton"><div title="Like"><i></i><i></i>${like ?? ''}</div></span></td>
+      <td><a href="${href}?ref=embed_page"><div title="Comment"><i></i><i></i>${comment ?? ''}</div></a></td>
+      <td><a href="/sharer/sharer.php?u=x"><div title="Share"><i></i><i></i>${share ?? ''}</div></a></td>
+    </tr></tbody></table></div>`;
+const pluginPage = (posts) =>
+    `<html><body><div><div><a title="Dave Ramsey" href="https://www.facebook.com/3059?ref=embed_page">Dave Ramsey</a><div>9,011,580 followers</div></div>
+     <div><div role="feed">${posts.join('')}</div></div></div></body></html>`;
+
+describe('domExtractPluginPosts (Page plugin)', () => {
+    const posts = [
+        pluginPost({
+            utime: 1790797828,
+            href: 'https://www.facebook.com/daveramsey/posts/pfbid0AAA',
+            text: 'How much house can you really afford?\nFree tools to run the numbers.',
+            like: '151',
+            comment: '21',
+            share: '16',
+            seeMore: true,
+        }),
+        pluginPost({
+            utime: 1790779676,
+            href: 'https://www.facebook.com/reel/1592634102348550/',
+            text: 'Lisa called in to the show. #ad',
+            like: '4.9K',
+            comment: '912',
+            share: '129',
+        }),
+        pluginPost({
+            utime: 1790500000,
+            href: 'https://www.facebook.com/daveramsey/posts/pfbid0CCC',
+            text: 'No counts shown',
+        }),
+    ];
+
+    it('reads exact time, text, reactions, comments and shares of each post', async () => {
+        const out = await evaluate(pluginPage(posts), domExtractPluginPosts, 10);
+        expect(out).toHaveLength(3);
+        expect(out[0]).toEqual({
+            postUrl: 'https://www.facebook.com/daveramsey/posts/pfbid0AAA',
+            publishDate: '2026-09-30T19:50:28.000Z',
+            caption: 'How much house can you really afford? Free tools to run the numbers.',
+            captionTruncated: true,
+            reactions: 151,
+            commentCount: 21,
+            shareCount: 16,
+        });
+        expect(out[1]).toMatchObject({
+            postUrl: 'https://www.facebook.com/reel/1592634102348550/',
+            reactions: 4900,
+            commentCount: 912,
+            shareCount: 129,
+        });
+    });
+
+    it('a count that is not shown is null (never 0), and maxPosts limits the list', async () => {
+        const out = await evaluate(pluginPage(posts), domExtractPluginPosts, 10);
+        expect(out[2]).toMatchObject({ reactions: null, commentCount: null, shareCount: null });
+        expect(await evaluate(pluginPage(posts), domExtractPluginPosts, 2)).toHaveLength(2);
+    });
+
+    it('no feed (plugin not shown for this Page) -> no posts', async () => {
+        expect(
+            await evaluate(
+                '<html><body><div>This content is not available</div></body></html>',
+                domExtractPluginPosts,
+                5,
+            ),
+        ).toEqual([]);
+    });
+});
+
+describe('lookupProfile: posts from the Page plugin', () => {
+    const PLUGIN_URL = /facebook\.com\/plugins\/page\.php/;
+    const base = { username: 'NASA', sourceInput: 'NASA', maxRecentPosts: 5 };
+    const pageBody = fbPage({ ogDescription: 'NASA. 28,729,285 followers', posts: [fbPost()] });
+    const plugin = pluginPage([
+        pluginPost({
+            utime: 1790797828,
+            href: 'https://www.facebook.com/nasa/posts/pfbid0X',
+            text: 'Launch day #sponsored',
+            like: '2K',
+            comment: '300',
+            share: '50',
+        }),
+        pluginPost({
+            utime: 1790700000,
+            href: 'https://www.facebook.com/nasa/posts/pfbid0Y',
+            text: 'Second post',
+            like: '1.5K',
+            comment: '120',
+            share: '20',
+        }),
+    ]);
+
+    it('returns one post row per plugin post, with exact dates and labelled counts (no per-post page loads)', async () => {
+        const context = await browser.newContext();
+        let posts;
+        let seen;
+        try {
+            seen = await serve(context, [
+                { match: PLUGIN_URL, body: plugin },
+                { match: PAGE_URL, body: pageBody },
+            ]);
+            ({ posts } = await lookupProfile({ page: await context.newPage(), ...base }));
+        } finally {
+            await context.close();
+        }
+        expect(posts).toHaveLength(2);
+        expect(posts[0]).toMatchObject({
+            recordType: 'post',
+            platform: 'facebook',
+            postUrl: 'https://www.facebook.com/nasa/posts/pfbid0X',
+            publishDate: '2026-09-30T19:50:28.000Z',
+            caption: 'Launch day #sponsored',
+            likeCount: 2000,
+            commentCount: 300,
+            shareCount: 50,
+        });
+        expect(posts[0].statusDetail).toContain('Page plugin');
+        expect(seen.filter((u) => /\/posts\/pfbid|\/reel\//.test(u))).toEqual([]);
+    });
+
+    it('falls back to the Page itself when the plugin shows no timeline', async () => {
+        const { posts } = await withContext(
+            [
+                { match: PLUGIN_URL, body: '<html><body>Content not available</body></html>' },
+                { match: PAGE_URL, body: pageBody },
+            ],
+            ({ page }) => lookupProfile({ page, ...base }),
+        );
+        expect(posts).toHaveLength(1);
+        expect(posts[0].publishDate).toBeNull();
+    }, 30_000);
 });

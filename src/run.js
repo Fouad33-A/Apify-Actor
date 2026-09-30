@@ -110,7 +110,11 @@ export async function runMode({
     //  2. link-in-bio pages, so a Stan Store one click behind a Linktree is seen (only when bio patterns are set)
     //  3. the creator's own website (followCreatorSite): what it sells, and a public contact e-mail
     //  4. the reach rule: the latest posts' median likes/views vs followers (only when reachPosts > 0)
-    async function finishProfile(profile, { mod: m = mod, platformName = platform, preloadedPosts = null } = {}) {
+    // `handle` is the address the account is opened with (Facebook's row.username is the Page's display name).
+    async function finishProfile(
+        profile,
+        { mod: m = mod, platformName = platform, preloadedPosts = null, handle = profile.username } = {},
+    ) {
         // Where each e-mail came from (the Agent wants "e-mail found and where"). A3 judges only the bio ones.
         const sources = (profile.contactEmails ?? []).map((email) => ({ email, source: 'bio' }));
         let row = screenRow({ ...profile, contactEmailSources: sources }, { deferEmail: followCreatorSite });
@@ -143,7 +147,7 @@ export async function runMode({
         if (alive() && followCreatorSite) {
             const urls = pickSiteUrls(
                 [...(row.externalLinks ?? []), ...(row.bioLinkTargets ?? [])],
-                row.username,
+                handle,
                 maxSitePages,
                 isLinkInBioUrl,
             );
@@ -184,7 +188,7 @@ export async function runMode({
                 ? { posts: preloadedPosts }
                 : await m.lookupProfile({
                       page,
-                      username: row.username,
+                      username: handle,
                       sourceInput: row.sourceInput,
                       maxRecentPosts: wantedPosts,
                       shouldContinue,
@@ -303,7 +307,7 @@ export async function runMode({
                     maxRecentPosts,
                     shouldContinue,
                 });
-                const screened = await finishProfile(profile);
+                const screened = await finishProfile(profile, { handle: username });
                 if (!hiddenByFilter(screened)) await write('profile', screened);
                 for (const post of posts) {
                     if (!(await write('post', post))) break;
@@ -571,14 +575,17 @@ export async function runMode({
                     maxRecentPosts: 0,
                     shouldContinue,
                 });
-                const row = await finishProfile({
-                    ...profile,
-                    sourceInput: cand.seeds.join(', '),
-                    discoveredFrom: cand.seeds,
-                    discoverySignals: cand.signals,
-                    timesSeen: cand.timesSeen,
-                    discoveryExamples: cand.examples,
-                });
+                const row = await finishProfile(
+                    {
+                        ...profile,
+                        sourceInput: cand.seeds.join(', '),
+                        discoveredFrom: cand.seeds,
+                        discoverySignals: cand.signals,
+                        timesSeen: cand.timesSeen,
+                        discoveryExamples: cand.examples,
+                    },
+                    { handle: cand.handle },
+                );
                 if (!hiddenByFilter(row)) await write('profile', row);
                 if (rateLimit || pendingRateLimit) {
                     const rl = rateLimit ?? pendingRateLimit;
@@ -699,7 +706,12 @@ export async function runMode({
                 });
                 const row = await finishProfile(
                     { ...profile, ...sightings, sourceInput },
-                    { mod: m, platformName: cand.platform, preloadedPosts: wantNow ? (posts ?? []) : null },
+                    {
+                        mod: m,
+                        platformName: cand.platform,
+                        preloadedPosts: wantNow ? (posts ?? []) : null,
+                        handle: cand.handle,
+                    },
                 );
                 if (!hiddenByFilter(row)) await write('profile', row);
                 const rl = rateLimit ?? pendingRateLimit;

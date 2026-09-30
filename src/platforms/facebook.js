@@ -213,6 +213,82 @@ export function domExtractPosts(maxPosts) {
     return out;
 }
 
+// Runs inside the Page plugin's page (facebook.com/plugins/page.php?tabs=timeline, the public embed of a Page's
+// timeline, visible without login). Each post carries an exact timestamp (abbr data-utime), its text, and the
+// reaction / comment / share counts (seen live 2026-10-01). A count that is not shown stays null.
+export function domExtractPluginPosts(maxPosts) {
+    const feed = document.querySelector('[role="feed"]');
+    if (!feed || !(maxPosts > 0)) return [];
+    const parseAbbrev = (text) => {
+        const m = String(text ?? '')
+            .replace(/[,\s]/g, '')
+            .match(/^([\d.]+)([KMB])?$/i);
+        if (!m) return null;
+        const mult = { K: 1e3, M: 1e6, B: 1e9 }[(m[2] || '').toUpperCase()] || 1;
+        return Math.round(parseFloat(m[1]) * mult);
+    };
+    let blocks = [...feed.children].filter((el) => el.querySelector('abbr[data-utime]'));
+    if (!blocks.length) {
+        // layout variation: climb from each timestamp to the element that holds one post
+        blocks = [...feed.querySelectorAll('abbr[data-utime]')].map((abbr) => {
+            let el = abbr;
+            while (
+                el.parentElement &&
+                el.parentElement !== feed &&
+                el.parentElement.querySelectorAll('abbr[data-utime]').length === 1
+            ) {
+                el = el.parentElement;
+            }
+            return el;
+        });
+    }
+    const out = [];
+    for (const block of blocks) {
+        if (out.length >= maxPosts) break;
+        const abbr = block.querySelector('abbr[data-utime]');
+        const utime = Number(abbr.getAttribute('data-utime'));
+        const anchor =
+            abbr.closest('a') || block.querySelector('a[href*="/posts/"], a[href*="/reel/"], a[href*="/videos/"]');
+        let postUrl = null;
+        if (anchor && anchor.href) {
+            const u = new URL(anchor.href);
+            u.search = '';
+            u.hash = '';
+            postUrl = u.href;
+        }
+        const message = block.querySelector('[data-testid="post_message"]');
+        let caption = message ? message.innerText.replace(/\s+/g, ' ').trim() : null;
+        const truncated = Boolean(caption && /(…|\.\.\.)?\s*See more$/i.test(caption));
+        if (caption) caption = caption.replace(/\s*(…|\.\.\.)?\s*See more$/i, '').trim() || null;
+        const count = (title) => {
+            const el = [...block.querySelectorAll('[title]')].find((e) => e.getAttribute('title') === title);
+            return el ? parseAbbrev(el.textContent) : null;
+        };
+        out.push({
+            postUrl,
+            publishDate: Number.isFinite(utime) && utime > 0 ? new Date(utime * 1000).toISOString() : null,
+            caption,
+            captionTruncated: truncated,
+            reactions: count('Like'),
+            commentCount: count('Comment'),
+            shareCount: count('Share'),
+        });
+    }
+    return out;
+}
+
+// Opens the Page plugin for a Page and returns its posts (empty when the plugin is not shown for that Page).
+export async function fetchPluginPosts({ page, pageUrl, maxPosts }) {
+    const href = encodeURIComponent(String(pageUrl).split('?')[0].split('#')[0]);
+    const url = `https://${DOMAIN}/plugins/page.php?href=${href}&tabs=timeline&width=500&height=3000&small_header=false&adapt_container_width=true&hide_cover=true&show_facepile=false`;
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await page.waitForSelector('[role="feed"]', { timeout: 6000 }).catch(() => {
+        // no timeline in the plugin for this Page: the caller falls back to the Page itself
+    });
+    await assertNotRateLimited(page, 'facebook', 'plugin');
+    return page.evaluate(domExtractPluginPosts, maxPosts);
+}
+
 // Runs inside the page. Comments/replies currently rendered (aria-label "Comment by X ..." / "Reply by X ...").
 export function domExtractComments({ maxComments, postPathHint = null }) {
     const timeRe = /^(just now|\d+\s?(s|m|mins?|h|hrs?|d|w|y|mo)|yesterday.*|[A-Z][a-z]+ \d{1,2}(, \d{4})?.*)$/i;
@@ -428,6 +504,50 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
         });
 
         const rawPosts = maxRecentPosts > 0 ? await page.evaluate(domExtractPosts, maxRecentPosts) : [];
+
+        // The Page plugin (the public embed of the timeline) lists the latest posts with exact dates and labelled
+        // reaction / comment / share counts: much more than an anonymous visitor sees on the Page itself.
+        if (maxRecentPosts > 0) {
+            let plugin = [];
+            try {
+                plugin = await fetchPluginPosts({ page, pageUrl: page.url(), maxPosts: maxRecentPosts });
+            } catch (err) {
+                if (err?.name === 'RateLimitError') throw err;
+                // the plugin did not load: fall back to what the Page itself showed (let the failed navigation settle)
+                await page.waitForTimeout(500);
+            }
+            if (plugin.length) {
+                const posts = plugin.map((p) =>
+                    makePostRow({
+                        platform: 'facebook',
+                        sourceInput,
+                        username: dom.pageName || username,
+                        displayName: dom.pageName,
+                        bio: dom.bio,
+                        externalLinks,
+                        followerCount: dom.followerCount,
+                        followingCount: dom.followingCount,
+                        verified: dom.verified,
+                        postUrl: p.postUrl,
+                        caption: p.caption,
+                        publishDate: p.publishDate,
+                        likeCount: p.reactions,
+                        commentCount: p.commentCount,
+                        shareCount: p.shareCount,
+                        viewCount: null,
+                        isSponsored: null,
+                        statusDetail: [
+                            'from the Page plugin (public embed of the timeline)',
+                            p.reactions != null ? 'likeCount is the total reactions, rounded as displayed' : null,
+                            p.captionTruncated ? 'caption is truncated ("See more")' : null,
+                        ]
+                            .filter(Boolean)
+                            .join('; '),
+                    }),
+                );
+                return { profile, posts };
+            }
+        }
 
         // The post page is more complete than the truncated card on the Page: full caption, labelled
         // comment/share counts (reels put views, reactions and the caption in og:title instead).

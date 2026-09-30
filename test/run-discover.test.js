@@ -213,6 +213,40 @@ describe('discover mode: keywords -> accounts -> screening -> score', () => {
         expect(row.passesFilters).toBe(true);
     });
 
+    it('Facebook: the score stage reopens the Page by its address, not by its display name, and scores the plugin posts', async () => {
+        const fb = {
+            lookupProfile: vi.fn(async ({ username, maxRecentPosts }) => ({
+                profile: {
+                    recordType: 'profile',
+                    platform: 'facebook',
+                    status: 'found',
+                    username: 'Ameris Bank', // the Page's display name, as Facebook rows carry it
+                    sourceInput: username,
+                    followerCount: 60_000,
+                    contactEmails: ['me@bank.test'],
+                    externalLinks: [],
+                },
+                posts: maxRecentPosts
+                    ? Array.from({ length: 6 }, (_, i) => ({
+                          status: 'found',
+                          postUrl: `https://www.facebook.com/x/posts/${i}`,
+                          caption: 'tips',
+                          likeCount: 1500,
+                          commentCount: 100,
+                          publishDate: daysAgo(i * 2),
+                      }))
+                    : [],
+            })),
+        };
+        const h = harness(criteria, { facebook: fb }, [cand('facebook', 'amerisbank')]);
+        await h.run();
+        expect(fb.lookupProfile.mock.calls.map((c) => c[0].username)).toEqual(['amerisbank', 'amerisbank']);
+        const row = h.pushed[0];
+        expect(row.postsReadForScore).toBe(6);
+        expect(row.scoreUnknownRules).toEqual([]);
+        expect(row.scoreTotal).toBe(60); // B1 20 + B2 15 + B3 10 + B4 10 + B5 5
+    });
+
     it('a platform that rate-limits is stopped, the others carry on; rows are still written', async () => {
         const tt = {
             lookupProfile: vi.fn(async () => {
