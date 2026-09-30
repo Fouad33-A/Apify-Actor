@@ -50,12 +50,19 @@ Honest expectations:
 - **Instagram** signals: accounts @mentioned in captions and comments, and commenters.
 - **Facebook** works too (seeds are Page names such as `NASA`). Signals: accounts tagged or linked in the Page's latest post, and commenters (with their `@handle` when they have one). Anonymous visitors see only the latest post(s) and a few comments per Page, so each seed gives fewer candidates than on Instagram, and many commenters are personal profiles, which the Actor cannot read as Pages (those rows come back as `not_found`, `private` or `blocked`, marked as such). Use a small `maxCandidates` on Facebook; tagged Pages are the useful signal.
 - **TikTok** can only use @mentions in captions (comments are not available).
-- **First live results (build 0.0.51, 2026-09-30):**
-    - **Instagram:** it works mechanically. With seeds `planbudgetdream` and `easy_budget` (3 posts each) it reached the 60 MB cap before finishing even one candidate lookup, so **the seed phase alone takes roughly 50-60 MB**. Use `maxProxyMegabytes` 150-200 for a 2-seed run with about 10 candidates. One candidate it found (mentioned twice) did not exist ("Profile isn't available"): mentions can be typos or dead accounts, and those come back as `not_found`.
-    - **Facebook:** a run on the `NASA` Page (latest post only) found **no candidates**: the latest post tagged nobody and showed no commenter handles. Facebook yields far less than Instagram for anonymous visitors.
-    - **Cost:** the platform's proxy figure worked out to roughly **$2 per GB** (16.6 MB measured = about $0.03), so 60 MB is about $0.12 and a 200 MB run about $0.40 plus a few cents of compute. The proxy line in `OUTPUT` can lag: re-read it a minute later.
-- Read `OUTPUT.expand`: per seed, `profileStatus`, `postsRead`, `captionMentions`, `commentsRead`, `commenterSightings`, plus the total `sightings`, `candidates` and `lookedUp`. A run that returns nothing explains itself there.
-- Start small, read `OUTPUT.cost`, then scale.
+- **Live results, Instagram (build 0.0.53, seeds `planbudgetdream` + `easy_budget`, 3 posts each, images/video/fonts blocked):** the run completed in 3.5 minutes, read 55 comments, found 64 sightings, looked up 10 candidates with exact follower counts, bios and links, and used about 72 MB of proxy traffic (roughly $0.15 at about $2 per GB, the platform's own rate). **0 of 10 candidates passed the 30-150K + bio-email screen.** Why:
+    - Most people who comment on a creator's posts are ordinary followers (81, 166, 348, 1,121, 1,467 followers...). The audience is not where 30-150K creators come from.
+    - Some @mentions are scam-style accounts that do not exist ("invest_brittany_platform_"): they come back `not_found`.
+    - Two "commenters" (`129`, `2.4k`) were like counts read as names. Fixed in 0.9.3 (such rows are now dropped).
+- **Ways to get a real yield, in order of value:**
+    1. **More seeds.** A candidate that shows up under several seeds ranks first and is far more likely to be a creator in the same space. Give 10-20 confirmed fits, not 2.
+    2. **Tagged accounts and collaborators.** From 0.9.3 Instagram posts also carry the accounts tagged in the post and its collaboration co-authors (`mentionedAccounts`); those are peers, not audience.
+    3. **Follower pre-screen (0.9.3).** When you give `minFollowers`/`maxFollowers`, each candidate's count is read first from the light embed page, and the full profile (bio, links, e-mail) is read only if the count is in range. Out-of-range candidates come back as a short row that says so, which cuts the cost per rejected candidate a lot, so you can look at 40-50 candidates per run.
+    4. Run it repeatedly: each round's passing candidates become the next round's seeds.
+- **Facebook (build 0.0.51, `NASA` Page, latest post only):** no candidates: the latest post tagged nobody and showed no commenter handles. Facebook yields far less than Instagram for anonymous visitors.
+- **Blocking images/video/fonts works on Instagram** (data intact): always pass `"blockResourceTypes": ["image", "media", "font"]` for Instagram. It roughly halves the traffic. Keep the default (`media` only) for TikTok (blocking images made it return an empty page) and use it cautiously on Facebook.
+- **Cost:** about $2 per GB of residential proxy (16.6 MB measured = about $0.03). The proxy line in `OUTPUT` can lag: re-read it a minute later.
+- Read `OUTPUT.expand`: per seed, `profileStatus`, `postsRead`, `captionMentions`, `commentsRead`, `commenterSightings`, plus the total `sightings`, `candidates`, `lookedUp` and `preScreened`. A run that returns nothing explains itself there.
 
 Example:
 
@@ -66,7 +73,7 @@ Example:
     "usernames": ["planbudgetdream", "easy_budget"],
     "maxRecentPosts": 3,
     "maxCommentsPerPost": 30,
-    "maxCandidates": 10,
+    "maxCandidates": 30,
     "excludeUsernames": ["already", "screened", "handles"],
     "minFollowers": 30000,
     "maxFollowers": 150000,
@@ -74,6 +81,7 @@ Example:
     "excludeBioPatterns": ["stan.store", "ebook", "e-book"],
     "maxItemsPerRun": 30,
     "maxProxyMegabytes": 200,
+    "blockResourceTypes": ["image", "media", "font"],
     "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
 }
 ```

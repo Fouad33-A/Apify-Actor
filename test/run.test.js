@@ -529,6 +529,54 @@ describe('runMode: expand (discovery from seeds)', () => {
         });
     });
 
+    it('pre-screens candidates on the cheap follower count: out-of-range ones skip the full lookup and say so', async () => {
+        const quickProfile = vi.fn(async ({ username }) => ({
+            recordType: 'profile',
+            status: 'found',
+            username,
+            followerCount: username === 'newfriend' ? 90_000 : 500,
+            statusDetail: 'embed',
+        }));
+        const h = expandHarness(
+            { maxRecentPosts: 2, minFollowers: 30_000, maxFollowers: 150_000, excludeUsernames: ['known_one'] },
+            { quickProfile },
+        );
+        const report = {};
+        await runMode({
+            mode: 'expand',
+            mod: h.mod,
+            page: {},
+            input: {
+                usernames: ['SeedOne'],
+                maxRecentPosts: 2,
+                minFollowers: 30_000,
+                maxFollowers: 150_000,
+                excludeUsernames: ['known_one'],
+            },
+            budget: h.budget,
+            pushData: async (row) => h.pushed.push(row),
+            rateLimitErrors: [],
+            report,
+        });
+        const rows = h.pushed.filter((r) => r.recordType === 'profile');
+        const light = rows.find((r) => r.username === 'commenter_a');
+        expect(light).toMatchObject({ passesFilters: false, discoveredFrom: ['seedone'] });
+        expect(light.statusDetail).toMatch(/outside the requested range.*not read/);
+        expect(light.filterFailures).toEqual(['followers 500 below 30000']);
+        // in range: the full lookup still happens
+        const fullLookups = h.mod.lookupProfile.mock.calls.map((c) => c[0].username);
+        expect(fullLookups).toContain('newfriend');
+        expect(fullLookups).not.toContain('commenter_a');
+        expect(report.expand.preScreened).toBe(2);
+    });
+
+    it('no follower range given -> no pre-screen call at all', async () => {
+        const quickProfile = vi.fn();
+        const h = expandHarness({ maxRecentPosts: 2 }, { quickProfile });
+        await h.run('expand');
+        expect(quickProfile).not.toHaveBeenCalled();
+    });
+
     it('screening flags each candidate; onlyPassing leaves out found profiles that fail (never blocked ones)', async () => {
         const lookupProfile = vi.fn(async ({ username }) => {
             if (username === 'seedone') return { profile: profileFor('seedone'), posts: seedPosts };

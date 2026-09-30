@@ -32,10 +32,14 @@ const RESERVED = new Set([
 
 const HANDLE = /^[a-z0-9_](?:[a-z0-9_.]{0,28}[a-z0-9_])?$/;
 
+// "129" or "2.4k" is a like/comment count that was read as a name (seen live), not a creator. Purely numeric
+// handles do exist on Instagram but are rare enough that dropping them costs less than looking up counts.
+const COUNT_LIKE = /^\d[\d.,]*[km]?$/;
+
 export function normalizeHandle(raw) {
     if (raw == null) return null;
     const h = String(raw).trim().replace(/^@/, '').toLowerCase();
-    if (!HANDLE.test(h) || RESERVED.has(h)) return null;
+    if (!HANDLE.test(h) || RESERVED.has(h) || COUNT_LIKE.test(h)) return null;
     return h;
 }
 

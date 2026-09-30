@@ -237,7 +237,7 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
         let stopped = false;
         // What happened per seed, so a run that finds nothing explains itself in OUTPUT.expand.
         const seedReports = [];
-        const expandReport = { seeds: seedReports, sightings: 0, candidates: 0, lookedUp: 0 };
+        const expandReport = { seeds: seedReports, sightings: 0, candidates: 0, lookedUp: 0, preScreened: 0 };
         Object.assign(report, { expand: expandReport });
         for (const seed of seeds) {
             if (stopped || !shouldContinue()) break;
@@ -341,6 +341,36 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
             if (stopped || !shouldContinue()) break;
             expandReport.lookedUp += 1;
             try {
+                // Cheap pre-screen: when a follower range was given and the light embed page already shows the
+                // count outside it, the full profile (bio, links, e-mail) is not read.
+                if ((minFollowers != null || maxFollowers != null) && typeof mod.quickProfile === 'function') {
+                    const quick = await mod.quickProfile({
+                        page,
+                        username: cand.handle,
+                        sourceInput: cand.seeds.join(', '),
+                    });
+                    const n = quick?.followerCount;
+                    if (
+                        quick &&
+                        quick.status === 'found' &&
+                        n != null &&
+                        ((minFollowers != null && n < minFollowers) || (maxFollowers != null && n > maxFollowers))
+                    ) {
+                        expandReport.preScreened += 1;
+                        const light = screenRow({
+                            ...quick,
+                            sourceInput: cand.seeds.join(', '),
+                            discoveredFrom: cand.seeds,
+                            discoverySignals: cand.signals,
+                            timesSeen: cand.timesSeen,
+                            discoveryExamples: cand.examples,
+                            statusDetail:
+                                'Follower count read from the public embed page and outside the requested range: the full profile (bio, links, e-mail) was not read',
+                        });
+                        if (!hiddenByFilter(light)) await write('profile', light);
+                        continue;
+                    }
+                }
                 const { profile, rateLimit } = await mod.lookupProfile({
                     page,
                     username: cand.handle,

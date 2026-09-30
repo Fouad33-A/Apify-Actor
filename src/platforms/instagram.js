@@ -380,6 +380,8 @@ export function domExtractComments(maxComments) {
         if (lines.length < 3) continue; // need at least username, time-ago, body
 
         const username = lines[0];
+        // A like/comment count (129, 2.4k) or other text in the name position is not a commenter.
+        if (!/^[A-Za-z0-9._]{1,30}$/.test(username) || /^\d[\d.,]*[kKmM]?$/.test(username)) continue;
         let end = lines.length;
         while (end > 2 && controlRe.test(lines[end - 1])) end--;
 
@@ -637,6 +639,16 @@ export function parseEmbedText(text) {
 
 // One Instagram media node (legacy JSON or embed "shortcode_media") -> a post row. Anything the node
 // does not carry stays null; nothing is inferred.
+// Accounts tagged in the post, plus collaboration co-authors (when the embed data carries them).
+export function taggedAccounts(node, ownUsername = null) {
+    const names = [
+        ...(node?.edge_media_to_tagged_user?.edges ?? []).map((e) => e?.node?.user?.username),
+        ...(node?.coauthor_producers ?? []).map((u) => u?.username),
+    ];
+    const own = String(ownUsername ?? '').toLowerCase();
+    return [...new Set(names.filter(Boolean).map((n) => String(n).toLowerCase()))].filter((n) => n !== own);
+}
+
 export function mediaNodeToPostRow(node, author) {
     return makePostRow({
         platform: 'instagram',
@@ -649,6 +661,7 @@ export function mediaNodeToPostRow(node, author) {
         shareCount: null,
         viewCount: node.video_view_count ?? null,
         isSponsored: node.is_ad ?? null,
+        mentionedAccounts: taggedAccounts(node, author?.username),
     });
 }
 
@@ -843,4 +856,11 @@ export async function searchPosts() {
     throw new Error(
         'Instagram keyword/hashtag search needs a logged-in session (logged-out probe 2026-09-29: HTTP 429 and a redirect to the login page); this Actor does not log in. Use mode=profile with usernames instead',
     );
+}
+
+// Cheap look at an account through the public embed page only (no bio/links): used to skip full lookups of
+// accounts whose follower count is already outside the requested range. Returns a profile row or null.
+export async function quickProfile({ page, username, sourceInput }) {
+    const result = await lookupViaEmbed({ page, username, sourceInput, maxRecentPosts: 0 });
+    return result ? result.profile : null;
 }

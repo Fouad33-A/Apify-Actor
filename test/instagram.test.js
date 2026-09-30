@@ -14,6 +14,7 @@ import {
     mediaNodeToPostRow,
     parseEmbedText,
     parsePostDescription,
+    taggedAccounts,
 } from '../src/platforms/instagram.js';
 import { launchBrowser, serve } from './helpers/browser.js';
 import {
@@ -232,6 +233,17 @@ describe('domExtractComments (in-page)', () => {
             likeCount: 3,
             datetime: '2026-09-21T08:00:00.000Z',
         });
+    });
+
+    it('a count in the name position (129, 2.4k) or non-handle text is not a commenter', async () => {
+        const mixed = [
+            igComment({ user: '129', body: 'counts are not people' }),
+            igComment({ user: '2.4k', body: 'neither is this' }),
+            igComment({ user: 'has space', body: 'nor this' }),
+            igComment({ user: 'real.person', body: 'this one is' }),
+        ];
+        const rows = await evaluate(igPost({ comments: mixed }), domExtractComments, 50);
+        expect(rows.map((r) => r.username)).toEqual(['real.person']);
     });
 
     it('like count is null when the comment shows none', async () => {
@@ -739,6 +751,19 @@ describe('mediaNodeToPostRow', () => {
             shareCount: null,
             followerCount: 5,
         });
+    });
+
+    it('carries tagged users and collaboration co-authors as mentionedAccounts (not the author)', () => {
+        const node = {
+            shortcode: 'C',
+            edge_media_to_tagged_user: {
+                edges: [{ node: { user: { username: 'Tagged_One' } } }, { node: { user: { username: 'nasa' } } }],
+            },
+            coauthor_producers: [{ username: 'collab.creator' }, { username: 'tagged_one' }],
+        };
+        expect(taggedAccounts(node, 'NASA')).toEqual(['tagged_one', 'collab.creator']);
+        expect(mediaNodeToPostRow(node, author).mentionedAccounts).toEqual(['tagged_one', 'collab.creator']);
+        expect(taggedAccounts({}, 'x')).toEqual([]);
     });
 
     it('a bare node yields nulls, not invented values', () => {
