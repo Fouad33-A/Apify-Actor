@@ -168,6 +168,30 @@ describe('staged screen: the reach rule', () => {
         });
     });
 
+    it('says how many post pages could not be loaded, so a failed load is not mistaken for hidden likes', async () => {
+        const failing = async ({ username, maxRecentPosts }) => ({
+            profile: profile(username, { externalLinks: [] }),
+            posts: maxRecentPosts
+                ? [
+                      {
+                          status: 'found',
+                          likeCount: null,
+                          statusDetail: 'post page could not be loaded (timeout or block): its counts are unavailable',
+                      },
+                      {
+                          status: 'found',
+                          likeCount: null,
+                          statusDetail: 'post page could not be loaded (timeout or block): its counts are unavailable',
+                      },
+                      { status: 'found', likeCount: 10 },
+                  ]
+                : [],
+        });
+        const h = harness({ usernames: ['x'], reachPosts: 3 }, failing);
+        await h.run();
+        expect(h.pushed[0].screeningWarnings).toContain('2 of 3 post pages could not be loaded (timeout or block)');
+    });
+
     it('reachPosts 0 (default) never reads posts', async () => {
         const h = harness({ usernames: ['strong'], maxFollowers: 100_000 }, lookup);
         await h.run();

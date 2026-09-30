@@ -49,6 +49,7 @@ export function makeProfileRow(fields) {
         medianViews: fields.medianViews ?? null,
         likesPctOfFollowers: fields.likesPctOfFollowers ?? null,
         viewsPctOfFollowers: fields.viewsPctOfFollowers ?? null,
+        commentsPctOfFollowers: fields.commentsPctOfFollowers ?? null,
         reachPctOfFollowers: fields.reachPctOfFollowers ?? null,
         reachBasis: fields.reachBasis ?? null,
 

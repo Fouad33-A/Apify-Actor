@@ -118,7 +118,13 @@ export async function resolveBioLinks({ page, links, maxPages = 2, maxLinks = 40
     for (const link of pages) {
         const url = normalizeUrl(link).href;
         try {
-            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+            try {
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+            } catch (first) {
+                // one retry: a slow proxy exit is the usual cause of a timeout (seen live on a Linktree page)
+                if (!/timeout/i.test(String(first?.message))) throw first;
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+            }
             await page.waitForTimeout(settleMs);
             const info = await page.evaluate(domPageInfo);
             if (looksLikeErrorPage(info)) {

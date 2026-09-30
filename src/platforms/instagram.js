@@ -457,9 +457,12 @@ export function domExtractComments(maxComments) {
 
 export async function lookupProfile({ page, username, sourceInput, maxRecentPosts }) {
     const url = `https://${DOMAIN}/${encodeURIComponent(username)}/`;
-    const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
-    // The profile header/stats hydrate client-side just after networkidle;
-    // give the SPA a short beat to finish before reading the DOM.
+    // "networkidle" waited for every blocked/lingering request and cost 30-60 s per profile; the profile data is in
+    // the page as soon as the document and its header are there, so wait for those and give the SPA a short beat.
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.waitForSelector('header', { timeout: 12_000 }).catch(() => {
+        // no header (login wall, not found, private): the checks below report what the page shows
+    });
     await page.waitForTimeout(1500);
     const html = await page.content();
 
@@ -536,7 +539,21 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
     } catch {
         // the page navigated or the control is not there: read the bio as shown
     }
-    const dom = await page.evaluate(domExtractProfile);
+    let dom = await page.evaluate(domExtractProfile);
+    if (dom?.bioTruncated) {
+        // The in-page click did not open it (seen live on one profile): try a real pointer click once.
+        try {
+            await page
+                .locator('header')
+                .getByText(/^(…|\.\.\.)?\s*more$/i)
+                .first()
+                .click({ timeout: 3000 });
+            await page.waitForTimeout(600);
+            dom = (await page.evaluate(domExtractProfile)) ?? dom;
+        } catch {
+            // nothing clickable: the truncation stays reported in screeningWarnings
+        }
+    }
 
     if (dom) {
         const profile = makeProfileRow({
@@ -565,8 +582,11 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
         for (const gp of gridPosts) {
             const postUrl = new URL(gp.href, `https://${DOMAIN}`).toString();
             let metrics = { publishDate: null, likeCount: null, viewCount: null, ogDescription: null };
+            let loadFailed = false;
             try {
-                await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+                // The post's counts are in the page's meta tags as soon as the document is there: do not wait for
+                // "networkidle" (it timed out after 30 s with the page already loaded, and the numbers were lost).
+                await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
                 await page.waitForTimeout(800);
                 await assertNotRateLimited(page, 'instagram', 'post');
                 metrics = await page.evaluate(domExtractPostMetrics);
@@ -574,6 +594,7 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                 if (err?.name === 'RateLimitError') throw err;
                 // a single post failing to load shouldn't drop the whole profile -
                 // report this post with nulls rather than aborting the run.
+                loadFailed = true;
             }
             const described = parsePostDescription(metrics.ogDescription);
             posts.push(
@@ -597,7 +618,9 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
                         ogPresent: Boolean(metrics.ogDescription),
                     }),
                     commentCount: described.commentCount,
-                    statusDetail: postNote(described, metrics),
+                    statusDetail: loadFailed
+                        ? 'post page could not be loaded (timeout or block): its counts are unavailable'
+                        : postNote(described, metrics),
                     shareCount: null, // Instagram does not expose share counts
                     viewCount: metrics.viewCount,
                     isSponsored: null, // not reliably exposed in the current DOM; left honest-null rather than guessed

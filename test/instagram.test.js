@@ -985,3 +985,21 @@ describe("pickLikeCount: hidden post likes never become a comment's like count",
         expect(pickLikeCount(input)).toBe(expected);
     });
 });
+
+describe('post pages that fail to load', () => {
+    it('are reported as such (not as hidden likes), and the profile is still returned', async () => {
+        const routes = [
+            { match: PROFILE_URL, body: profilePage() },
+            // the post pages are not routed at all, so every navigation to them fails
+        ];
+        const { profile, posts } = await withContext(routes, ({ page }) =>
+            lookupProfile({ page, username: 'nasa', sourceInput: 'nasa', maxRecentPosts: 2 }),
+        );
+        expect(profile.status).toBe('found');
+        expect(posts).toHaveLength(2);
+        for (const p of posts) {
+            expect(p.likeCount).toBeNull();
+            expect(p.statusDetail).toMatch(/could not be loaded/);
+        }
+    }, 90_000);
+});

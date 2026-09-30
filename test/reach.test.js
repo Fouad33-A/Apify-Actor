@@ -68,3 +68,21 @@ describe('computeReach', () => {
         expect(computeReach([], 100).postsSampled).toBe(0);
     });
 });
+
+describe('commentsPctOfFollowers (available even when likes are hidden)', () => {
+    it('median comments as a percentage of followers', () => {
+        const r = computeReach(
+            [post(null), post(null), post(null)].map((x, i) => ({ ...x, commentCount: [10, 20, 30][i] })),
+            2000,
+        );
+        expect(r).toMatchObject({
+            medianLikes: null,
+            reachPctOfFollowers: null,
+            medianComments: 20,
+            commentsPctOfFollowers: 1,
+        });
+    });
+    it('null when fewer than 3 posts have comment counts', () => {
+        expect(computeReach([post(1), post(2)], 100).commentsPctOfFollowers).toBeNull();
+    });
+});

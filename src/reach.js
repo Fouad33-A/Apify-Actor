@@ -27,6 +27,7 @@ export function computeReach(posts, followerCount, { minSamples = MIN_SAMPLES } 
     const medianViews = pick('viewCount');
     const likesPct = pct(medianLikes, followerCount);
     const viewsPct = pct(medianViews, followerCount);
+    const commentsPct = pct(medianComments, followerCount);
     let reachPct = null;
     let basis = null;
     if (viewsPct != null) {
@@ -43,6 +44,7 @@ export function computeReach(posts, followerCount, { minSamples = MIN_SAMPLES } 
         medianViews,
         likesPctOfFollowers: likesPct,
         viewsPctOfFollowers: viewsPct,
+        commentsPctOfFollowers: commentsPct, // always available when comment counts are (even if likes are hidden)
         reachPctOfFollowers: reachPct,
         reachBasis: basis,
     };

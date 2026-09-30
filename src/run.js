@@ -85,6 +85,15 @@ export async function runMode({ mode, mod, page, input, budget, pushData, rateLi
                 shouldContinue,
             });
             row = { ...row, ...computeReach(looked.posts, row.followerCount) };
+            const failedLoads = (looked.posts ?? []).filter((p) =>
+                /could not be loaded/.test(p.statusDetail ?? ''),
+            ).length;
+            if (failedLoads) {
+                row.screeningWarnings = [
+                    ...(row.screeningWarnings ?? []),
+                    `${failedLoads} of ${looked.posts.length} post pages could not be loaded (timeout or block)`,
+                ];
+            }
             if (looked.rateLimit) pendingRateLimit = looked.rateLimit;
         }
         const done = screenRow(row, { includeReach: true });
