@@ -186,31 +186,41 @@ describe('discover mode: keywords -> accounts -> screening -> score', () => {
         expect(h.pushed[0].filterFailures.at(-1)).toMatch(/^score \d+ of 60 is below 40$/);
     });
 
-    it('TikTok: posts come with the profile load (one call), unknown rules get full points and say so', async () => {
-        const tt = {
-            lookupProfile: vi.fn(async ({ username }) => ({
-                profile: {
-                    recordType: 'profile',
-                    platform: 'tiktok',
-                    status: 'found',
-                    username,
-                    sourceInput: username,
-                    followerCount: 40_000,
-                    contactEmails: ['t@jane.com'],
-                    externalLinks: [],
-                },
-                posts: [], // TikTok's video list did not load
-            })),
-        };
+    const tiktokMod = () => ({
+        lookupProfile: vi.fn(async ({ username }) => ({
+            profile: {
+                recordType: 'profile',
+                platform: 'tiktok',
+                status: 'found',
+                username,
+                sourceInput: username,
+                followerCount: 40_000,
+                contactEmails: ['t@jane.com'],
+                externalLinks: [],
+            },
+            posts: [], // TikTok's video list did not load
+        })),
+    });
+
+    it('TikTok (default): posts are NOT read, the profile is opened once, unknown rules take the full points and say so', async () => {
+        const tt = tiktokMod();
         const h = harness(criteria, { tiktok: tt }, [cand('tiktok', 'tiktoker')]);
         await h.run();
         const row = h.pushed[0];
         expect(tt.lookupProfile).toHaveBeenCalledTimes(1);
-        expect(tt.lookupProfile.mock.calls[0][0].maxRecentPosts).toBe(10);
+        expect(tt.lookupProfile.mock.calls[0][0].maxRecentPosts).toBe(0);
         expect(row.scoreUnknownRules).toEqual(['B1', 'B2', 'B5']);
         expect(row.scoreUnknownTreatedAsFull).toBe(true);
         expect(row.scoreTotal).toBe(58); // B1 20 + B2 15 + B3 8 (40k) + B4 10 + B5 5
         expect(row.passesFilters).toBe(true);
+    });
+
+    it('TikTok with readTiktokPosts: the posts come with the one profile load', async () => {
+        const tt = tiktokMod();
+        const h = harness({ ...criteria, readTiktokPosts: true }, { tiktok: tt }, [cand('tiktok', 'tiktoker')]);
+        await h.run();
+        expect(tt.lookupProfile).toHaveBeenCalledTimes(1);
+        expect(tt.lookupProfile.mock.calls[0][0].maxRecentPosts).toBe(10);
     });
 
     it('Facebook: the score stage reopens the Page by its address, not by its display name, and scores the plugin posts', async () => {

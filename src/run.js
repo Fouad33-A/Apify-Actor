@@ -68,6 +68,7 @@ export async function runMode({
         searchEngines = DEFAULT_ENGINES,
         maxSearchPages = 2,
         maxSearchSeconds = 240,
+        readTiktokPosts = false,
         scorecard = false,
         minScore = null,
         agencyEmailPatterns = DEFAULT_SCORECARD.agencyEmailPatterns,
@@ -699,8 +700,12 @@ export async function runMode({
                         continue;
                     }
                 }
-                // TikTok's recent posts come with the same page load, so they are taken in one go.
-                const wantNow = cand.platform === 'tiktok' ? wantedPosts : 0;
+                // TikTok's recent posts come with the same page load, but reading them is slow and costly (autoplaying
+                // videos) and TikTok hides most post data logged out anyway: off unless readTiktokPosts is set. Without
+                // them TikTok's post-based rules are unknown and take the full points (unknownFullScorePlatforms).
+                const tiktokNoPosts = cand.platform === 'tiktok' && !readTiktokPosts;
+                const readNow = cand.platform === 'tiktok' && !tiktokNoPosts;
+                const wantNow = readNow ? wantedPosts : 0;
                 const { profile, posts, rateLimit } = await m.lookupProfile({
                     page,
                     username: cand.handle,
@@ -713,7 +718,7 @@ export async function runMode({
                     {
                         mod: m,
                         platformName: cand.platform,
-                        preloadedPosts: wantNow ? (posts ?? []) : null,
+                        preloadedPosts: (tiktokNoPosts && []) || (readNow ? (posts ?? []) : null),
                         handle: cand.handle,
                     },
                 );

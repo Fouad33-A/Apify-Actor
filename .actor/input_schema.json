@@ -143,6 +143,12 @@
             "maximum": 1800,
             "description": "The search phase stops starting new searches after this many seconds (the search proxy can be slow and each request may take up to a minute). Accounts found so far are still looked up; OUTPUT.discovery.search.stoppedOnTime tells you when it happened."
         },
+        "readTiktokPosts": {
+            "title": "Discover: read TikTok's recent posts",
+            "type": "boolean",
+            "default": false,
+            "description": "Off by default: reading a TikTok creator's recent posts is slow, often blocked, and costly in proxy traffic (autoplaying videos). With it off, TikTok's post-based score rules (B1 sponsored, B2 engagement, B5 posting rate) are unknown and take the full points on the platforms listed in 'unknown rules get full points'."
+        },
         "minFollowers": {
             "title": "Screening: minimum followers",
             "type": "integer",
