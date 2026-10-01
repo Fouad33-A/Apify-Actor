@@ -27,6 +27,7 @@ export async function runMode({
     mod,
     mods = {},
     serpProxyUrl = null,
+    meter = () => 0,
     page,
     input,
     budget,
@@ -70,6 +71,7 @@ export async function runMode({
         maxSearchPages = 2,
         maxSearchSeconds = 600,
         maxFullLookups = 20,
+        maxTiktokLookups = 6,
         searchModifiers = [],
         readTiktokPosts = false,
         scorecard = false,
@@ -91,6 +93,16 @@ export async function runMode({
         unknownFullScorePlatforms,
     };
     const shouldContinue = () => budget.canWriteMore();
+    // Where the proxy traffic goes: bytes moved by each kind of step, summed per step and platform (MB in the report).
+    const traffic = {};
+    async function metered(label, fn) {
+        const before = meter();
+        try {
+            return await fn();
+        } finally {
+            traffic[label] = (traffic[label] ?? 0) + (meter() - before);
+        }
+    }
     // A platform throttle noticed inside the staged screen: the row is still written, then the run stops.
     let pendingRateLimit = null;
     const criteria = {
@@ -142,7 +154,9 @@ export async function runMode({
             excludeBioPatterns.length &&
             (row.externalLinks ?? []).some(isLinkInBioUrl)
         ) {
-            const { targets, emails, warnings } = await resolveBioLinks({ page, links: row.externalLinks });
+            const { targets, emails, warnings } = await metered('link-in-bio pages', () =>
+                resolveBioLinks({ page, links: row.externalLinks }),
+            );
             row = screenRow({
                 ...row,
                 ...addEmails(emails, 'link-in-bio'),
@@ -158,11 +172,9 @@ export async function runMode({
                 isLinkInBioUrl,
             );
             if (urls.length) {
-                const { sites, emails, emailSources, warnings } = await scanCreatorSites({
-                    page,
-                    urls,
-                    max: maxSitePages,
-                });
+                const { sites, emails, emailSources, warnings } = await metered('creator websites', () =>
+                    scanCreatorSites({ page, urls, max: maxSitePages }),
+                );
                 const fromSite = addEmails(emails, 'site');
                 // keep the site each e-mail was read on
                 fromSite.contactEmailSources = [
@@ -192,13 +204,15 @@ export async function runMode({
         if (alive() && wantedPosts > 0) {
             const looked = preloadedPosts
                 ? { posts: preloadedPosts }
-                : await m.lookupProfile({
-                      page,
-                      username: handle,
-                      sourceInput: row.sourceInput,
-                      maxRecentPosts: wantedPosts,
-                      shouldContinue,
-                  });
+                : await metered(`posts (${platformName})`, () =>
+                      m.lookupProfile({
+                          page,
+                          username: handle,
+                          sourceInput: row.sourceInput,
+                          maxRecentPosts: wantedPosts,
+                          shouldContinue,
+                      }),
+                  );
             sampled = looked.posts ?? [];
             row = {
                 ...row,
@@ -667,6 +681,7 @@ export async function runMode({
         // included); `maxFullLookups` is how many are opened in full (posts, links, website). Accounts ruled out by the
         // cheap look do not use up the second one, so the run's effort goes to accounts inside the range.
         let fullLookups = 0;
+        let tiktokOpened = 0; // TikTok has no cheap look and its pages are the heaviest: at most maxTiktokLookups per run
         const funnel = {
             found: found.candidates.length,
             examined: 0,
@@ -753,7 +768,9 @@ export async function runMode({
                 // Cheap pre-screen (Instagram's public embed page shows the exact follower count): an account outside
                 // the follower range is not opened in full.
                 if ((minFollowers != null || maxFollowers != null) && typeof m.quickProfile === 'function') {
-                    const quick = await m.quickProfile({ page, username: cand.handle, sourceInput });
+                    const quick = await metered(`cheap follower look (${cand.platform})`, () =>
+                        m.quickProfile({ page, username: cand.handle, sourceInput }),
+                    );
                     const n = quick?.followerCount;
                     if (
                         quick?.status === 'found' &&
@@ -776,18 +793,29 @@ export async function runMode({
                 // TikTok's recent posts come with the same page load, but reading them is slow and costly (autoplaying
                 // videos) and TikTok hides most post data logged out anyway: off unless readTiktokPosts is set. Without
                 // them TikTok's post-based rules are unknown and take the full points (unknownFullScorePlatforms).
+                if (cand.platform === 'tiktok') {
+                    if (tiktokOpened >= maxTiktokLookups) {
+                        discoveryReport.tiktokNotOpened = (discoveryReport.tiktokNotOpened ?? 0) + 1;
+                        funnel.examined -= 1;
+                        discoveryReport.lookedUp -= 1;
+                        continue;
+                    }
+                    tiktokOpened += 1;
+                }
                 fullLookups += 1;
                 funnel.openedInFull += 1;
                 const tiktokNoPosts = cand.platform === 'tiktok' && !readTiktokPosts;
                 const readNow = cand.platform === 'tiktok' && !tiktokNoPosts;
                 const wantNow = readNow ? wantedPosts : 0;
-                const { profile, posts, rateLimit } = await m.lookupProfile({
-                    page,
-                    username: cand.handle,
-                    sourceInput,
-                    maxRecentPosts: wantNow,
-                    shouldContinue,
-                });
+                const { profile, posts, rateLimit } = await metered(`profile page (${cand.platform})`, () =>
+                    m.lookupProfile({
+                        page,
+                        username: cand.handle,
+                        sourceInput,
+                        maxRecentPosts: wantNow,
+                        shouldContinue,
+                    }),
+                );
                 const row = await finishProfile(
                     { ...profile, ...sightings, sourceInput },
                     {
@@ -798,6 +826,9 @@ export async function runMode({
                     },
                 );
                 countFailure(row);
+                discoveryReport.trafficMB = Object.fromEntries(
+                    Object.entries(traffic).map(([k, v]) => [k, Number((v / 1e6).toFixed(2))]),
+                );
                 if (!hiddenByFilter(row)) await write('profile', row);
                 const rl = rateLimit ?? pendingRateLimit;
                 pendingRateLimit = null;

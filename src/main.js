@@ -232,6 +232,7 @@ try {
             mod,
             mods: PLATFORM_MODULES,
             serpProxyUrl,
+            meter: () => cost.bytes,
             page,
             input,
             budget,

@@ -88,5 +88,6 @@
     ],
     "maxProxyUsd": 1.5,
     "blockMode": "flags",
-    "maxFullLookups": 20
+    "maxFullLookups": 20,
+    "maxTiktokLookups": 6
 }

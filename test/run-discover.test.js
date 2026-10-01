@@ -356,6 +356,41 @@ describe('discover mode: keywords -> accounts -> screening -> score', () => {
         expect(h.report.discovery.stoppedBecause).toMatch(/maxFullLookups/);
     });
 
+    it('TikTok is opened for at most maxTiktokLookups accounts, the rest are counted; traffic per step is reported', async () => {
+        const tt = tiktokMod();
+        let bytes = 0;
+        const h = harness(
+            { ...criteria, maxTiktokLookups: 2 },
+            { tiktok: tt },
+            ['t1', 't2', 't3', 't4'].map((x) => cand('tiktok', x)),
+        );
+        const original = h.run;
+        void original;
+        discoverByWebSearch.mockResolvedValue({
+            candidates: ['t1', 't2', 't3', 't4'].map((x) => cand('tiktok', x)),
+            report: { queries: [], enginesBlocked: [], totalHits: 4 },
+        });
+        const pushed = [];
+        const report = {};
+        await runMode({
+            mode: 'discover',
+            mods: { tiktok: tt },
+            page: {},
+            input: { searchKeywords: ['k'], ...criteria, maxTiktokLookups: 2 },
+            budget: new BudgetTracker(100),
+            pushData: async (r) => pushed.push(r),
+            rateLimitErrors: [],
+            report,
+            meter: () => {
+                bytes += 1_000_000;
+                return bytes;
+            },
+        });
+        expect(tt.lookupProfile).toHaveBeenCalledTimes(2);
+        expect(report.discovery.tiktokNotOpened).toBe(2);
+        expect(report.discovery.trafficMB['profile page (tiktok)']).toBeGreaterThan(0);
+    });
+
     it('a platform that rate-limits is stopped, the others carry on; rows are still written', async () => {
         const tt = {
             lookupProfile: vi.fn(async () => {

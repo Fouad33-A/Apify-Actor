@@ -99,6 +99,13 @@
             "minimum": 1,
             "description": "How many accounts inside the follower range are opened in full (profile, 10 posts, links, website, score). Accounts ruled out by the cheap follower look do not count. This, with the proxy cap, is what the run spends its money on."
         },
+        "maxTiktokLookups": {
+            "title": "Discover: max TikTok profiles to open",
+            "type": "integer",
+            "default": 6,
+            "minimum": 0,
+            "description": "TikTok has no cheap first look and its profile pages are the heaviest to load, so only this many TikTok accounts are opened per run (the rest are skipped and counted in OUTPUT.discovery.tiktokNotOpened). TikTok is the bonus platform; raise this if you want more of it."
+        },
         "excludeUsernames": {
             "title": "Already-known usernames to skip (expand mode)",
             "type": "array",

@@ -172,10 +172,16 @@ describe('accounts from Google snippets', () => {
         expect(handleFromSnippet('Being on a debt journey Instagram · thebudgetmom 900+ likes', 'instagram')).toBe(
             'thebudgetmom',
         );
-        expect(handleFromSnippet('x TikTok · Her.Money 12K likes', 'tiktok')).toBe('her.money');
+        expect(handleFromSnippet('x TikTok · her.money 12K likes', 'tiktok')).toBe('her.money');
         expect(handleFromSnippet('Instagram · popular', 'instagram')).toBeNull();
         expect(handleFromSnippet('nothing', 'instagram')).toBeNull();
         expect(handleFromSnippet('video TikTok · 85K views', 'tiktok')).toBeNull();
+        // a channel's DISPLAY name is not an account: capitalised, or followed by more plain words
+        expect(handleFromSnippet('TikTok · Dave Ramsey 1M likes', 'tiktok')).toBeNull();
+        expect(handleFromSnippet('TikTok · Alison 12K likes', 'tiktok')).toBeNull();
+        expect(handleFromSnippet('TikTok · debt free journey 3K likes', 'tiktok')).toBeNull();
+        expect(handleFromSnippet('TikTok · jdr_profitforthepeople 4K likes', 'tiktok')).toBe('jdr_profitforthepeople');
+        expect(handleFromSnippet('Instagram · thebudgetmom', 'instagram')).toBe('thebudgetmom');
         expect(handleFromSnippet('TikTok · 30.6k likes', 'tiktok')).toBeNull();
     });
     it('a reel result becomes a candidate through its snippet; /popular/ is not an account', async () => {

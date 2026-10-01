@@ -247,14 +247,24 @@ export function handleFromTitle(text, platform) {
 // address is a reel or post link with no account name in it.
 export function handleFromSnippet(text, platform) {
     const patterns = {
-        instagram: /Instagram\s*[·•|]\s*@?([A-Za-z0-9._]{1,30})/,
-        tiktok: /TikTok\s*[·•|]\s*@?([A-Za-z0-9._]{2,24})/,
+        instagram: /Instagram\s*[·•|]\s*@?([A-Za-z0-9._]{1,30})(.{0,12})/,
+        tiktok: /TikTok\s*[·•|]\s*@?([A-Za-z0-9._]{2,24})(.{0,12})/,
     };
     const m = patterns[platform] ? String(text ?? '').match(patterns[platform]) : null;
     if (!m) return null;
-    const name = m[1].replace(/\.+$/, '').toLowerCase();
+    const raw = m[1].replace(/\.+$/, '');
+    const name = raw.toLowerCase();
     // "TikTok · 85K views" names a count, not an account
     if (/^\d[\d.,]*[kmb]?$/i.test(name)) return null;
+    // Google prints either the account name or the channel's DISPLAY name here ("TikTok · Dave Ramsey", "TikTok ·
+    // debt free journey"). A handle is written in lower case and is followed by a count, a separator or the end; a
+    // capitalised word, or another plain word after it, is a display name and must not be opened as an account.
+    if (raw !== name) return null;
+    if (
+        /^\s+[A-Za-z]{2,}/.test(m[2]) &&
+        !/^\s+(likes?|views?|followers?|posts?|comments?|reels?|videos?)\b/i.test(m[2])
+    )
+        return null;
     return name && !IG_RESERVED.has(name) ? name : null;
 }
 
