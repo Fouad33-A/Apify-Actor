@@ -60,7 +60,7 @@
     "warnPatterns": ["crypto", "trading"],
     "onlyPassing": false,
     "maxItemsPerRun": 25,
-    "maxProxyMegabytes": 125,
+    "maxProxyMegabytes": 60,
     "blockResourceTypes": ["image", "media", "font"],
     "maxConcurrentRuns": 2,
     "proxyConfiguration": {
@@ -86,6 +86,6 @@
         "business service",
         "consulting"
     ],
-    "maxProxyUsd": 1.0,
+    "maxProxyUsd": 0.5,
     "blockMode": "flags"
 }
