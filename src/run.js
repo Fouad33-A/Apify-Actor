@@ -67,6 +67,7 @@ export async function runMode({
         discoverPlatforms = ['instagram', 'facebook', 'tiktok'],
         searchEngines = DEFAULT_ENGINES,
         maxSearchPages = 2,
+        maxSearchSeconds = 240,
         scorecard = false,
         minScore = null,
         agencyEmailPatterns = DEFAULT_SCORECARD.agencyEmailPatterns,
@@ -627,6 +628,8 @@ export async function runMode({
             lookedUp: 0,
             preScreened: 0,
             blockedPlatforms: [],
+            // filled in while searching, so a run that is stopped still reports what it did
+            search: { queries: [], enginesBlocked: [], totalHits: 0 },
         };
         Object.assign(report, { discovery: discoveryReport });
         const found = await discoverByWebSearch({
@@ -637,8 +640,10 @@ export async function runMode({
             engines: searchEngines,
             maxPages: maxSearchPages,
             serpProxyUrl,
+            maxSeconds: maxSearchSeconds,
+            report: discoveryReport.search,
             shouldContinue,
-            log: (m) => log.warning(m),
+            log: (m) => log.info(m),
         });
         const { ordered, skippedDuplicates } = orderCandidates(found.candidates, {
             exclude: excludeUsernames,
@@ -646,7 +651,6 @@ export async function runMode({
             platforms: discoverPlatforms,
         });
         Object.assign(discoveryReport, {
-            search: found.report,
             candidatesFound: found.candidates.length,
             toLookUp: ordered.length,
             skippedDuplicates,

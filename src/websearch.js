@@ -448,10 +448,10 @@ export async function parseSerpHtml(html) {
 }
 
 // Default page fetcher for the HTTP engine: one GET through the Google SERP proxy. Replaced in tests.
-export async function fetchSerpPage({ url, proxyUrl }) {
+export async function fetchSerpPage({ url, proxyUrl, timeoutMs = 40_000 }) {
     // eslint-disable-next-line import-x/no-extraneous-dependencies
     const { gotScraping } = await import('got-scraping');
-    const get = () => gotScraping({ url, proxyUrl, timeout: { request: 60_000 }, throwHttpErrors: false });
+    const get = () => gotScraping({ url, proxyUrl, timeout: { request: timeoutMs }, throwHttpErrors: false });
     // the search proxy is sometimes slow: one more try after a timeout
     const response = await get().catch((err) => (/timeout/i.test(String(err?.message)) ? get() : Promise.reject(err)));
     if (response.statusCode >= 400) throw new Error(`HTTP ${response.statusCode} from the search proxy`);
@@ -475,10 +475,16 @@ export async function discoverByWebSearch({
     resultWaitMs = 6000,
     serpProxyUrl = null,
     serpFetch = fetchSerpPage,
+    maxSeconds = 240,
+    report: reportSink = { queries: [], enginesBlocked: [], totalHits: 0 },
     shouldContinue = () => true,
     log = () => {},
 }) {
-    const report = { queries: [], enginesBlocked: [], totalHits: 0 };
+    const report = reportSink; // filled in place (see above)
+    // The whole search phase has a time budget: a slow search proxy must not eat the run (each request can take
+    // a minute). `report` may be passed in, so a run that is stopped still leaves what was found so far.
+    const deadline = Date.now() + maxSeconds * 1000;
+    const timeLeft = () => Date.now() < deadline;
     const byKey = new Map();
     const blocked = new Set();
     const tries = new Map(); // engine -> [attempts, accounts found]: an engine that keeps answering nothing is dropped
@@ -519,7 +525,7 @@ export async function discoverByWebSearch({
         if (engine.http && !serpProxyUrl) {
             return { got: 0, outcome: 'unavailable', detail: 'the Google SERP proxy is not available to this run' };
         }
-        for (let p = 0; p < maxPages; p += 1) {
+        for (let p = 0; p < maxPages && timeLeft(); p += 1) {
             try {
                 let info;
                 let anchors;
@@ -572,6 +578,11 @@ export async function discoverByWebSearch({
 
     for (const q of list.slice(0, maxQueries)) {
         if (!shouldContinue()) break;
+        if (!timeLeft()) {
+            report.stoppedOnTime = true;
+            log(`Search time budget (${maxSeconds} s) used up: the remaining searches were not asked`);
+            break;
+        }
         const entry = { platform: q.platform, keyword: q.keyword, attempts: [], handlesFound: 0 };
         report.queries.push(entry);
         for (const engineName of engines) {
@@ -580,16 +591,22 @@ export async function discoverByWebSearch({
             // an engine that only ever returns nothing is dropped, but never the last one left (Google varies from run to run)
             const others = engines.some((e) => e !== engineName && SEARCH_ENGINES[e] && !blocked.has(e));
             if (!engine || blocked.has(engineName) || (others && asked >= 8 && produced === 0)) continue;
-            for (let variant = 0; variant < QUERY_VARIANTS; variant += 1) {
+            for (let variant = 0; variant < QUERY_VARIANTS && timeLeft(); variant += 1) {
                 const query = buildQuery({ platform: q.platform, keyword: q.keyword, variant });
+                const startedMs = Date.now();
+                report.totalHits = byKey.size;
                 const { got, outcome, detail } = await askEngine(engineName, q, query);
                 const seen = tries.get(engineName) ?? [0, 0];
                 tries.set(engineName, [seen[0] + 1, seen[1] + got]);
+                log(
+                    `Search [${engineName}] ${q.platform} "${query}": ${outcome}, ${got} account(s), ${Math.round((Date.now() - startedMs) / 1000)} s`,
+                );
                 entry.attempts.push({
                     engine: engineName,
                     query,
                     status: outcome,
                     results: got,
+                    seconds: Math.round((Date.now() - startedMs) / 1000),
                     ...(detail ? { detail } : {}),
                 });
                 if (outcome === 'blocked') {

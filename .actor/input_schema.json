@@ -135,6 +135,14 @@
             "maximum": 5,
             "description": "How many result pages are read per keyword and platform (Google gives 10 results per page, Bing up to 50)."
         },
+        "maxSearchSeconds": {
+            "title": "Discover: time budget for the search phase (seconds)",
+            "type": "integer",
+            "default": 240,
+            "minimum": 30,
+            "maximum": 1800,
+            "description": "The search phase stops starting new searches after this many seconds (the search proxy can be slow and each request may take up to a minute). Accounts found so far are still looked up; OUTPUT.discovery.search.stoppedOnTime tells you when it happened."
+        },
         "minFollowers": {
             "title": "Screening: minimum followers",
             "type": "integer",

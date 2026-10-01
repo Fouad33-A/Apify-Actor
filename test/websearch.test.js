@@ -276,7 +276,13 @@ describe('discoverByWebSearch (real page, synthetic search engines)', () => {
         ]);
         expect(report.queries[0]).toMatchObject({ platform: 'instagram', handlesFound: 2 });
         expect(report.queries[0].attempts).toEqual([
-            { engine: 'bing', query: 'site:instagram.com budgeting', status: 'ok', results: 2 },
+            {
+                engine: 'bing',
+                query: 'site:instagram.com budgeting',
+                status: 'ok',
+                results: 2,
+                seconds: expect.any(Number),
+            },
         ]);
     });
 
@@ -372,7 +378,13 @@ describe('Google through the SERP proxy (HTTP, no browser)', () => {
             ['ohhyoubudget', '23K', ['google']],
         ]);
         expect(report.queries[0].attempts).toEqual([
-            { engine: 'google', query: 'site:instagram.com budgeting', status: 'ok', results: 2 },
+            {
+                engine: 'google',
+                query: 'site:instagram.com budgeting',
+                status: 'ok',
+                results: 2,
+                seconds: expect.any(Number),
+            },
         ]);
     });
 
@@ -385,6 +397,7 @@ describe('Google through the SERP proxy (HTTP, no browser)', () => {
                 query: 'site:instagram.com budgeting',
                 status: 'unavailable',
                 results: 0,
+                seconds: expect.any(Number),
                 detail: 'the Google SERP proxy is not available to this run',
             },
         ]);
@@ -404,6 +417,31 @@ describe('Google through the SERP proxy (HTTP, no browser)', () => {
         expect(unwrapSearchUrl('https://www.google.com/url?esrc=s&q=&url=https%3A%2F%2Fwww.instagram.com%2Fa%2F')).toBe(
             'https://www.instagram.com/a/',
         );
+    });
+
+    it('stops starting searches when the time budget is used up, and fills the report it was given in place', async () => {
+        const mine = { queries: [], enginesBlocked: [], totalHits: 0 };
+        const logs = [];
+        const slow = async () => {
+            await new Promise((resolve) => {
+                setTimeout(resolve, 300);
+            });
+            return parseSerpHtml(googleHtml);
+        };
+        const { candidates, report } = await run({
+            keywords: ['a', 'b', 'c'],
+            serpFetch: slow,
+            maxSeconds: 0.1,
+            report: mine,
+            log: (m) => logs.push(m),
+        });
+        expect(report).toBe(mine);
+        expect(report.stoppedOnTime).toBe(true);
+        expect(report.queries).toHaveLength(1); // only the first search was asked
+        expect(report.queries[0].attempts[0].seconds).toBeGreaterThanOrEqual(0);
+        expect(candidates.length).toBeGreaterThan(0);
+        expect(logs.join(' ')).toMatch(/Search \[google\] instagram "site:instagram.com a": ok, 2 account/);
+        expect(logs.join(' ')).toMatch(/time budget/);
     });
 
     it('a Google block page is reported as blocked and the engine is not used again', async () => {

@@ -174,6 +174,26 @@ if (mode === 'discover') {
     }
 }
 
+// If the run is stopped (by you or by its time limit), save what it has found and spent so far.
+Actor.on('aborting', async () => {
+    try {
+        await Actor.setValue('OUTPUT', {
+            mode,
+            aborted: true,
+            message: 'The run was stopped before it finished: this is what it had done so far.',
+            itemCounts: budget.counts,
+            cost: cost.report({ platformUsage: null }),
+            discovery: report.discovery ?? null,
+        });
+    } catch {
+        // nothing more can be done while stopping
+    }
+    await new Promise((resolve) => {
+        setTimeout(resolve, 1000);
+    });
+    await Actor.exit();
+});
+
 const charger = makeCharger({ actor: Actor, budget, warn: (m) => log.warning(m) });
 const page = await context.newPage();
 
