@@ -9,6 +9,15 @@
 
 export const BLOCKED_TYPES = new Set(['image', 'media', 'font']);
 
+// The proxy cap in megabytes: the smaller of the megabyte cap and the dollar cap (dollars / price per GB x 1000).
+// null = no cap.
+export function effectiveCapMegabytes({ maxMegabytes = null, maxUsd = null, pricePerGbUsd = 8 } = {}) {
+    const caps = [];
+    if (maxMegabytes) caps.push(maxMegabytes);
+    if (maxUsd != null && pricePerGbUsd > 0) caps.push((maxUsd / pricePerGbUsd) * 1000);
+    return caps.length ? Number(Math.min(...caps).toFixed(2)) : null;
+}
+
 export function computeUnits(memoryMbytes, runtimeSecs) {
     if (!memoryMbytes || !runtimeSecs) return null;
     return Number(((memoryMbytes / 1024) * (runtimeSecs / 3600)).toFixed(5));
@@ -88,10 +97,11 @@ export class CostTracker {
                 this.proxyPricePerGbUsd != null
                     ? Number(((proxyMegabytes / 1000) * this.proxyPricePerGbUsd).toFixed(4))
                     : null,
-            // The platform's own usage figure for this run (Apify), when it could be read. It can lag the
-            // final charge by a little because usage is aggregated after the run ends.
+            // The platform's own usage figure for this run (Apify), when it could be read. It can lag the final charge
+            // (usage is aggregated after the run ends). IMPORTANT: every number in usageUsd is US DOLLARS, including
+            // PROXY_RESIDENTIAL_TRANSFER_GBYTES (the residential proxy charge in dollars, not gigabytes).
             platformUsage,
-            note: 'proxyMegabytes is measured in the browser (wire bytes). Compare with Console > Proxy usage for the billed figure.',
+            note: 'proxyMegabytes is measured in the browser (wire bytes) and matches the billed proxy traffic; estimatedProxyUsd = megabytes / 1000 x the proxy price per GB. In platformUsage.usageUsd all numbers are US dollars (PROXY_RESIDENTIAL_TRANSFER_GBYTES is the proxy charge in dollars).',
         };
     }
 }

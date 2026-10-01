@@ -3,7 +3,7 @@ import http from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { BudgetTracker } from '../src/budget.js';
-import { computeUnits, CostTracker } from '../src/cost.js';
+import { computeUnits, CostTracker, effectiveCapMegabytes } from '../src/cost.js';
 import { launchBrowser } from './helpers/browser.js';
 
 describe('computeUnits', () => {
@@ -166,4 +166,100 @@ describe('CostTracker (real Chromium, local server)', () => {
         expect(body).toContain('hello');
         expect(budget.summary().stopReason).toBe('max_proxy_megabytes');
     });
+});
+
+describe('effectiveCapMegabytes (the dollar cap)', () => {
+    it('turns dollars into megabytes with the proxy price and takes the smaller cap', () => {
+        expect(effectiveCapMegabytes({ maxUsd: 0.5, pricePerGbUsd: 8 })).toBe(62.5);
+        expect(effectiveCapMegabytes({ maxMegabytes: 60, maxUsd: 0.5, pricePerGbUsd: 8 })).toBe(60);
+        expect(effectiveCapMegabytes({ maxMegabytes: 300, maxUsd: 0.5 })).toBe(62.5);
+        expect(effectiveCapMegabytes({ maxMegabytes: 300 })).toBe(300);
+        expect(effectiveCapMegabytes({})).toBeNull();
+    });
+    it('the report prices the measured traffic by default and explains that usageUsd is dollars', () => {
+        const t = new CostTracker({ proxyPricePerGbUsd: 8 });
+        t.addBytes(196_000_000);
+        const r = t.report();
+        expect(r.proxyMegabytes).toBe(196);
+        expect(r.estimatedProxyUsd).toBe(1.568);
+        expect(r.note).toMatch(/US dollars/);
+    });
+});
+
+describe("browser flags as an alternative to request interception ('flags' block mode)", () => {
+    it('imagesEnabled=false stops image downloads without any request interception, and the cache serves a repeated script', async () => {
+        const hits = { img: 0, js: 0 };
+        const server = http.createServer((req, res) => {
+            if (req.url.startsWith('/a.png')) {
+                hits.img += 1;
+                res.writeHead(200, { 'content-type': 'image/png' });
+                res.end(Buffer.alloc(2000));
+            } else if (req.url.startsWith('/lib.js')) {
+                hits.js += 1;
+                res.writeHead(200, { 'content-type': 'application/javascript', 'cache-control': 'max-age=3600' });
+                res.end('window.loaded = true;');
+            } else {
+                res.writeHead(200, { 'content-type': 'text/html' });
+                res.end('<html><body><img src="/a.png"><script src="/lib.js"></script></body></html>');
+            }
+        });
+        await new Promise((resolve) => {
+            server.listen(0, resolve);
+        });
+        const { port } = server.address();
+        const { chromium } = await import('playwright');
+        const flagged = await chromium.launch({
+            headless: true,
+            executablePath: process.env.PW_CHROMIUM_PATH || undefined,
+            args: ['--blink-settings=imagesEnabled=false'],
+        });
+        try {
+            const page = await (await flagged.newContext()).newPage();
+            await page.goto(`http://127.0.0.1:${port}/one`);
+            await page.goto(`http://127.0.0.1:${port}/two`);
+            expect(hits.img).toBe(0); // images are not downloaded
+            expect(hits.js).toBe(1); // the script came from the cache the second time
+        } finally {
+            await flagged.close();
+            await new Promise((resolve) => {
+                server.close(resolve);
+            });
+        }
+    }, 30_000);
+
+    it('with request interception switched on the same script is downloaded again on every page (cache off)', async () => {
+        let js = 0;
+        const server = http.createServer((req, res) => {
+            if (req.url.startsWith('/lib.js')) {
+                js += 1;
+                res.writeHead(200, { 'content-type': 'application/javascript', 'cache-control': 'max-age=3600' });
+                res.end('window.loaded = true;');
+            } else {
+                res.writeHead(200, { 'content-type': 'text/html' });
+                res.end('<html><body><script src="/lib.js"></script></body></html>');
+            }
+        });
+        await new Promise((resolve) => {
+            server.listen(0, resolve);
+        });
+        const { port } = server.address();
+        const { chromium } = await import('playwright');
+        const plain = await chromium.launch({
+            headless: true,
+            executablePath: process.env.PW_CHROMIUM_PATH || undefined,
+        });
+        try {
+            const context = await plain.newContext();
+            await context.route('**/*', (route) => route.continue());
+            const page = await context.newPage();
+            await page.goto(`http://127.0.0.1:${port}/one`);
+            await page.goto(`http://127.0.0.1:${port}/two`);
+            expect(js).toBe(2);
+        } finally {
+            await plain.close();
+            await new Promise((resolve) => {
+                server.close(resolve);
+            });
+        }
+    }, 30_000);
 });

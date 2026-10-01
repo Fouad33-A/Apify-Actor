@@ -353,11 +353,17 @@
             "default": 300,
             "minimum": 0
         },
-        "proxyPricePerGbUsd": {
-            "title": "Proxy price per GB (USD), for the cost report",
+        "maxProxyUsd": {
+            "title": "Hard cap: proxy spend (USD) this run may use",
             "type": "number",
-            "description": "Optional. If set, the cost report also shows estimatedProxyUsd = megabytes/1000 x this price. Leave empty to see megabytes only.",
-            "minimum": 0
+            "minimum": 0,
+            "description": "The run stops cleanly once its measured proxy traffic would cost this much (traffic in MB x the proxy price per GB). The measured traffic is accurate: it matched the billed proxy charge within a few percent. Rows already written are kept. Use together with, or instead of, the megabyte cap; the smaller applies."
+        },
+        "proxyPricePerGbUsd": {
+            "title": "Proxy price per GB (USD), for the cost report and the dollar cap",
+            "type": "number",
+            "default": 8,
+            "description": "Apify's residential proxy costs about US$8 per GB (measured on this Actor: US$1.57 for 196 MB). The cost report shows estimatedProxyUsd = megabytes / 1000 x this price. Change it only if your plan has a different rate."
         },
         "blockHeavyResources": {
             "title": "Block images, video and fonts",
@@ -375,6 +381,18 @@
             },
             "description": "Types of files the browser is not allowed to download, to save proxy traffic. Default: media (video and audio streams; the TikTok creator page autoplays previews that otherwise cost a lot of proxy traffic). Blocking image and font together with media made TikTok return an empty page once, so add them only after testing.",
             "default": ["media"]
+        },
+        "blockMode": {
+            "title": "How images and media are blocked",
+            "type": "string",
+            "editor": "select",
+            "enum": ["flags", "route"],
+            "enumTitles": [
+                "Browser flags (default; keeps the browser cache on, fonts are not blocked)",
+                "Request interception (old way; turns the browser cache off, blocks fonts too)"
+            ],
+            "default": "flags",
+            "description": "'flags' switches images off and stops media autoplay with browser flags and leaves the browser's HTTP cache on, so a page's scripts are downloaded once, not again on every page. 'route' (the old way) blocks by aborting requests, which also disables the cache. If a platform stops working with 'flags', set this to 'route'."
         },
         "standardUserAgent": {
             "title": "Announce plain Chrome instead of HeadlessChrome",

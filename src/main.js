@@ -5,7 +5,7 @@ import { BudgetTracker } from './budget.js';
 import { makeCharger } from './charging.js';
 import { waitForSlot } from './concurrency.js';
 import { parseCookieHeader, resolveSessionCookies } from './cookies.js';
-import { CostTracker } from './cost.js';
+import { CostTracker, effectiveCapMegabytes } from './cost.js';
 import { runtimeInfo } from './diagnostics.js';
 import * as facebook from './platforms/facebook.js';
 import * as instagram from './platforms/instagram.js';
@@ -30,12 +30,14 @@ const {
     platform,
     maxItemsPerRun = 2000,
     maxProxyMegabytes = 300,
-    proxyPricePerGbUsd = null,
+    maxProxyUsd = null,
+    proxyPricePerGbUsd = 8, // Apify residential proxy, about US$8 per GB (measured: US$1.57 for 196 MB)
     blockHeavyResources = false,
     blockResourceTypes = ['media'],
     standardUserAgent = false,
     fullChromium = false,
     hideAutomationFlag = false,
+    blockMode = 'flags',
     maxConcurrentRuns = 2,
     concurrencyWaitMinutes = 10,
     sessionCookies = '',
@@ -72,7 +74,12 @@ if (slot.gaveUp) {
 const budget = new BudgetTracker(maxItemsPerRun);
 const cost = new CostTracker({
     budget,
-    maxProxyMegabytes: maxProxyMegabytes || null,
+    // a dollar cap is turned into megabytes with the proxy price; the smaller of the two caps applies
+    maxProxyMegabytes: effectiveCapMegabytes({
+        maxMegabytes: maxProxyMegabytes,
+        maxUsd: maxProxyUsd,
+        pricePerGbUsd: proxyPricePerGbUsd,
+    }),
     proxyPricePerGbUsd,
     memoryMbytes: Number(process.env.ACTOR_MEMORY_MBYTES) || null,
 });
@@ -121,6 +128,19 @@ if (proxyInput?.useApifyProxy && !proxyUrl) {
     );
 }
 
+// Blocking images/media. 'flags' (default) turns images off and stops media autoplay with browser flags, with no
+// request interception, so the browser's HTTP cache keeps working (proven in test/cost.test.js). 'route' (the old
+// way) aborts those requests through Playwright's request interception, which switches the cache off, so every
+// page re-downloads its scripts. Fonts can only be blocked in 'route' mode.
+const blockedTypes = blockHeavyResources ? ['image', 'media', 'font'] : blockResourceTypes;
+const useFlags = blockMode === 'flags';
+const browserBlockFlags = useFlags
+    ? [
+          ...(blockedTypes.includes('image') ? ['--blink-settings=imagesEnabled=false'] : []),
+          ...(blockedTypes.includes('media') ? ['--autoplay-policy=user-gesture-required'] : []),
+      ]
+    : [];
+
 // Experiments for sites that treat the default headless shell as a bot:
 // - fullChromium: Chrome's full "new headless" mode (the same browser a person runs, without a window)
 //   instead of the stripped-down headless shell.
@@ -129,10 +149,12 @@ if (proxyInput?.useApifyProxy && !proxyUrl) {
 const browser = await chromium.launch({
     headless: true,
     ...(fullChromium ? { channel: 'chromium' } : {}),
-    args: hideAutomationFlag ? ['--disable-blink-features=AutomationControlled'] : [],
+    args: [...(hideAutomationFlag ? ['--disable-blink-features=AutomationControlled'] : []), ...browserBlockFlags],
     proxy: toPlaywrightProxy(proxyUrl),
 });
-log.info(`Browser ${browser.version()} (fullChromium=${fullChromium}, hideAutomationFlag=${hideAutomationFlag})`);
+log.info(
+    `Browser ${browser.version()} (fullChromium=${fullChromium}, hideAutomationFlag=${hideAutomationFlag}, blockMode=${blockMode})`,
+);
 // The proxy exit country changes the page language (Facebook came back in Romanian on one run), and
 // the text parsing is English-based, so ask for English like a normal browser configured for it.
 // Optional: headless Chromium announces itself as "HeadlessChrome" in its user agent. With
@@ -147,7 +169,7 @@ const context = await browser.newContext({
     extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
 });
 
-await cost.attach(context, { blockHeavyResources, blockTypes: blockResourceTypes });
+await cost.attach(context, useFlags ? { blockTypes: [] } : { blockHeavyResources, blockTypes: blockResourceTypes });
 
 // Never logged: only how many cookies were applied and where they came from.
 const session =
