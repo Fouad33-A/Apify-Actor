@@ -287,7 +287,11 @@ export function parsePluginHeader(text) {
     if (idx === -1) return null;
     const followerCount = parseAbbrevCount(lines[idx].replace(/\s+followers$/i, ''));
     if (followerCount == null) return null;
-    return { pageName: idx > 0 ? lines[idx - 1] : null, followerCount };
+    // the line before the count is the Page name, unless it is a button label of the plugin
+    const before = idx > 0 ? lines[idx - 1] : null;
+    const pageName =
+        before && !/^(follow page|followed|like page|liked|follow|share|send message)$/i.test(before) ? before : null;
+    return { pageName, followerCount };
 }
 
 // The cheap first look at a Page: the public Page plugin shows its name and exact follower count in about 100 KB,

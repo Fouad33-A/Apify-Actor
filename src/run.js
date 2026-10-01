@@ -20,7 +20,7 @@ import { computeReach } from './reach.js';
 import { makeCommentRow, makePostRow, makeProfileRow } from './schema.js';
 import { DEFAULT_SCORECARD, postStats, scoreRow, warnHits } from './scorecard.js';
 import { pickSiteUrls, scanCreatorSites } from './sitescan.js';
-import { DEFAULT_ENGINES, discoverByWebSearch, orderCandidates } from './websearch.js';
+import { DEFAULT_ENGINES, discoverByWebSearch, orderCandidates, parseFollowerHint } from './websearch.js';
 
 export async function runMode({
     mode,
@@ -683,6 +683,34 @@ export async function runMode({
             };
             const sourceInput = cand.queries.join(' | ');
             try {
+                // TikTok has no cheap first look and its profile pages are the heaviest to load. When the search snippet
+                // shows a follower figure far outside the range (more than 3x beyond either end), the profile is not
+                // opened; the row says so. The figure is only a hint, so the margin is wide.
+                const hintN = parseFollowerHint(cand.hint);
+                if (
+                    cand.platform === 'tiktok' &&
+                    hintN != null &&
+                    ((minFollowers != null && hintN < minFollowers / 3) ||
+                        (maxFollowers != null && hintN > maxFollowers * 3))
+                ) {
+                    discoveryReport.skippedByHint = (discoveryReport.skippedByHint ?? 0) + 1;
+                    const skipped = {
+                        ...makeProfileRow({
+                            platform: 'tiktok',
+                            sourceInput,
+                            username: cand.handle,
+                            status: 'not_checked',
+                            statusDetail: `Not opened: the search result showed about ${cand.hint} followers, far outside the wanted range (a hint from the search result, not a measurement)`,
+                            ...sightings,
+                        }),
+                        passesFilters: false,
+                        filterFailures: [
+                            `search result showed about ${cand.hint} followers, far outside the range (profile not opened)`,
+                        ],
+                    };
+                    await write('profile', skipped);
+                    continue;
+                }
                 // Cheap pre-screen (Instagram's public embed page shows the exact follower count): an account outside
                 // the follower range is not opened in full.
                 if ((minFollowers != null || maxFollowers != null) && typeof m.quickProfile === 'function') {

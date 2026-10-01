@@ -901,6 +901,8 @@ describe('quickProfile (cheap look through the Page plugin)', () => {
             followerCount: 4200,
         });
         expect(parsePluginHeader('This content is not available')).toBeNull();
+        // a button label before the count is not the Page name
+        expect(parsePluginHeader('Follow Page\n281K followers')).toEqual({ pageName: null, followerCount: 281_000 });
     });
 
     it('returns a found row with the follower count, or null when the plugin does not show the Page', async () => {

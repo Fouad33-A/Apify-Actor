@@ -302,6 +302,22 @@ describe('discover mode: keywords -> accounts -> screening -> score', () => {
         expect(h.pushed[0].passesFilters).toBe(false);
     });
 
+    it('TikTok: a snippet figure far outside the range means the profile is not opened, and the row says so', async () => {
+        const tt = tiktokMod();
+        const h = harness(criteria, { tiktok: tt }, [
+            cand('tiktok', 'tiny', { hint: '85' }),
+            cand('tiktok', 'huge', { hint: '9M' }),
+            cand('tiktok', 'near', { hint: '8K' }),
+        ]);
+        await h.run();
+        expect(tt.lookupProfile.mock.calls.map((c) => c[0].username)).toEqual(['near']); // 8K is within the 3x margin
+        const skipped = h.pushed.filter((r) => r.status === 'not_checked');
+        expect(skipped.map((r) => r.username).sort()).toEqual(['huge', 'tiny']);
+        expect(skipped[0]).toMatchObject({ passesFilters: false });
+        expect(skipped[0].statusDetail).toMatch(/Not opened/);
+        expect(h.report.discovery.skippedByHint).toBe(2);
+    });
+
     it('a platform that rate-limits is stopped, the others carry on; rows are still written', async () => {
         const tt = {
             lookupProfile: vi.fn(async () => {

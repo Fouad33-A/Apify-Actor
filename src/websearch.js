@@ -253,6 +253,8 @@ export function handleFromSnippet(text, platform) {
     const m = patterns[platform] ? String(text ?? '').match(patterns[platform]) : null;
     if (!m) return null;
     const name = m[1].replace(/\.+$/, '').toLowerCase();
+    // "TikTok · 85K views" names a count, not an account
+    if (/^\d[\d.,]*[kmb]?$/i.test(name)) return null;
     return name && !IG_RESERVED.has(name) ? name : null;
 }
 

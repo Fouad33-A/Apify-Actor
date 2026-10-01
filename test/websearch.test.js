@@ -175,6 +175,8 @@ describe('accounts from Google snippets', () => {
         expect(handleFromSnippet('x TikTok · Her.Money 12K likes', 'tiktok')).toBe('her.money');
         expect(handleFromSnippet('Instagram · popular', 'instagram')).toBeNull();
         expect(handleFromSnippet('nothing', 'instagram')).toBeNull();
+        expect(handleFromSnippet('video TikTok · 85K views', 'tiktok')).toBeNull();
+        expect(handleFromSnippet('TikTok · 30.6k likes', 'tiktok')).toBeNull();
     });
     it('a reel result becomes a candidate through its snippet; /popular/ is not an account', async () => {
         const html = `<html><head><title>x</title></head><body>
