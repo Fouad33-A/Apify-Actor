@@ -318,6 +318,44 @@ describe('discover mode: keywords -> accounts -> screening -> score', () => {
         expect(h.report.discovery.skippedByHint).toBe(2);
     });
 
+    it('accounts ruled out by the cheap look do not use up the budget of accounts opened in full; the funnel is reported', async () => {
+        const ig = {
+            quickProfile: vi.fn(async ({ username }) => ({
+                recordType: 'profile',
+                platform: 'instagram',
+                status: 'found',
+                username,
+                followerCount: username.startsWith('aout') ? 900 : 60_000,
+                sourceInput: 'q',
+            })),
+            lookupProfile: vi.fn(async ({ username }) => ({
+                profile: {
+                    recordType: 'profile',
+                    platform: 'instagram',
+                    status: 'found',
+                    username,
+                    sourceInput: username,
+                    followerCount: 60_000,
+                    contactEmails: ['a@b.co'],
+                    externalLinks: [],
+                },
+                posts: [],
+            })),
+        };
+        const names = ['aout1', 'aout2', 'aout3', 'zin1', 'zin2', 'zin3']; // examined in this order
+        const h = harness(
+            { ...criteria, maxFullLookups: 2 },
+            { instagram: ig },
+            names.map((n) => cand('instagram', n)),
+        );
+        await h.run();
+        // the three out-of-range accounts were examined cheaply; two in-range accounts were opened in full; the third in-range one was not
+        expect([...new Set(ig.lookupProfile.mock.calls.map((c) => c[0].username))].sort()).toEqual(['zin1', 'zin2']);
+        const f = h.report.discovery.funnel;
+        expect(f).toMatchObject({ found: 6, examined: 5, preScreenedOutOfRange: 3, openedInFull: 2 });
+        expect(h.report.discovery.stoppedBecause).toMatch(/maxFullLookups/);
+    });
+
     it('a platform that rate-limits is stopped, the others carry on; rows are still written', async () => {
         const tt = {
             lookupProfile: vi.fn(async () => {

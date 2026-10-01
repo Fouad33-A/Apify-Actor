@@ -5,8 +5,8 @@
     "excludeWords": ["course", "coach"],
     "discoverPlatforms": ["instagram", "facebook", "tiktok"],
     "searchEngines": ["google"],
-    "maxSearchPages": 1,
-    "maxCandidates": 20,
+    "maxSearchPages": 3,
+    "maxCandidates": 100,
     "excludeUsernames": [],
     "minFollowers": 10000,
     "maxFollowers": 150000,
@@ -59,8 +59,8 @@
     "reachPosts": 10,
     "warnPatterns": ["crypto", "trading"],
     "onlyPassing": false,
-    "maxItemsPerRun": 25,
-    "maxProxyMegabytes": 60,
+    "maxItemsPerRun": 150,
+    "maxProxyMegabytes": 190,
     "blockResourceTypes": ["image", "media", "font"],
     "maxConcurrentRuns": 2,
     "proxyConfiguration": {
@@ -86,6 +86,7 @@
         "business service",
         "consulting"
     ],
-    "maxProxyUsd": 0.5,
-    "blockMode": "flags"
+    "maxProxyUsd": 1.5,
+    "blockMode": "flags",
+    "maxFullLookups": 20
 }

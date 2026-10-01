@@ -69,6 +69,7 @@ export async function runMode({
         searchEngines = DEFAULT_ENGINES,
         maxSearchPages = 2,
         maxSearchSeconds = 600,
+        maxFullLookups = 20,
         searchModifiers = [],
         readTiktokPosts = false,
         scorecard = false,
@@ -662,6 +663,38 @@ export async function runMode({
             skippedDuplicates,
         });
         log.info(`Discover: ${found.candidates.length} account(s) found by web search, ${ordered.length} to look up`);
+        // Two separate budgets: `maxCandidates` is how many accounts are examined at all (the cheap follower look
+        // included); `maxFullLookups` is how many are opened in full (posts, links, website). Accounts ruled out by the
+        // cheap look do not use up the second one, so the run's effort goes to accounts inside the range.
+        let fullLookups = 0;
+        const funnel = {
+            found: found.candidates.length,
+            examined: 0,
+            preScreenedOutOfRange: 0,
+            notOpenedByHint: 0,
+            openedInFull: 0,
+            passedHardFilters: 0,
+            failedFollowerRange: 0,
+            failedWordLists: 0,
+            failedScore: 0,
+            failedOther: 0,
+        };
+        discoveryReport.funnel = funnel;
+        const countFailure = (row) => {
+            if (row.status !== 'found') {
+                funnel.failedOther += 1;
+                return;
+            }
+            if (row.passesFilters) {
+                funnel.passedHardFilters += 1;
+                return;
+            }
+            const first = (row.filterFailures ?? [])[0] ?? '';
+            if (/^followers /.test(first)) funnel.failedFollowerRange += 1;
+            else if (/^score /.test(first)) funnel.failedScore += 1;
+            else if (/contains|mentions|management\/agency|category/.test(first)) funnel.failedWordLists += 1;
+            else funnel.failedOther += 1;
+        };
         const stoppedPlatforms = new Set();
         const stopPlatform = (platformName, rl) => {
             rateLimitErrors.push(rl.toRecord());
@@ -671,9 +704,14 @@ export async function runMode({
         };
         for (const cand of ordered) {
             if (!shouldContinue()) break;
+            if (fullLookups >= maxFullLookups) {
+                discoveryReport.stoppedBecause = `${maxFullLookups} accounts opened in full (maxFullLookups)`;
+                break;
+            }
             const m = mods[cand.platform];
             if (!m || stoppedPlatforms.has(cand.platform)) continue;
             discoveryReport.lookedUp += 1;
+            funnel.examined += 1;
             const sightings = {
                 discoveredFrom: cand.queries,
                 discoverySignals: ['web-search', ...cand.engines],
@@ -694,6 +732,7 @@ export async function runMode({
                         (maxFollowers != null && hintN > maxFollowers * 3))
                 ) {
                     discoveryReport.skippedByHint = (discoveryReport.skippedByHint ?? 0) + 1;
+                    funnel.notOpenedByHint += 1;
                     const skipped = {
                         ...makeProfileRow({
                             platform: 'tiktok',
@@ -722,6 +761,7 @@ export async function runMode({
                         ((minFollowers != null && n < minFollowers) || (maxFollowers != null && n > maxFollowers))
                     ) {
                         discoveryReport.preScreened += 1;
+                        funnel.preScreenedOutOfRange += 1;
                         const light = screenRow({
                             ...quick,
                             ...sightings,
@@ -736,6 +776,8 @@ export async function runMode({
                 // TikTok's recent posts come with the same page load, but reading them is slow and costly (autoplaying
                 // videos) and TikTok hides most post data logged out anyway: off unless readTiktokPosts is set. Without
                 // them TikTok's post-based rules are unknown and take the full points (unknownFullScorePlatforms).
+                fullLookups += 1;
+                funnel.openedInFull += 1;
                 const tiktokNoPosts = cand.platform === 'tiktok' && !readTiktokPosts;
                 const readNow = cand.platform === 'tiktok' && !tiktokNoPosts;
                 const wantNow = readNow ? wantedPosts : 0;
@@ -755,6 +797,7 @@ export async function runMode({
                         handle: cand.handle,
                     },
                 );
+                countFailure(row);
                 if (!hiddenByFilter(row)) await write('profile', row);
                 const rl = rateLimit ?? pendingRateLimit;
                 pendingRateLimit = null;
