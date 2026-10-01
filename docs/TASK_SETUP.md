@@ -43,9 +43,14 @@ TikTok hides most post data when logged out. A TikTok account that passes the ha
 - **OUTPUT > discovery:** for every search: the query, which engine answered (`ok`, `blocked`, `no_results`, `unrecognised`), and how many accounts it gave. `enginesBlocked` lists engines that showed a bot check (nothing is solved or clicked through). `candidatesFound`, `toLookUp`, `preScreened`, `blockedPlatforms`.
 - **OUTPUT > cost:** proxy traffic and cost for the whole run. Cost per search is the run cost divided by the number of queries (keywords times platforms).
 
-## First live findings (build 0.0.72, 2026-09-30)
+## Live results (build 0.0.85 = code 0.12.7, 2026-10-01)
 
-Bing answered the Actor's browser with an empty results page; DuckDuckGo and Brave answered with CAPTCHAs (reported as blocked, nothing solved). Code version 0.12.1 therefore asks Google through Apify's Google SERP proxy first. Not yet run live.
+2 keywords x 3 platforms: 6 Google searches (3-12 s each), 54 accounts found, 9 looked up (cap for the test), 3 minutes, **$0.13** in total (about $0.014 per account). Instagram `allison` (81k) passed and scored 45 of 60 from 10 real posts; a Facebook page passed on 25 of 60 from 5 real plugin posts; the other accounts failed with named reasons (followers outside 10k-150k, `stan.store` in the bio links). TikTok posts are not read by default (cost), so TikTok's B1/B2/B5 are unknown and take full points, listed in `scoreUnknownRules`. Expect Google's speed to vary (3 s to 65 s per search in earlier runs); the search phase stops after `maxSearchSeconds`.
+
+Notes for the Agent:
+
+- B1 (20) + B5 (5) alone give 25, which is `minScore`: a large page that posts often and has no shop link can pass on those two (a bank did). The fit gate (C3) removes such pages; raise `minScore` to 30 if you want the Actor to require some engagement, size or e-mail as well.
+- Most accounts Google returns are outside 10k-150k. Use several keywords per run and `excludeUsernames` for handles already tracked.
 
 ## If a search engine blocks the Actor
 
