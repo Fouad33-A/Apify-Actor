@@ -47,7 +47,11 @@ TikTok hides most post data when logged out. A TikTok account that passes the ha
 
 2 keywords x 3 platforms: 6 Google searches (3-12 s each), 54 accounts found, 9 looked up (cap for the test), 3 minutes, **$0.13** in total (about $0.014 per account). Instagram `allison` (81k) passed and scored 45 of 60 from 10 real posts; a Facebook page passed on 25 of 60 from 5 real plugin posts; the other accounts failed with named reasons (followers outside 10k-150k, `stan.store` in the bio links). TikTok posts are not read by default (cost), so TikTok's B1/B2/B5 are unknown and take full points, listed in `scoreUnknownRules`. Expect Google's speed to vary (3 s to 65 s per search in earlier runs); the search phase stops after `maxSearchSeconds`.
 
-Notes for the Agent:
+Notes for the Agent (updated for 0.13.0):
+
+- Accounts whose search snippet shows a follower figure inside your range are now looked up first; Facebook Pages outside the range are no longer opened in full (a light look at the Page plugin gives the exact follower count first). This is what cuts the cost and the wasted lookups.
+- `searchModifiers` (Task: creator) steers searches towards people; `excludeCategoryPatterns` drops Facebook Pages whose category is a company or institution. For companies on Instagram and TikTok, which show no category, add words to `excludeBioPatterns` such as `nmls`, `member fdic`, `download the app`, `official account`, `our team` (your decision: they also fail any creator who writes them).
+- An Instagram profile with no bio and no link (`allison`) cannot be checked for an e-mail or a website: it is a DM-only prospect.
 
 - B1 (20) + B5 (5) alone give 25, which is `minScore`: a large page that posts often and has no shop link can pass on those two (a bank did). The fit gate (C3) removes such pages; raise `minScore` to 30 if you want the Actor to require some engagement, size or e-mail as well.
 - Most accounts Google returns are outside 10k-150k. Use several keywords per run and `excludeUsernames` for handles already tracked.

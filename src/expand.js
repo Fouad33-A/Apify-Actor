@@ -96,10 +96,12 @@ export function applyScreening(row, criteria = {}, { includeReach = true } = {})
         excludeBioPatterns,
         excludeSitePatterns,
         agencyEmailPatterns,
+        excludeCategoryPatterns,
         minReachPercent,
     } = criteria;
     const patterns = (excludeBioPatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
     const sitePatterns = (excludeSitePatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
+    const categoryPatterns = (excludeCategoryPatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
     const agencyPatterns = (agencyEmailPatterns ?? []).map((p) => String(p).trim().toLowerCase()).filter(Boolean);
     const reachActive = includeReach && minReachPercent != null;
     const active =
@@ -109,6 +111,7 @@ export function applyScreening(row, criteria = {}, { includeReach = true } = {})
         patterns.length > 0 ||
         sitePatterns.length > 0 ||
         agencyPatterns.length > 0 ||
+        categoryPatterns.length > 0 ||
         reachActive;
     if (!active) return { passes: null, failures: [] };
 
@@ -133,6 +136,14 @@ export function applyScreening(row, criteria = {}, { includeReach = true } = {})
             .join(' \n ')
             .toLowerCase();
         for (const p of patterns) if (haystack.includes(p)) failures.push(`bio or link contains "${p}"`);
+    }
+    if (categoryPatterns.length) {
+        // Facebook Pages: "Category: Financial service" (a company or institution is not a creator)
+        const category = String(row.statusDetail ?? '')
+            .match(/^Category:\s*(.+)$/i)?.[1]
+            ?.toLowerCase();
+        const hit = category ? categoryPatterns.find((p) => category.includes(p)) : null;
+        if (hit) failures.push(`Page category "${category}" contains "${hit}"`);
     }
     if (agencyPatterns.length) {
         // A3: a management / agency e-mail written in the BIO (not one found later on a website).

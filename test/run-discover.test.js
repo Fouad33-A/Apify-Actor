@@ -257,6 +257,51 @@ describe('discover mode: keywords -> accounts -> screening -> score', () => {
         expect(row.scoreTotal).toBe(60); // B1 20 + B2 15 + B3 10 + B4 10 + B5 5
     });
 
+    it('the cheap follower look skips opening an out-of-range Page in full, and the row says so', async () => {
+        const fb = {
+            quickProfile: vi.fn(async () => ({
+                recordType: 'profile',
+                platform: 'facebook',
+                status: 'found',
+                username: 'Dave Ramsey',
+                followerCount: 9_000_000,
+                sourceInput: 'q',
+            })),
+            lookupProfile: vi.fn(),
+        };
+        const h = harness(criteria, { facebook: fb }, [cand('facebook', 'DaveRamsey')]);
+        await h.run();
+        expect(fb.lookupProfile).not.toHaveBeenCalled();
+        expect(h.pushed[0]).toMatchObject({ passesFilters: false, followerCount: 9_000_000 });
+        expect(h.pushed[0].filterFailures).toEqual(['followers 9000000 above 150000']);
+        expect(h.report.discovery.preScreened).toBe(1);
+    });
+
+    it('Facebook category: a company or institution fails with the reason', async () => {
+        const fb = {
+            lookupProfile: vi.fn(async ({ username }) => ({
+                profile: {
+                    recordType: 'profile',
+                    platform: 'facebook',
+                    status: 'found',
+                    username: 'Ameris Bank',
+                    sourceInput: username,
+                    statusDetail: 'Category: Financial service',
+                    followerCount: 60_000,
+                    contactEmails: [],
+                    externalLinks: [],
+                },
+                posts: [],
+            })),
+        };
+        const h = harness({ ...criteria, excludeCategoryPatterns: ['financial service'] }, { facebook: fb }, [
+            cand('facebook', 'amerisbank'),
+        ]);
+        await h.run();
+        expect(h.pushed[0].filterFailures).toEqual(['Page category "financial service" contains "financial service"']);
+        expect(h.pushed[0].passesFilters).toBe(false);
+    });
+
     it('a platform that rate-limits is stopped, the others carry on; rows are still written', async () => {
         const tt = {
             lookupProfile: vi.fn(async () => {

@@ -277,6 +277,45 @@ export function domExtractPluginPosts(maxPosts) {
     return out;
 }
 
+// Pure: the Page name and follower count from the plugin header text ("Dave Ramsey\n9,011,580 followers").
+export function parsePluginHeader(text) {
+    const lines = String(text ?? '')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    const idx = lines.findIndex((l) => /^[\d.,]+\s*[KMB]?\s+followers$/i.test(l));
+    if (idx === -1) return null;
+    const followerCount = parseAbbrevCount(lines[idx].replace(/\s+followers$/i, ''));
+    if (followerCount == null) return null;
+    return { pageName: idx > 0 ? lines[idx - 1] : null, followerCount };
+}
+
+// The cheap first look at a Page: the public Page plugin shows its name and exact follower count in about 100 KB,
+// where the Page itself loads several MB. Returns a profile row, or null when the plugin does not show the Page
+// (the caller then reads the Page itself).
+export async function quickProfile({ page, username, sourceInput }) {
+    const href = encodeURIComponent(`https://${DOMAIN}/${username}`);
+    const url = `https://${DOMAIN}/plugins/page.php?href=${href}&tabs=&width=340&height=130&small_header=true&hide_cover=true&show_facepile=false`;
+    try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        await page.waitForTimeout(800);
+        const text = await page.evaluate(() => (document.body ? document.body.innerText : ''));
+        const head = parsePluginHeader(text);
+        if (!head) return null;
+        return makeProfileRow({
+            platform: 'facebook',
+            sourceInput,
+            username: head.pageName || username,
+            displayName: head.pageName,
+            followerCount: head.followerCount,
+            status: 'found',
+            statusDetail: null,
+        });
+    } catch {
+        return null;
+    }
+}
+
 // Opens the Page plugin for a Page and returns its posts (empty when the plugin is not shown for that Page).
 export async function fetchPluginPosts({ page, pageUrl, maxPosts }) {
     const href = encodeURIComponent(String(pageUrl).split('?')[0].split('#')[0]);

@@ -113,6 +113,13 @@
             "default": [],
             "description": "Added to every search as minus words, e.g. course, coach, 'my book'."
         },
+        "searchModifiers": {
+            "title": "Discover: words that steer the search to creators",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Added to every search, for example the phrase link in bio, or the word creator. Searches for a topic alone return many brands and institutions; words that creators put in their bios bring profiles of people closer to the top."
+        },
         "discoverPlatforms": {
             "title": "Discover: platforms to search",
             "type": "array",
@@ -138,7 +145,7 @@
         "maxSearchSeconds": {
             "title": "Discover: time budget for the search phase (seconds)",
             "type": "integer",
-            "default": 240,
+            "default": 600,
             "minimum": 30,
             "maximum": 1800,
             "description": "The search phase stops starting new searches after this many seconds (the search proxy can be slow and each request may take up to a minute). Accounts found so far are still looked up; OUTPUT.discovery.search.stoppedOnTime tells you when it happened."
@@ -173,6 +180,13 @@
             "editor": "stringList",
             "default": [],
             "description": "For example stan.store, ebook, e-book. Case-insensitive text match on the bio and link URLs."
+        },
+        "excludeCategoryPatterns": {
+            "title": "Screening: fail if the Page category contains",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Facebook shows a category under each Page name (Financial service, Nonprofit organization, Public figure, ...). A Page whose category contains one of these words fails, with the reason. For example: financial service, nonprofit, company, bank, insurance, software, app page, government, organization, local business."
         },
         "onlyPassing": {
             "title": "Only write profiles that pass the screening",

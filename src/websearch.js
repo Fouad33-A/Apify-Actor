@@ -38,12 +38,20 @@ export const PLATFORM_SITES = { instagram: 'instagram.com', facebook: 'facebook.
 // are filtered to the platform afterwards), for engines that answer an operator query with an empty page.
 // Words to leave out are NOT sent as minus operators (they made results thinner); they are applied to the results.
 export const QUERY_VARIANTS = 3;
-export function buildQuery({ platform, keyword, variant = 0 }) {
+const SEARCH_PARALLEL = 3; // Google searches asked at the same time
+export function buildQuery({ platform, keyword, variant = 0, modifiers = [] }) {
     const site = PLATFORM_SITES[platform];
     const kw = String(keyword).trim();
-    if (variant === 0) return `site:${site} ${kw}`;
-    if (variant === 1) return `${kw} ${platform} followers`;
-    return `${kw} "${site}"`;
+    // extra words that steer towards creators, e.g. "link in bio" (set by the Agent; same for every platform)
+    const extra = (modifiers ?? [])
+        .map((m) => String(m ?? '').trim())
+        .filter(Boolean)
+        .join(' ');
+    let query;
+    if (variant === 0) query = `site:${site} ${kw}`;
+    else if (variant === 1) query = `${kw} ${platform} followers`;
+    else query = `${kw} "${site}"`;
+    return extra ? `${query} ${extra}` : query;
 }
 
 // Pure: does a result mention one of the words the Agent wants left out (course, coach, ...)?
@@ -267,6 +275,17 @@ export function accountsInText(text, platform) {
     return out;
 }
 
+// "12.4K" / "1,234" / "9M" -> number (a search-result hint: used for the order of lookups only, never to judge).
+export function parseFollowerHint(hint) {
+    const m = String(hint ?? '')
+        .replace(/,/g, '')
+        .trim()
+        .match(/^([\d.]+)\s*([KMB])?$/i);
+    if (!m) return null;
+    const mult = { K: 1e3, M: 1e6, B: 1e9 }[(m[2] || '').toUpperCase()] || 1;
+    return Math.round(parseFloat(m[1]) * mult);
+}
+
 // The follower figure a snippet shows ("12.4K Followers, 300 Following ..."). Only a hint: never trusted or filtered on.
 export function followerHint(text) {
     const m = String(text ?? '').match(/([\d][\d.,]*\s*[KMB]?)\s+(?:Followers|followers)/);
@@ -475,7 +494,8 @@ export async function discoverByWebSearch({
     resultWaitMs = 6000,
     serpProxyUrl = null,
     serpFetch = fetchSerpPage,
-    maxSeconds = 240,
+    maxSeconds = 600,
+    modifiers = [],
     report: reportSink = { queries: [], enginesBlocked: [], totalHits: 0 },
     shouldContinue = () => true,
     log = () => {},
@@ -576,15 +596,8 @@ export async function discoverByWebSearch({
         return { got, outcome: got ? 'ok' : outcome, detail };
     }
 
-    for (const q of list.slice(0, maxQueries)) {
-        if (!shouldContinue()) break;
-        if (!timeLeft()) {
-            report.stoppedOnTime = true;
-            log(`Search time budget (${maxSeconds} s) used up: the remaining searches were not asked`);
-            break;
-        }
-        const entry = { platform: q.platform, keyword: q.keyword, attempts: [], handlesFound: 0 };
-        report.queries.push(entry);
+    async function runQuery(q, entryRef) {
+        const entry = entryRef; // filled in place
         for (const engineName of engines) {
             const engine = SEARCH_ENGINES[engineName];
             const [asked, produced] = tries.get(engineName) ?? [0, 0];
@@ -592,7 +605,7 @@ export async function discoverByWebSearch({
             const others = engines.some((e) => e !== engineName && SEARCH_ENGINES[e] && !blocked.has(e));
             if (!engine || blocked.has(engineName) || (others && asked >= 8 && produced === 0)) continue;
             for (let variant = 0; variant < QUERY_VARIANTS && timeLeft(); variant += 1) {
-                const query = buildQuery({ platform: q.platform, keyword: q.keyword, variant });
+                const query = buildQuery({ platform: q.platform, keyword: q.keyword, variant, modifiers });
                 const startedMs = Date.now();
                 report.totalHits = byKey.size;
                 const { got, outcome, detail } = await askEngine(engineName, q, query);
@@ -626,6 +639,34 @@ export async function discoverByWebSearch({
             if (entry.handlesFound) break; // this engine answered: no need to ask the next one
         }
     }
+
+    // Plain HTTP searches (Google through the SERP proxy) can run side by side; browser searches share one page and
+    // run one after another.
+    const parallel = engines.every((e) => SEARCH_ENGINES[e]?.http) ? SEARCH_PARALLEL : 1;
+    const queue = list.slice(0, maxQueries).map((q) => ({
+        q,
+        entry: { platform: q.platform, keyword: q.keyword, attempts: [], handlesFound: 0 },
+    }));
+    for (const item of queue) report.queries.push(item.entry);
+    let next = 0;
+    async function worker() {
+        while (next < queue.length) {
+            const item = queue[next];
+            next += 1;
+            if (!shouldContinue()) return;
+            if (!timeLeft()) {
+                if (!report.stoppedOnTime) {
+                    report.stoppedOnTime = true;
+                    log(`Search time budget (${maxSeconds} s) used up: the remaining searches were not asked`);
+                }
+                return;
+            }
+            await runQuery(item.q, item.entry);
+        }
+    }
+    await Promise.all(Array.from({ length: parallel }, () => worker()));
+    // searches that were never asked are not listed as if they had been
+    report.queries = report.queries.filter((e) => e.attempts.length);
     const candidates = [...byKey.values()];
     report.totalHits = candidates.length;
     return { candidates, report };
@@ -634,7 +675,7 @@ export async function discoverByWebSearch({
 // Candidates in the order they should be looked up: profile-page hits before post hits, then how often seen; the
 // platforms take turns so one platform cannot use the whole budget. Handles in `exclude` (already in the tracker)
 // are dropped and counted.
-export function orderCandidates(candidates, { exclude = [], limit = 30, platforms = [] } = {}) {
+export function orderCandidates(candidates, { exclude = [], limit = 30, platforms = [], range = null } = {}) {
     const skip = new Set((exclude ?? []).map((h) => String(h).trim().replace(/^@/, '').toLowerCase()));
     const dropped = [];
     const per = new Map();
@@ -646,8 +687,20 @@ export function orderCandidates(candidates, { exclude = [], limit = 30, platform
         if (!per.has(c.platform)) per.set(c.platform, []);
         per.get(c.platform).push(c);
     }
+    // Accounts whose search snippet shows a follower figure inside the wanted range come first, unknown ones next,
+    // clearly outside last (the figure is only a hint: nothing is dropped because of it, the profile is re-read).
+    const fit = (c) => {
+        const n = parseFollowerHint(c.hint);
+        if (n == null || !range) return 1;
+        const low = range.min != null && n < range.min;
+        const high = range.max != null && n > range.max;
+        return low || high ? 2 : 0;
+    };
     const rank = (a, b) =>
-        Number(b.profileHit) - Number(a.profileHit) || b.timesSeen - a.timesSeen || a.handle.localeCompare(b.handle);
+        fit(a) - fit(b) ||
+        Number(b.profileHit) - Number(a.profileHit) ||
+        b.timesSeen - a.timesSeen ||
+        a.handle.localeCompare(b.handle);
     for (const arr of per.values()) arr.sort(rank);
     const order = platforms.length ? platforms.filter((p) => per.has(p)) : [...per.keys()];
     const out = [];

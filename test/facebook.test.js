@@ -13,6 +13,8 @@ import {
     parseFacebookOgTitle,
     parseFacebookPostPageText,
     parseFacebookProfileHref,
+    parsePluginHeader,
+    quickProfile,
     searchPosts,
     unwrapFacebookLink,
 } from '../src/platforms/facebook.js';
@@ -886,4 +888,44 @@ describe('lookupProfile: posts from the Page plugin', () => {
         expect(posts).toHaveLength(1);
         expect(posts[0].publishDate).toBeNull();
     }, 30_000);
+});
+
+describe('quickProfile (cheap look through the Page plugin)', () => {
+    it('parsePluginHeader reads the Page name and exact follower count', () => {
+        expect(parsePluginHeader('Dave Ramsey\n9,011,580 followers\nFollow Page')).toEqual({
+            pageName: 'Dave Ramsey',
+            followerCount: 9_011_580,
+        });
+        expect(parsePluginHeader('Small Page\n4.2K followers')).toEqual({
+            pageName: 'Small Page',
+            followerCount: 4200,
+        });
+        expect(parsePluginHeader('This content is not available')).toBeNull();
+    });
+
+    it('returns a found row with the follower count, or null when the plugin does not show the Page', async () => {
+        const PLUGIN = /facebook\.com\/plugins\/page\.php/;
+        const ok = await withContext(
+            [
+                {
+                    match: PLUGIN,
+                    body: '<html><body><div><a>Dave Ramsey</a><div>9,011,580 followers</div></div></body></html>',
+                },
+            ],
+            ({ page }) => quickProfile({ page, username: 'DaveRamsey', sourceInput: 'q' }),
+        );
+        expect(ok).toMatchObject({
+            platform: 'facebook',
+            status: 'found',
+            username: 'Dave Ramsey',
+            followerCount: 9_011_580,
+        });
+        const none = await withContext(
+            [{ match: PLUGIN, body: '<html><body>Page not available</body></html>' }],
+            ({ page }) => quickProfile({ page, username: 'nope', sourceInput: 'q' }),
+        );
+        expect(none).toBeNull();
+        // an unreachable plugin is not an error either
+        expect(await withContext([], ({ page }) => quickProfile({ page, username: 'x', sourceInput: 'q' }))).toBeNull();
+    });
 });

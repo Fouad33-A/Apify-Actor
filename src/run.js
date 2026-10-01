@@ -53,6 +53,7 @@ export async function runMode({
         maxFollowers = null,
         requireContactEmail = false,
         excludeBioPatterns = [],
+        excludeCategoryPatterns = [],
         onlyPassing = false,
         excludeUsernames = [],
         maxCandidates = 30,
@@ -67,7 +68,8 @@ export async function runMode({
         discoverPlatforms = ['instagram', 'facebook', 'tiktok'],
         searchEngines = DEFAULT_ENGINES,
         maxSearchPages = 2,
-        maxSearchSeconds = 240,
+        maxSearchSeconds = 600,
+        searchModifiers = [],
         readTiktokPosts = false,
         scorecard = false,
         minScore = null,
@@ -96,6 +98,7 @@ export async function runMode({
         requireContactEmail,
         excludeBioPatterns,
         excludeSitePatterns,
+        excludeCategoryPatterns,
         agencyEmailPatterns: scorecard ? agencyEmailPatterns : [],
         minReachPercent,
     };
@@ -642,6 +645,7 @@ export async function runMode({
             maxPages: maxSearchPages,
             serpProxyUrl,
             maxSeconds: maxSearchSeconds,
+            modifiers: searchModifiers,
             report: discoveryReport.search,
             shouldContinue,
             log: (m) => log.info(m),
@@ -650,6 +654,7 @@ export async function runMode({
             exclude: excludeUsernames,
             limit: maxCandidates,
             platforms: discoverPlatforms,
+            range: { min: minFollowers, max: maxFollowers },
         });
         Object.assign(discoveryReport, {
             candidatesFound: found.candidates.length,

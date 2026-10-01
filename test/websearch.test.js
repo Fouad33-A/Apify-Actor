@@ -11,6 +11,7 @@ import {
     handleFromUrl,
     mentionsExcluded,
     orderCandidates,
+    parseFollowerHint,
     parseSerpHtml,
     unwrapSearchUrl,
 } from '../src/websearch.js';
@@ -211,6 +212,39 @@ describe('accounts named in the result text', () => {
         expect(res.status).toBe('ok');
         expect(res.hits.map((h) => h.handle)).toEqual(['thebudgetmom', 'the.frugal.one']);
         expect(res.excluded).toBe(1);
+    });
+});
+
+describe('search modifiers and follower-hint ordering', () => {
+    it('modifiers are added to every wording', () => {
+        expect(buildQuery({ platform: 'instagram', keyword: 'budgeting', modifiers: ['"link in bio"'] })).toBe(
+            'site:instagram.com budgeting "link in bio"',
+        );
+        expect(buildQuery({ platform: 'tiktok', keyword: 'etf', variant: 1, modifiers: ['creator', ' '] })).toBe(
+            'etf tiktok followers creator',
+        );
+    });
+    it('parseFollowerHint reads 12.4K, 1,234, 9M; anything else is null', () => {
+        expect(parseFollowerHint('12.4K')).toBe(12_400);
+        expect(parseFollowerHint('1,234')).toBe(1234);
+        expect(parseFollowerHint('9M')).toBe(9_000_000);
+        expect(parseFollowerHint(null)).toBeNull();
+        expect(parseFollowerHint('lots')).toBeNull();
+    });
+    it('candidates whose snippet figure is inside the range are looked up first, clearly outside ones last', () => {
+        const c = (handle, hint) => ({
+            platform: 'instagram',
+            handle,
+            hint,
+            profileHit: true,
+            timesSeen: 1,
+            queries: ['k'],
+        });
+        const { ordered } = orderCandidates([c('huge', '9M'), c('tiny', '700'), c('unknown', null), c('fit', '45K')], {
+            limit: 10,
+            range: { min: 10_000, max: 150_000 },
+        });
+        expect(ordered.map((x) => x.handle)).toEqual(['fit', 'unknown', 'huge', 'tiny']);
     });
 });
 
@@ -429,7 +463,7 @@ describe('Google through the SERP proxy (HTTP, no browser)', () => {
             return parseSerpHtml(googleHtml);
         };
         const { candidates, report } = await run({
-            keywords: ['a', 'b', 'c'],
+            keywords: ['a', 'b', 'c', 'd', 'e', 'f'],
             serpFetch: slow,
             maxSeconds: 0.1,
             report: mine,
@@ -437,20 +471,37 @@ describe('Google through the SERP proxy (HTTP, no browser)', () => {
         });
         expect(report).toBe(mine);
         expect(report.stoppedOnTime).toBe(true);
-        expect(report.queries).toHaveLength(1); // only the first search was asked
+        expect(report.queries).toHaveLength(3); // the first three ran side by side; the rest were never asked
         expect(report.queries[0].attempts[0].seconds).toBeGreaterThanOrEqual(0);
         expect(candidates.length).toBeGreaterThan(0);
         expect(logs.join(' ')).toMatch(/Search \[google\] instagram "site:instagram.com a": ok, 2 account/);
         expect(logs.join(' ')).toMatch(/time budget/);
     });
 
+    it('HTTP searches run side by side (3 at a time), and every query is still reported in order', async () => {
+        let active = 0;
+        let peak = 0;
+        const slow = async () => {
+            active += 1;
+            peak = Math.max(peak, active);
+            await new Promise((resolve) => {
+                setTimeout(resolve, 50);
+            });
+            active -= 1;
+            return parseSerpHtml(googleHtml);
+        };
+        const { report } = await run({ keywords: ['a', 'b', 'c', 'd', 'e', 'f'], serpFetch: slow });
+        expect(peak).toBe(3);
+        expect(report.queries.map((q) => q.keyword)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    });
+
     it('a Google block page is reported as blocked and the engine is not used again', async () => {
         const blocked = await parseSerpHtml(
             '<html><head><title>Sorry</title></head><body>Our systems have detected unusual traffic from your computer network.</body></html>',
         );
-        const { report } = await run({ keywords: ['a', 'b'], serpFetch: async () => blocked });
+        const { report } = await run({ keywords: ['a', 'b', 'c', 'd', 'e', 'f'], serpFetch: async () => blocked });
         expect(report.enginesBlocked).toEqual(['google']);
-        expect(report.queries[1].attempts).toEqual([]);
+        expect(report.queries).toHaveLength(3); // the later searches were not asked once the engine was known to block
     });
 
     it('an HTTP failure is reported as an error with its reason, never as an empty success', async () => {

@@ -68,5 +68,22 @@
         "apifyProxyGroups": ["RESIDENTIAL"],
         "apifyProxyCountry": "US"
     },
-    "maxSearchSeconds": 200
+    "maxSearchSeconds": 600,
+    "searchModifiers": ["creator"],
+    "excludeCategoryPatterns": [
+        "financial service",
+        "nonprofit",
+        "company",
+        "bank",
+        "insurance",
+        "software",
+        "app page",
+        "government",
+        "organization",
+        "local business",
+        "product/service",
+        "e-commerce",
+        "business service",
+        "consulting"
+    ]
 }
