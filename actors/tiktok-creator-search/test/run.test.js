@@ -211,11 +211,11 @@ describe('exam presets, region/language and median views', () => {
 
     it('passes the median options to the profile Actor and carries the median into the row', async () => {
         const { out, calls } = await run({ minMedianViews: 1000, videosForMedian: 5 });
-        expect(calls[0]).toEqual({ medianViews: true, videosForMedian: 5 });
+        expect(calls[0]).toMatchObject({ medianViews: true, videosForMedian: 5 });
         const by = Object.fromEntries(out.map((r) => [r.handle, r]));
         expect(by.mid_one).toMatchObject({ medianViews: 8000, videosAnalyzed: 10, passesFilters: true });
         expect(by.small_one).toMatchObject({ medianViews: 300, passesFilters: false });
-        expect((await run({})).calls[0]).toEqual({ medianViews: false, videosForMedian: 10 });
+        expect((await run({})).calls[0]).toMatchObject({ medianViews: false, videosForMedian: 10 });
     });
 
     it('puts creators from the wanted country first (prefer) or leaves confirmed others out (only)', async () => {
@@ -226,5 +226,54 @@ describe('exam presets, region/language and median views', () => {
         expect(only.out.map((r) => r.handle)).not.toContain('mid_one');
         expect(only.out.map((r) => r.handle)).toContain('big_one'); // unknown country is kept and marked
         expect(only.out.find((r) => r.handle === 'big_one').locationMatch).toBeNull();
+    });
+});
+
+describe('country from the latest video', () => {
+    const profile = (name, over) => [
+        name,
+        { rowType: 'profile', username: name, status: 'ok', followers: 20_000, emails: [], ...over },
+    ];
+    it('looks the country up on the latest video only when countries are asked for and the profile has none', async () => {
+        const profilesMap = new Map([
+            profile('mid_one', {
+                region: null,
+                language: null,
+                latestVideoUrl: 'https://www.tiktok.com/@mid_one/video/1',
+            }),
+            profile('small_one', { region: 'GB', language: 'en' }),
+            profile('big_one', { region: null, language: null }),
+        ]);
+        const looked = [];
+        const run = async (extra) => {
+            const out = [];
+            const calls = [];
+            await runSearch({
+                input: {
+                    ...readInput({ keywords: ['budgeting'], maxSearchPages: 1, ...extra }),
+                    delayBetweenPlaceLookupsMs: 0,
+                },
+                pushData: async (r) => out.push(r),
+                serpProxyUrl: 'http://x',
+                serpFetch,
+                enrich: async (a, names, options) => (
+                    calls.push(options),
+                    new Map(names.filter((n) => profilesMap.has(n)).map((n) => [n, { ...profilesMap.get(n) }]))
+                ),
+                readPlace: async (url) => (looked.push(url), { region: 'AE', language: 'en' }),
+            });
+            return { out, calls };
+        };
+        const { out, calls } = await run({ regions: ['AE'] });
+        expect(calls[0]).toMatchObject({ needLatestVideo: true });
+        const by = Object.fromEntries(out.map((r) => [r.handle, r]));
+        expect(by.mid_one).toMatchObject({ region: 'AE', regionSource: 'latest video', locationMatch: true });
+        expect(by.small_one).toMatchObject({ region: 'GB', regionSource: 'profile', locationMatch: false });
+        expect(by.big_one.locationMatch).toBeNull(); // no video address to look at
+        expect(looked).toEqual(['https://www.tiktok.com/@mid_one/video/1']);
+        looked.length = 0;
+        const none = await run({});
+        expect(none.calls[0]).toMatchObject({ needLatestVideo: false });
+        expect(looked).toEqual([]);
     });
 });

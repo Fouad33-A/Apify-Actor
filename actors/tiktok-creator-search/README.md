@@ -46,7 +46,7 @@ Finds **TikTok creators for keywords and hashtags**. TikTok's own search and has
 
 ## Matching Gulf creators and reach
 
-These are **inputs, not fixed results**: leave them empty and the Actor behaves as before. A creator's country and language come from the profile data, so they need "Add profile data" and many profiles show none (those rows say `locationMatch: null`). To steer the search itself toward a region, add words such as `UAE` or `Dubai` to `searchModifiers`. The exam presets are popular starting wordings, not a complete list.
+These are **inputs, not fixed results**: leave them empty and the Actor behaves as before. A creator's country comes from their profile when it shows one; in testing most profiles showed none, so the Actor then reads the country TikTok attaches to the creator's **latest video** (`regionSource: "latest video"`). That needs "Add profile data" and one extra page read per creator. Creators with no country at all say `locationMatch: null`. To steer the search itself toward a region, add words such as `UAE` or `Dubai` to `searchModifiers`. The exam presets are popular starting wordings, not a complete list.
 
 ## Limits
 

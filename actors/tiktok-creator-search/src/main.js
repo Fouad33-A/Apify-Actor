@@ -2,6 +2,7 @@ import { Actor, log } from 'apify';
 
 import { presetSearches } from './presets.js';
 import { defaultEngines, discoverCreators, parseFollowerHint } from './serp.js';
+import { fetchVideoPlace } from './video.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
 const BATCH = 50; // the profile Actor takes 1-50 usernames per run
@@ -152,14 +153,20 @@ export function creatorRow(candidate, profile, enrichNote) {
 // Default enrichment: runs the account's own profile Actor (profileOnly) and returns its profile rows by username.
 // With { medianViews: true } the profile Actor runs in "full" mode (recent videos too) and its per-creator summary row
 // (medianPlays over the recent videos) is merged into the profile row; otherwise it runs in profileOnly mode.
-export async function callProfileActor(actorId, usernames, { medianViews = false, videosForMedian = 10 } = {}) {
-    const perCreator = medianViews ? videosForMedian + 3 : 1;
+export async function callProfileActor(
+    actorId,
+    usernames,
+    { medianViews = false, videosForMedian = 10, needLatestVideo = false } = {},
+) {
+    const full = medianViews || needLatestVideo;
+    const videos = medianViews ? videosForMedian : 1;
+    const perCreator = full ? videos + 3 : 1;
     const run = await Actor.call(
         actorId,
         {
             usernames,
-            mode: medianViews ? 'full' : 'profileOnly',
-            ...(medianViews ? { videosPerProfile: videosForMedian } : {}),
+            mode: full ? 'full' : 'profileOnly',
+            ...(full ? { videosPerProfile: videos } : {}),
             maxItems: usernames.length * perCreator + 5,
             concurrency: 2,
         },
@@ -171,17 +178,21 @@ export async function callProfileActor(actorId, usernames, { medianViews = false
         .listItems({ limit: usernames.length * perCreator + 10 });
     const byName = new Map();
     const summaries = new Map();
+    const latest = new Map();
     for (const item of items) {
         const name = String(item.username ?? '').toLowerCase();
         if (!name) continue;
         if (item.rowType === 'profile') byName.set(name, item);
         else if (item.rowType === 'summary') summaries.set(name, item);
+        else if (item.rowType === 'video' && item.videoUrl && (item.rankNewest === 1 || !latest.has(name)))
+            latest.set(name, item.videoUrl);
     }
     for (const [name, row] of byName) {
         const s = summaries.get(name);
+        if (latest.has(name)) byName.set(name, { ...byName.get(name), latestVideoUrl: latest.get(name) });
         if (s)
             byName.set(name, {
-                ...row,
+                ...byName.get(name),
                 medianPlays: s.medianPlays ?? null,
                 videosAnalyzed: s.videosAnalyzed ?? null,
                 medianPlaysPctFollowers: s.medianPlaysPctFollowers ?? null,
@@ -198,6 +209,7 @@ export async function runSearch({
     serpFetch,
     engines,
     enrich = callProfileActor,
+    readPlace = fetchVideoPlace,
     shouldStop = () => false,
 }) {
     const started = new Date().toISOString();
@@ -226,6 +238,7 @@ export async function runSearch({
                 for (const [name, row] of await enrich(input.profileActor, names, {
                     medianViews: input.wantMedian,
                     videosForMedian: input.videosForMedian,
+                    needLatestVideo: input.regions.length > 0,
                 }))
                     profiles.set(name, row);
             } catch (error) {
@@ -236,6 +249,35 @@ export async function runSearch({
         }
     }
 
+    // A creator's country: the profile's own when it has one, otherwise the country of their latest video (a video page
+    // names the country it was posted from). Only looked up when countries were asked for.
+    const regionSource = new Map();
+    if (input.regions.length) {
+        for (const c of ordered) {
+            if (shouldStop()) break;
+            const profile = profiles.get(c.handle);
+            if (!profile) continue;
+            if (profile.region) {
+                regionSource.set(c.handle, 'profile');
+                continue;
+            }
+            const url = profile.latestVideoUrl ?? c.videoUrls?.[0];
+            if (!url) continue;
+            try {
+                const place = await readPlace(url);
+                if (place?.region) {
+                    profile.region = place.region;
+                    profile.language ??= place.language;
+                    regionSource.set(c.handle, 'latest video');
+                }
+            } catch {
+                // the creator keeps an unknown country
+            }
+            await new Promise((resolve) => {
+                setTimeout(resolve, input.delayBetweenPlaceLookupsMs ?? 600);
+            });
+        }
+    }
     const counts = {
         returned: 0,
         passing: 0,
@@ -262,6 +304,7 @@ export async function runSearch({
         row.passesFilters = passes;
         row.filterFailures = failures;
         Object.assign(row, matchRegionLanguage(row, input));
+        row.regionSource = row.region ? (regionSource.get(c.handle) ?? 'profile') : null;
         if (!profile) counts.unenriched += 1;
         else if (row.profileStatus !== 'ok') counts.profileProblems += 1;
         if (passes === true) counts.passing += 1;
