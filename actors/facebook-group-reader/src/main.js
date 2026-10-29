@@ -2,7 +2,14 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { isLoginWall, normalizeGroup, parseGroupMeta, parsePosts } from './parse.js';
 
-const DEFAULTS = { maxPostsPerGroup: 50, includeAuthors: false, delayBetweenGroupsMs: 3000, sinceDate: null };
+const DEFAULTS = {
+    maxPostsPerGroup: 50,
+    includeAuthors: false,
+    delayBetweenGroupsMs: 3000,
+    sinceDate: null,
+    maxSessionAttempts: 3,
+};
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const chronologicalUrl = (url) => `${String(url).replace(/\/$/, '')}/?sorting_setting=CHRONOLOGICAL`;
 
@@ -25,23 +32,8 @@ export function readInput(raw) {
         invalid,
         sinceMs,
         maxPostsPerGroup: Math.min(Math.max(1, Number(input.maxPostsPerGroup) || 50), 500),
+        maxSessionAttempts: Math.min(Math.max(1, Number(input.maxSessionAttempts) || 3), 6),
     };
-}
-
-function splitSetCookie(header) {
-    if (!header) return [];
-    if (Array.isArray(header)) return header;
-    return String(header).split(/,(?=\s*[^;,=\s]+=[^;,]+)/g).map((part) => part.trim()).filter(Boolean);
-}
-
-function anonymousCookies(headers) {
-    const raw = headers?.['set-cookie'] ?? headers?.['Set-Cookie'];
-    return splitSetCookie(raw).map((line) => {
-        const first = line.split(';', 1)[0];
-        const eq = first.indexOf('=');
-        if (eq < 1) return null;
-        return { name: first.slice(0, eq).trim(), value: first.slice(eq + 1), domain: '.facebook.com', path: '/' };
-    }).filter(Boolean);
 }
 
 export async function fetchGroup(url, { proxyUrl } = {}) {
@@ -52,177 +44,7 @@ export async function fetchGroup(url, { proxyUrl } = {}) {
         timeout: { request: 30_000 },
         headers: { 'accept-language': 'en-US,en;q=0.9' },
     });
-    return {
-        status: response.statusCode,
-        html: response.body,
-        finalUrl: response.url,
-        cookies: anonymousCookies(response.headers),
-    };
-}
-
-function countFromText(text, word) {
-    const match = new RegExp(`([\\d][\\d.,]*\\s*[KMB]?)\\s+${word}`, 'i').exec(String(text ?? ''));
-    if (!match) return null;
-    const number = /([\d][\d.,]*)\s*([KMB])?/i.exec(match[1]);
-    if (!number) return null;
-    const multiplier = { K: 1e3, M: 1e6, B: 1e9 }[(number[2] || '').toUpperCase()] || 1;
-    return Math.round(Number.parseFloat(number[1].replace(/,/g, '')) * multiplier);
-}
-
-function proxyForPlaywright(proxyUrl) {
-    const url = new URL(proxyUrl);
-    return {
-        server: `${url.protocol}//${url.host}`,
-        ...(url.username ? { username: decodeURIComponent(url.username) } : {}),
-        ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
-    };
-}
-
-export async function createLoggedOutBrowserReader({ proxyUrl, shouldStop = () => false } = {}) {
-    const { chromium } = await import('playwright');
-    const executablePath = process.env.APIFY_CHROME_EXECUTABLE_PATH || process.env.APIFY_DEFAULT_BROWSER_PATH || undefined;
-    const browser = await chromium.launch({
-        headless: true,
-        ...(executablePath ? { executablePath } : {}),
-        ...(proxyUrl ? { proxy: proxyForPlaywright(proxyUrl) } : {}),
-    });
-
-    const close = async () => browser.close().catch(() => {});
-
-    const read = async (group, { maxPosts = 50, includeAuthors = false, cookies = [] } = {}) => {
-        const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1365, height: 900 } });
-        if (cookies.length) await context.addCookies(cookies).catch(() => {});
-        const page = await context.newPage();
-        let response = null;
-        let consentAction = 'not_present';
-
-        const dismissLoginModal = async () => {
-            await page.keyboard.press('Escape').catch(() => {});
-            const closeButton = page.locator('[role="dialog"] [aria-label="Close"], [role="dialog"] [aria-label="close"]');
-            if (await closeButton.count()) await closeButton.first().click({ timeout: 1200 }).catch(() => {});
-        };
-
-        const handleCookieConsent = async () => {
-            const choices = [
-                { label: 'declined_optional', re: /decline optional cookies|only allow essential cookies|reject optional cookies/i },
-                { label: 'accepted', re: /allow all cookies|accept all cookies|^allow cookies$/i },
-            ];
-            for (const choice of choices) {
-                const button = page.getByRole('button', { name: choice.re });
-                if (await button.count()) {
-                    const clicked = await button.first().click({ timeout: 2500 }).then(() => true).catch(() => false);
-                    if (clicked) {
-                        consentAction = choice.label;
-                        await page.waitForTimeout(1200);
-                        return true;
-                    }
-                }
-            }
-            return false;
-        };
-
-        const collectVisible = async () => page.evaluate(({ limit, authors }) => {
-            const nodes = [...document.querySelectorAll('[role="feed"] [role="article"], div[role="article"], div[data-pagelet^="FeedUnit"]')];
-            const output = [];
-            for (const article of nodes) {
-                const links = [...article.querySelectorAll('a[href]')];
-                const permalink = links.map((a) => a.href).find((href) => /facebook\.com\/groups\/[^/]+\/(?:posts|permalink)\/\d+/i.test(href));
-                if (!permalink) continue;
-                const postId = /\/(?:posts|permalink)\/(\d+)/i.exec(permalink)?.[1] ?? null;
-                const text = (article.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
-                if (!text) continue;
-                let createdAt = null;
-                for (const link of links.filter((item) => /\/(?:posts|permalink)\/\d+/i.test(item.href))) {
-                    const parsed = Date.parse(link.getAttribute('aria-label') || link.getAttribute('title') || link.textContent || '');
-                    if (Number.isFinite(parsed)) {
-                        createdAt = new Date(parsed).toISOString();
-                        break;
-                    }
-                }
-                let author = null;
-                if (authors) {
-                    const link = links.find((item) => {
-                        const href = item.getAttribute('href') || '';
-                        const label = (item.textContent || '').trim();
-                        return label && !/\/(?:posts|permalink)\/|\/groups\//i.test(href) && !/^(like|comment|share)$/i.test(label);
-                    });
-                    author = link ? (link.textContent || '').trim() : null;
-                }
-                output.push({ postId, url: permalink.split('?')[0], text: text.slice(0, 5000), createdAt, author });
-                if (output.length >= limit) break;
-            }
-            return output;
-        }, { limit: maxPosts, authors: includeAuthors });
-
-        try {
-            const target = chronologicalUrl(group.url);
-            response = await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-            await page.waitForTimeout(1800);
-            if (await handleCookieConsent()) {
-                response = await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-                await page.waitForTimeout(2200);
-            }
-            await dismissLoginModal();
-
-            const collected = new Map();
-            const merge = async () => {
-                const structured = parsePosts(await page.content(), { includeAuthors });
-                const visible = await collectVisible();
-                for (const post of [...structured, ...visible]) {
-                    const key = post.postId || post.url;
-                    if (!key) continue;
-                    const previous = collected.get(key) ?? {};
-                    collected.set(key, { ...previous, ...post });
-                }
-                return collected.size;
-            };
-
-            await merge();
-            let stagnant = 0;
-            const maxRounds = Math.min(30, Math.max(8, maxPosts * 3));
-            for (let round = 0; round < maxRounds && !shouldStop() && collected.size < maxPosts; round++) {
-                const before = collected.size;
-                await dismissLoginModal();
-                await page.evaluate(() => {
-                    const articles = [...document.querySelectorAll('[role="feed"] [role="article"], div[role="article"], div[data-pagelet^="FeedUnit"]')];
-                    const last = articles[articles.length - 1];
-                    if (last) last.scrollIntoView({ block: 'end', behavior: 'instant' });
-                    window.scrollBy(0, Math.max(window.innerHeight * 1.8, 1400));
-                });
-                await page.waitForTimeout(stagnant ? 2200 : 1400);
-                await merge();
-                stagnant = collected.size === before ? stagnant + 1 : 0;
-                if (stagnant >= 3) {
-                    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-                    await page.waitForTimeout(2800);
-                    const beforeBottom = collected.size;
-                    await merge();
-                    if (collected.size === beforeBottom) break;
-                    stagnant = 0;
-                }
-            }
-
-            const posts = [...collected.values()].slice(0, maxPosts).map((post) => ({
-                ...post,
-                reactions: post.reactions ?? countFromText(post.text, '(?:reactions?|likes?)'),
-                comments: post.comments ?? countFromText(post.text, 'comments?'),
-                shares: post.shares ?? countFromText(post.text, 'shares?'),
-                ...(!includeAuthors ? { author: undefined, authorId: undefined } : {}),
-            }));
-            return {
-                status: response?.status() ?? 200,
-                html: await page.content(),
-                finalUrl: page.url(),
-                posts,
-                consentAction,
-                browserCookies: await context.cookies('https://www.facebook.com/').catch(() => []),
-            };
-        } finally {
-            await context.close().catch(() => {});
-        }
-    };
-
-    return { read, close };
+    return { status: response.statusCode, html: response.body, finalUrl: response.url };
 }
 
 function mergePosts(primary, secondary) {
@@ -250,9 +72,17 @@ function mergePosts(primary, secondary) {
     });
 }
 
-export async function run({ input, pushData, fetch = fetchGroup, browserRead = null, saveDiagnostic = async () => null, shouldStop = () => false, now = () => new Date() }) {
-    const totals = { groups: 0, ok: 0, loginWall: 0, posts: 0, diagnostics: 0, browserFallbacks: 0 };
+export async function run({
+    input,
+    pushData,
+    fetchAttempt,
+    saveDiagnostic = async () => null,
+    shouldStop = () => false,
+    now = () => new Date(),
+}) {
+    const totals = { groups: 0, ok: 0, loginWall: 0, posts: 0, diagnostics: 0, httpAttempts: 0, sessionRotations: 0 };
     const stamp = () => now().toISOString();
+
     const capture = async (group, response, label) => {
         try {
             const key = await saveDiagnostic(group, response, label);
@@ -268,51 +98,52 @@ export async function run({ input, pushData, fetch = fetchGroup, browserRead = n
         await pushData({ recordType: 'group', input: bad, status: 'invalid_input', statusDetail: 'Not a Facebook group address (https://www.facebook.com/groups/<name or id>)', scrapedAt: stamp() });
     }
 
-    for (const [index, group] of input.groups.entries()) {
+    for (const [groupIndex, group] of input.groups.entries()) {
         if (shouldStop()) break;
         totals.groups++;
-        let desktop;
-        try {
-            desktop = await fetch(group.url);
-        } catch (error) {
-            await pushData({ recordType: 'group', groupId: group.id, url: group.url, status: 'error', statusDetail: String(error.message ?? error).split('\n')[0], scrapedAt: stamp() });
-            continue;
-        }
-
         const base = { groupId: group.id, url: group.url };
-        if (desktop.status >= 400) {
-            await pushData({ recordType: 'group', ...base, status: desktop.status === 404 ? 'not_found' : 'http_error', statusDetail: `HTTP ${desktop.status}`, scrapedAt: stamp() });
-            continue;
-        }
+        let posts = [];
+        let bestResponse = null;
+        let bestMeta = {};
+        let sawLoginWall = false;
+        let lastError = null;
 
-        const desktopMeta = parseGroupMeta(desktop.html);
-        const desktopWall = isLoginWall({ finalUrl: desktop.finalUrl, html: desktop.html });
-        let posts = desktopWall ? [] : parsePosts(desktop.html, { includeAuthors: input.includeAuthors });
-        let selected = desktop;
-        let surface = 'desktop_html';
+        for (let attempt = 1; attempt <= input.maxSessionAttempts && !shouldStop() && posts.length < input.maxPostsPerGroup; attempt++) {
+            totals.httpAttempts++;
+            if (attempt > 1) totals.sessionRotations++;
+            log.info(`group ${group.id}: anonymous HTTP session attempt ${attempt}/${input.maxSessionAttempts}; collected=${posts.length}/${input.maxPostsPerGroup}.`);
 
-        if (posts.length < input.maxPostsPerGroup && browserRead && !shouldStop()) {
-            totals.browserFallbacks++;
-            log.info(`group ${group.id}: HTTP exposed ${posts.length}/${input.maxPostsPerGroup} requested post(s); deepening the same public logged-out feed in Chromium.`);
+            let response;
             try {
-                const rendered = await browserRead(group, {
-                    maxPosts: input.maxPostsPerGroup,
-                    includeAuthors: input.includeAuthors,
-                    cookies: desktop.cookies ?? [],
-                });
-                const renderedPosts = rendered.posts?.length ? rendered.posts : parsePosts(rendered.html, { includeAuthors: input.includeAuthors });
-                if (renderedPosts.length) {
-                    posts = mergePosts(posts, renderedPosts);
-                    selected = rendered;
-                    surface = 'desktop_html+logged_out_browser';
-                } else if (!posts.length) {
-                    selected = rendered;
-                    surface = 'logged_out_browser';
-                }
-                log.info(`group ${group.id}: public browser depth pass exposed ${renderedPosts.length} post(s); merged total=${posts.length}; final=${rendered.finalUrl}`);
+                response = await fetchAttempt(group.url, attempt);
             } catch (error) {
-                log.warning(`group ${group.id}: public browser depth pass failed: ${error.message}`);
+                lastError = error;
+                log.warning(`group ${group.id}: attempt ${attempt} request failed: ${error.message}`);
+                continue;
             }
+            bestResponse = response;
+
+            if (response.status >= 400) {
+                lastError = new Error(`HTTP ${response.status}`);
+                log.info(`group ${group.id}: attempt ${attempt} returned HTTP ${response.status}; ${attempt < input.maxSessionAttempts ? 'rotating session.' : 'no attempts left.'}`);
+                if (response.status === 404) break;
+                continue;
+            }
+
+            const meta = parseGroupMeta(response.html);
+            if (meta.name || meta.description || meta.memberCount != null || meta.privacy) bestMeta = { ...bestMeta, ...meta };
+            const wall = isLoginWall({ finalUrl: response.finalUrl, html: response.html });
+            if (wall) {
+                sawLoginWall = true;
+                log.info(`group ${group.id}: attempt ${attempt} was redirected/served a login wall; discarding that anonymous session${attempt < input.maxSessionAttempts ? ' and rotating.' : '.'}`);
+                continue;
+            }
+
+            const found = parsePosts(response.html, { includeAuthors: input.includeAuthors });
+            const before = posts.length;
+            posts = mergePosts(posts, found);
+            log.info(`group ${group.id}: attempt ${attempt} exposed ${found.length} structured post(s); ${posts.length - before} new; merged total=${posts.length}.`);
+            if (posts.length >= input.maxPostsPerGroup) break;
         }
 
         if (input.sinceMs != null) {
@@ -320,89 +151,77 @@ export async function run({ input, pushData, fetch = fetchGroup, browserRead = n
         }
         posts = posts.slice(0, input.maxPostsPerGroup);
 
-        const selectedMeta = parseGroupMeta(selected.html);
-        const meta = {
-            name: selectedMeta.name && selectedMeta.name !== 'Facebook' ? selectedMeta.name : desktopMeta.name,
-            description: selectedMeta.description ?? desktopMeta.description,
-            memberCount: selectedMeta.memberCount ?? desktopMeta.memberCount,
-            privacy: selectedMeta.privacy ?? desktopMeta.privacy,
-        };
-        const wall = isLoginWall({ finalUrl: selected.finalUrl, html: selected.html });
-
-        if (wall && !posts.length) {
-            totals.loginWall++;
-            const diagnosticKey = await capture(group, selected, surface);
+        if (posts.length) {
             await pushData({
                 recordType: 'group',
                 ...base,
-                ...meta,
-                postsVisible: 0,
-                sourceSurface: surface,
-                status: 'login_wall',
-                statusDetail: 'Facebook redirected the logged-out public feed to login. Public group metadata may still be available, but posts were not exposed to this anonymous session.',
-                diagnosticKey,
-                scrapedAt: stamp(),
-            });
-        } else {
-            const diagnosticKey = posts.length ? null : await capture(group, selected, surface);
-            await pushData({
-                recordType: 'group',
-                ...base,
-                ...meta,
+                ...bestMeta,
                 postsVisible: posts.length,
-                sourceSurface: surface,
-                status: posts.length ? 'ok' : 'no_posts_visible',
-                statusDetail: posts.length ? null : `Facebook exposed no parseable public posts after the ${surface} attempt.`,
-                diagnosticKey,
+                sourceSurface: 'rotating_public_html',
+                status: 'ok',
+                statusDetail: posts.length < input.maxPostsPerGroup ? `Public anonymous HTML exposed ${posts.length}/${input.maxPostsPerGroup} requested unique posts after ${input.maxSessionAttempts} bounded session attempt(s).` : null,
                 scrapedAt: stamp(),
             });
             for (const post of posts) {
-                await pushData({ recordType: 'post', groupId: group.id, groupUrl: group.url, sourceSurface: surface, ...post, status: 'ok', scrapedAt: stamp() });
+                await pushData({ recordType: 'post', groupId: group.id, groupUrl: group.url, sourceSurface: 'rotating_public_html', ...post, status: 'ok', scrapedAt: stamp() });
             }
             totals.posts += posts.length;
-            if (posts.length) totals.ok++;
+            totals.ok++;
+        } else {
+            const diagnosticKey = bestResponse ? await capture(group, bestResponse, 'public_html_attempts_exhausted') : null;
+            if (sawLoginWall) totals.loginWall++;
+            const status = sawLoginWall ? 'login_wall' : (bestResponse?.status === 404 ? 'not_found' : lastError ? 'http_error' : 'no_posts_visible');
+            await pushData({
+                recordType: 'group',
+                ...base,
+                ...bestMeta,
+                postsVisible: 0,
+                sourceSurface: 'rotating_public_html',
+                status,
+                statusDetail: sawLoginWall
+                    ? 'Facebook exposed no public feed posts across the bounded anonymous residential sessions; at least one attempt was redirected to login.'
+                    : lastError?.message ?? 'Facebook exposed no parseable public posts across the bounded anonymous HTTP sessions.',
+                diagnosticKey,
+                scrapedAt: stamp(),
+            });
         }
 
         log.info(`group ${group.id} done`);
-        if (index < input.groups.length - 1) await sleep(input.delayBetweenGroupsMs);
+        if (groupIndex < input.groups.length - 1) await sleep(input.delayBetweenGroupsMs);
     }
 
     return {
         ...totals,
-        note: 'Reads only public logged-out Facebook surfaces. Structured public HTML is parsed first; when it exposes fewer posts than requested, a normal logged-out Chromium visit may scroll the same public feed to load more. No Facebook account cookies, credentials, access tokens, CAPTCHA solving, or private API calls are used.',
+        note: 'Reads only public logged-out Facebook HTML. Each bounded retry uses a fresh anonymous proxy session; sessions that receive login/block responses are discarded. No Facebook account cookies, credentials, access tokens, CAPTCHA solving, browser automation, or private API calls are used.',
     };
 }
 
 async function main() {
     await Actor.init();
     let stop = false;
-    let browserReader = null;
-    Actor.on('aborting', async () => {
-        stop = true;
-        await browserReader?.close?.().catch(() => {});
-        await sleep(500);
-        await Actor.exit();
-    });
+    Actor.on('aborting', async () => { stop = true; await sleep(300); await Actor.exit(); });
 
     try {
         const input = readInput(await Actor.getInput());
         const proxyConfiguration = input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] };
         const proxy = await Actor.createProxyConfiguration(proxyConfiguration);
         if (!proxy) throw new Error('Apify proxy configuration was not created.');
-        const sessionId = `fb_public_${Math.random().toString(36).slice(2, 12)}`;
-        const proxyUrl = await proxy.newUrl(sessionId);
-        log.info(`Network route: ${input.proxyConfiguration ? 'input proxy configuration' : 'Apify RESIDENTIAL default'} with one sticky anonymous session; Facebook authentication is not used.`);
-        browserReader = await createLoggedOutBrowserReader({ proxyUrl, shouldStop: () => stop });
+        log.info(`Network route: ${input.proxyConfiguration ? 'input proxy configuration' : 'Apify RESIDENTIAL default'} with up to ${input.maxSessionAttempts} fresh anonymous HTTP session(s) per group; Facebook authentication is not used.`);
+
+        const fetchAttempt = async (url, attempt) => {
+            const sessionId = `fb_public_${Date.now()}_${attempt}_${Math.random().toString(36).slice(2, 9)}`;
+            const proxyUrl = await proxy.newUrl(sessionId);
+            return fetchGroup(url, { proxyUrl });
+        };
+
         const summary = await run({
             input,
             pushData: (record) => Actor.pushData(record),
-            fetch: (url) => fetchGroup(url, { proxyUrl }),
-            browserRead: browserReader.read,
+            fetchAttempt,
             saveDiagnostic: async (group, response, label) => {
                 const suffix = String(label ?? 'response').replace(/[^A-Za-z0-9_-]/g, '_').toUpperCase();
                 const key = `DIAGNOSTIC_GROUP_${String(group.id).replace(/[^A-Za-z0-9_-]/g, '_')}_${suffix}`;
-                const cookieNames = Array.isArray(response.browserCookies) ? [...new Set(response.browserCookies.map((cookie) => cookie.name))].join(',') : '';
-                const header = `<!-- facebook-group-reader diagnostic\nrequested group: ${group.url}\nsurface: ${label}\nfinal: ${response.finalUrl}\nhttpStatus: ${response.status}\nconsentAction: ${response.consentAction ?? 'n/a'}\nanonymousBrowserCookieNames: ${cookieNames}\nExact logged-out response/render used by the Actor. Cookie values are not stored in this diagnostic header.\n-->\n`;
+                const header = `<!-- facebook-group-reader diagnostic\nrequested group: ${group.url}\nsurface: ${label}\nfinal: ${response.finalUrl}\nhttpStatus: ${response.status}\nExact logged-out response used by the Actor. No account credentials or account cookies are used.\n-->\n`;
                 await Actor.setValue(key, `${header}${response.html}`, { contentType: 'text/html; charset=utf-8' });
                 log.info(`Saved response diagnostic to key-value store key ${key} (${Buffer.byteLength(response.html, 'utf8')} bytes).`);
                 return key;
@@ -410,13 +229,11 @@ async function main() {
             shouldStop: () => stop,
         });
         await Actor.setValue('OUTPUT', summary);
-        log.info(`Done: ${summary.groups} group(s), ${summary.posts} post(s), ${summary.loginWall} login-wall classification(s), ${summary.browserFallbacks} browser fallback(s), ${summary.diagnostics} diagnostic(s).`);
+        log.info(`Done: ${summary.groups} group(s), ${summary.posts} post(s), ${summary.loginWall} login-wall classification(s), ${summary.httpAttempts} HTTP attempt(s), ${summary.sessionRotations} session rotation(s), ${summary.diagnostics} diagnostic(s).`);
     } catch (error) {
         log.error(String(error.stack ?? error.message ?? error));
         await Actor.fail(String(error.message ?? error));
         return;
-    } finally {
-        await browserReader?.close?.().catch(() => {});
     }
     await Actor.exit();
 }
