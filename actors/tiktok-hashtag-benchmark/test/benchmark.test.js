@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { keepVideo, readInput, run } from '../src/main.js';
-import { findVideoUrls } from '../src/search.js';
+import { braveUrl, findVideoUrls, freshnessFor } from '../src/search.js';
 import { percentile, summariseVideos } from '../src/stats.js';
-import { parseVideoPage, videoUrlsIn } from '../src/video.js';
+import { parseVideoPage, postedAtFromId, videoUrlsIn } from '../src/video.js';
 
 const NOW = Date.parse('2026-10-29T00:00:00Z');
 const page = (item, statusCode = 0) =>
@@ -145,5 +145,36 @@ describe('search and run', () => {
         });
         expect(rows[0]).toMatchObject({ recordType: 'benchmark', status: 'no_videos' });
         expect(rows[0].statusDetail).toMatch(/limited/);
+    });
+});
+
+describe('freshness', () => {
+    it("maps the day range to Brave's time filter", () => {
+        expect([5, 20, 90, 365, 700].map(freshnessFor)).toEqual(['pw', 'pm', 'py', 'py', null]);
+        expect(braveUrl('q', 1, 'py')).toMatch(/&tf=py$/);
+        expect(braveUrl('q', 0)).not.toMatch(/tf=/);
+    });
+    it('reads the post time from a video id and skips old videos without fetching them', async () => {
+        const id = (iso) => String((BigInt(Math.floor(Date.parse(iso) / 1000)) << 32n) + 123n);
+        expect(postedAtFromId(id('2026-06-13T00:00:00Z'))).toBe(Date.parse('2026-06-13T00:00:00Z'));
+        expect(postedAtFromId('12345')).toBeNull();
+        const fetched = [];
+        const rows = [];
+        const urls = [
+            `https://www.tiktok.com/@old/video/${id('2022-01-01T00:00:00Z')}`,
+            `https://www.tiktok.com/@newer/video/${id('2026-10-01T00:00:00Z')}`,
+        ];
+        await run({
+            input: readInput({ hashtags: ['igcse'], delayBetweenVideosMs: 0, concurrency: 1 }),
+            pushData: async (r) => void rows.push(r),
+            search: async () => ({ urls, attempts: [], rateLimited: false }),
+            fetchVideo: async (url) => {
+                fetched.push(url);
+                return { status: 200, html: page(item()) };
+            },
+            now: () => NOW,
+        });
+        expect(fetched).toEqual([urls[1]]);
+        expect(rows.find((r) => r.recordType === 'benchmark').dropped.tooOld).toBe(1);
     });
 });

@@ -1,9 +1,9 @@
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 
-import { findVideoUrls } from './search.js';
+import { findVideoUrls, freshnessFor } from './search.js';
 import { summariseVideos } from './stats.js';
-import { parseVideoPage } from './video.js';
+import { parseVideoPage, postedAtFromId } from './video.js';
 
 const DEFAULTS = {
     maxVideosPerHashtag: 50,
@@ -76,7 +76,15 @@ export async function run({
         });
         const dropped = { notTagged: 0, tooOld: 0, otherRegion: 0, unavailable: 0 };
         const kept = [];
-        const queue = [...found.urls];
+        // the video id carries the post time, so old videos are skipped without reading their pages
+        const queue = found.urls.filter((u) => {
+            const posted = postedAtFromId(u.split('/video/')[1]);
+            if (posted != null && now() - posted > input.recentDays * 86_400_000) {
+                dropped.tooOld += 1;
+                return false;
+            }
+            return true;
+        });
         const worker = async () => {
             for (
                 let url = queue.shift();

@@ -11,8 +11,10 @@ const sleep = (ms) =>
     });
 
 export const WORDINGS = (tag) => [`site:tiktok.com/@ #${tag}`, `site:tiktok.com #${tag} video`, `#${tag} tiktok video`];
-export const braveUrl = (q, page) =>
-    `https://search.brave.com/search?q=${encodeURIComponent(q)}&offset=${page}&source=web`;
+// Brave's own time filter: pw = past week, pm = past month, py = past year (none when the range is longer)
+export const freshnessFor = (days) => (days <= 7 ? 'pw' : days <= 31 ? 'pm' : days <= 366 ? 'py' : null);
+export const braveUrl = (q, page, freshness = null) =>
+    `https://search.brave.com/search?q=${encodeURIComponent(q)}&offset=${page}&source=web${freshness ? `&tf=${freshness}` : ''}`;
 
 export async function fetchBrave(url) {
     const res = await gotScraping({
@@ -28,6 +30,7 @@ export async function findVideoUrls({
     tag,
     want,
     maxPages = 2,
+    freshness = null,
     fetch = fetchBrave,
     paceMs = 5000,
     backoffMs = 20_000,
@@ -41,7 +44,7 @@ export async function findVideoUrls({
         for (let page = 0; page < maxPages && urls.size < want && !shouldStop(); page += 1) {
             let res;
             for (let attempt = 0; attempt <= 2; attempt += 1) {
-                res = await fetch(braveUrl(q, page));
+                res = await fetch(braveUrl(q, page, freshness));
                 if (res.status !== 429) break;
                 rateLimits += 1;
                 if (attempt < 2) await sleep(backoffMs);

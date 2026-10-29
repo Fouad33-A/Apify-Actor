@@ -59,3 +59,13 @@ export function videoUrlsIn(html) {
     }
     return [...found.values()];
 }
+
+// A TikTok video id starts with the post time: the id's upper 32 bits are the unix time in seconds.
+export function postedAtFromId(videoId) {
+    try {
+        const ms = Number(BigInt(videoId) >> 32n) * 1000;
+        return ms > Date.UTC(2016, 0, 1) && ms < Date.now() + 86_400_000 ? ms : null;
+    } catch {
+        return null;
+    }
+}
