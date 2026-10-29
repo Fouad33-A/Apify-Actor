@@ -1,7 +1,7 @@
 {
     "name": "facebook-group-reader",
     "version": "0.1.0",
-    "description": "Reads what a public Facebook group shows to a logged-out visitor: name, member count and visible posts. Reports login_wall when Facebook asks for a login.",
+    "description": "Reads public Facebook groups in a logged-out browser session: group metadata and visible posts with engagement counts.",
     "type": "module",
     "main": "src/main.js",
     "scripts": {
@@ -11,7 +11,8 @@
     "dependencies": {
         "apify": "^3.2.0",
         "cheerio": "^1.0.0",
-        "got-scraping": "^4.0.0"
+        "got-scraping": "^4.0.0",
+        "playwright": "*"
     },
     "engines": {
         "node": ">=18.0.0"
