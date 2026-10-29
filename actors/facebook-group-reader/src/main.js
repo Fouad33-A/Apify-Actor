@@ -42,7 +42,12 @@ function proxyForPlaywright(proxyUrl) {
 
 export async function createLoggedOutBrowserReader({ proxyUrl, shouldStop = () => false } = {}) {
     const { chromium } = await import('playwright');
-    const browser = await chromium.launch({ headless: true, ...(proxyUrl ? { proxy: proxyForPlaywright(proxyUrl) } : {}) });
+    const executablePath = process.env.APIFY_CHROME_EXECUTABLE_PATH || process.env.APIFY_DEFAULT_BROWSER_PATH || undefined;
+    const browser = await chromium.launch({
+        headless: true,
+        ...(executablePath ? { executablePath } : {}),
+        ...(proxyUrl ? { proxy: proxyForPlaywright(proxyUrl) } : {}),
+    });
     const close = async () => browser.close().catch(() => {});
 
     const read = async (group, { maxPosts = 50, includeAuthors = false } = {}) => {
