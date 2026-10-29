@@ -145,6 +145,38 @@ describe('readPlayReviews', () => {
         expect(res.reviews.map((r) => r.reviewId)).toEqual(['r2a', 'r1a']);
         expect(res.reviews[0]).toMatchObject({ rating: 2, helpfulVotes: 2, version: '2.0', country: 'us' });
     });
+    it('does not split the overall cap evenly between star ratings', async () => {
+        const calls = [];
+        const gplay = {
+            sort: { NEWEST: 2 },
+            reviews: async (opts) => {
+                calls.push(opts);
+                const star = opts.stars;
+                if (star === 1) {
+                    return {
+                        data: [
+                            { id: 'one-new', score: 1, text: 'Newest one star complaint', date: '2026-10-30T00:00:00Z' },
+                            { id: 'one-mid', score: 1, text: 'Another one star complaint', date: '2026-10-29T00:00:00Z' },
+                            { id: 'one-old', score: 1, text: 'Older one star complaint', date: '2026-10-28T00:00:00Z' },
+                        ],
+                        nextPaginationToken: null,
+                    };
+                }
+                return {
+                    data: [
+                        { id: 'two-old', score: 2, text: 'Older two star complaint', date: '2026-10-01T00:00:00Z' },
+                    ],
+                    nextPaginationToken: null,
+                };
+            },
+        };
+        const res = await readPlayReviews('com.x.y', { stars: [1, 2], gplay, maxReviews: 3 });
+        expect(calls.map((c) => [c.stars, c.num])).toEqual([
+            [1, 3],
+            [2, 3],
+        ]);
+        expect(res.reviews.map((r) => r.reviewId)).toEqual(['one-new', 'one-mid', 'one-old']);
+    });
     it('reports a failure without throwing', async () => {
         const gplay = {
             sort: { NEWEST: 2 },
@@ -167,7 +199,7 @@ describe('themes', () => {
         expect(themes('Way too many ads and popups')).toEqual(['ads']);
     });
     it('does not match inside other words', () => {
-        expect(themes('The pass was a bad one')).toEqual([]); // no "ads", "bug", "lag" inside words
+        expect(themes('The pass was a bad one')).toEqual([]);
         expect(themes('Loved the gradient adsorb')).toEqual([]);
     });
     it('handles typographic apostrophes and custom themes', () => {
