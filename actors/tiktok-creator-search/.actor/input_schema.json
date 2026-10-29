@@ -6,7 +6,7 @@
         "keywords": {
             "title": "Keywords",
             "type": "array",
-            "description": "Topics to find creators for, for example 'budgeting for beginners'. Each one is searched on Google restricted to tiktok.com.",
+            "description": "Topics to find creators for, for example 'budgeting for beginners'. Each one is searched on Brave Search (Google as a fallback) restricted to tiktok.com.",
             "editor": "stringList",
             "default": ["budgeting for beginners"],
             "prefill": ["budgeting for beginners", "debt free journey"]
@@ -26,14 +26,14 @@
         "searchModifiers": {
             "title": "Extra search words",
             "type": "array",
-            "description": "Optional words added to every Google query to steer it, for example 'creator'.",
+            "description": "Optional words added to every search query to steer it, for example 'creator'.",
             "editor": "stringList"
         },
         "maxSearchPages": {
-            "title": "Google result pages per query",
+            "title": "Search result pages per query",
             "type": "integer",
             "editor": "number",
-            "description": "Pages of Google results read for each query wording (about 10 results each).",
+            "description": "Pages of search results read for each query wording (a page holds about 10 to 15 TikTok accounts).",
             "default": 2,
             "minimum": 1,
             "maximum": 5
@@ -42,7 +42,7 @@
             "title": "Search time budget (seconds)",
             "type": "integer",
             "editor": "number",
-            "description": "No new Google search is started after this time. Google through the search proxy can take up to a minute per request.",
+            "description": "No new search is started after this time. Requests to Brave Search are spaced about 5 seconds apart and a rate-limit answer is waited out, so allow about 30 seconds per keyword.",
             "default": 300,
             "minimum": 30
         },

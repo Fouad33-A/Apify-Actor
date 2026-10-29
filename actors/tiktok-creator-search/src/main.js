@@ -1,6 +1,6 @@
 import { Actor, log } from 'apify';
 
-import { discoverCreators, parseFollowerHint } from './serp.js';
+import { defaultEngines, discoverCreators, parseFollowerHint } from './serp.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
 const BATCH = 50; // the profile Actor takes 1-50 usernames per run
@@ -114,6 +114,7 @@ export async function runSearch({
     pushData,
     serpProxyUrl,
     serpFetch,
+    engines,
     enrich = callProfileActor,
     shouldStop = () => false,
 }) {
@@ -127,6 +128,7 @@ export async function runSearch({
         modifiers: input.searchModifiers,
         serpProxyUrl,
         serpFetch,
+        engines,
         report,
         shouldContinue: () => !shouldStop(),
         log: (m) => log.info(m),
@@ -181,7 +183,7 @@ export async function runSearch({
         ...counts,
         enrichNote,
         search: report,
-        note: 'Creators come from Google results for the keywords and hashtags (TikTok search itself is not available logged out). Google answers vary from run to run, so a repeat run can find different creators; the search report lists every attempt. Follower figures come from the profile Actor, not from the search snippets.',
+        note: 'Creators come from Brave Search results (Google as a fallback) for the keywords and hashtags, because TikTok search itself is not available logged out. Search results vary from run to run, so a repeat run can find different creators; the search report lists every attempt. Follower figures come from the profile Actor, not from the search snippets.',
     };
 }
 
@@ -197,12 +199,14 @@ async function main() {
     });
     try {
         const input = readInput(await Actor.getInput());
-        const serp = await Actor.createProxyConfiguration({ groups: ['GOOGLE_SERP'] });
+        // Brave Search needs no proxy; the Google SERP proxy, when the account has it, is the fallback engine.
+        const serp = await Actor.createProxyConfiguration({ groups: ['GOOGLE_SERP'] }).catch(() => null);
         const serpProxyUrl = serp ? await serp.newUrl() : null;
         const summary = await runSearch({
             input,
             pushData: (row) => Actor.pushData(row),
             serpProxyUrl,
+            engines: defaultEngines({ serpProxyUrl }),
             shouldStop: () => stop,
         });
         await Actor.setValue('OUTPUT', summary);

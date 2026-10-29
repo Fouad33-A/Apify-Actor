@@ -1,10 +1,10 @@
-// Finding TikTok creators from a keyword or hashtag: Google's results for "site:tiktok.com <keyword>" through Apify's
-// Google SERP proxy (plain HTTP, no browser). TikTok's own search and hashtag pages do not load for a logged-out
-// visitor, so they are not used; nothing is solved, clicked through or worked around.
+// Finding TikTok creators from a keyword or hashtag: search-engine results for "site:tiktok.com/@ <keyword>", read with
+// plain HTTP (no browser, no TikTok login). Brave Search is the main source; Google through Apify's Google SERP proxy is the
+// fallback. TikTok's own search and hashtag pages are empty for a logged-out visitor, so they are not used; nothing is
+// solved, clicked through or worked around.
 //
-// What Google returns varies from run to run (some wordings come back empty, some requests time out). Every attempt is
-// recorded in the report so a thin result can be explained. Follower figures printed in snippets are kept only as
-// hints; they are never used to judge an account.
+// What a search engine returns varies from run to run. Every attempt is recorded in the report so a thin result can be
+// explained. Follower figures printed in snippets are kept only as hints; they are never used to judge an account.
 
 import * as cheerio from 'cheerio';
 import { gotScraping } from 'got-scraping';
@@ -292,10 +292,94 @@ export async function fetchSerpPage({ url, proxyUrl, timeoutMs = 40_000 }) {
     return parseSerpHtml(response.body);
 }
 
+// ---- Brave Search: the main source ------------------------------------------------------------------------------------
+// Found by testing against the real services: Google's result page needs JavaScript and often shows no results to a plain
+// request, while Brave Search answers a plain HTTP request with ordinary result links (about 13 TikTok handles a page for
+// "site:tiktok.com/@ <keyword>", and a second page adds as many again). It limits the request rate, so requests are spaced
+// (see makeGate) and a "429 too many requests" is waited out; if it keeps limiting, the engine is dropped for the run
+// (nothing is rotated or disguised).
+
+export const braveUrl = (q, page) => `https://search.brave.com/search?q=${enc(q)}&offset=${page || 0}&source=web`;
+
+export function buildBraveQuery({ keyword, variant = 0, modifiers = [] }) {
+    const kw = String(keyword).trim();
+    const extra = (modifiers ?? [])
+        .map((m) => String(m ?? '').trim())
+        .filter(Boolean)
+        .join(' ');
+    let query;
+    if (variant === 0) query = `site:${SITE}/@ ${kw}`;
+    else if (variant === 1) query = `site:${SITE} ${kw}`;
+    else query = `tiktok ${kw} creator @`;
+    return extra ? `${query} ${extra}` : query;
+}
+
+export async function fetchBravePage({ url, timeoutMs = 30_000 }) {
+    const response = await gotScraping({
+        url,
+        timeout: { request: timeoutMs },
+        throwHttpErrors: false,
+        headers: { 'accept-language': 'en-US,en;q=0.9' },
+    });
+    if (response.statusCode === 429)
+        throw Object.assign(new Error('HTTP 429 from Brave Search (too many requests)'), { rateLimited: true });
+    if (response.statusCode >= 400) throw new Error(`HTTP ${response.statusCode} from Brave Search`);
+    return parseSerpHtml(response.body);
+}
+
+const sleep = (ms) =>
+    new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+
+// One shared gate per engine: whoever asks next waits until `paceMs` have passed since the previous request started.
+export function makeGate(paceMs) {
+    let last = 0;
+    let chain = Promise.resolve();
+    return () => {
+        chain = chain.then(async () => {
+            const wait = last + paceMs - Date.now();
+            if (wait > 0) await sleep(wait);
+            last = Date.now();
+        });
+        return chain;
+    };
+}
+
+export function defaultEngines({ serpProxyUrl, serpFetch = fetchSerpPage, braveFetch = fetchBravePage } = {}) {
+    const engines = [
+        {
+            name: 'brave',
+            urlFor: braveUrl,
+            queryFor: buildBraveQuery,
+            fetch: ({ url }) => braveFetch({ url }),
+            paceMs: 5000,
+            backoffMs: 20_000,
+        },
+    ];
+    if (serpProxyUrl) {
+        engines.push({
+            name: 'google',
+            urlFor: googleUrl,
+            queryFor: buildQuery,
+            fetch: ({ url }) => serpFetch({ url, proxyUrl: serpProxyUrl }),
+            paceMs: 0,
+            backoffMs: 0,
+        });
+    }
+    return engines;
+}
+
+const PER_KEYWORD_TARGET = 30; // stop asking more wordings for a keyword once it has this many different handles
+const RATE_LIMIT_RETRIES = 2;
+const RATE_LIMITS_BEFORE_DROP = 2;
+
 /**
  * Runs every keyword (hashtags are keywords written with a leading #). Returns { candidates, report }.
  * candidates: [{ handle, queries, timesSeen, profileHit, snippets, hint, videoUrls }]
- * The report lists every attempt (query wording, status, results, seconds) so a thin result can be explained.
+ * The report lists every attempt (engine, query wording, status, results, seconds) so a thin result can be explained.
+ * `engines` ([{ name, urlFor, queryFor, fetch, paceMs, backoffMs }]) are tried in order for a keyword that found nothing
+ * yet; without it the Google SERP proxy is used alone (serpProxyUrl / serpFetch), as before.
  */
 export async function discoverCreators({
     keywords,
@@ -304,6 +388,7 @@ export async function discoverCreators({
     maxQueries = 60,
     serpProxyUrl,
     serpFetch = fetchSerpPage,
+    engines: givenEngines,
     maxSeconds = 600,
     modifiers = [],
     report: reportSink = { queries: [], blocked: false, stoppedOnTime: false },
@@ -314,6 +399,19 @@ export async function discoverCreators({
     const deadline = Date.now() + maxSeconds * 1000;
     const timeLeft = () => Date.now() < deadline;
     const byHandle = new Map();
+    const engines = (
+        givenEngines ?? [
+            {
+                name: 'google',
+                urlFor: googleUrl,
+                queryFor: buildQuery,
+                fetch: ({ url }) => serpFetch({ url, proxyUrl: serpProxyUrl }),
+                paceMs: 0,
+                backoffMs: 0,
+                needsProxy: true,
+            },
+        ]
+    ).map((e) => ({ ...e, gate: makeGate(e.paceMs ?? 0), blocked: false, rateLimited: 0 }));
 
     function addHits(hits, keyword) {
         for (const h of hits) {
@@ -338,55 +436,84 @@ export async function discoverCreators({
         }
     }
 
-    async function ask(keyword, query) {
+    const handlesFor = (keyword) => [...byHandle.values()].filter((c) => c.queries.includes(keyword)).length;
+
+    async function ask(engine, keyword, query) {
         let got = 0;
         let outcome = 'error';
         let detail = null;
-        if (!serpProxyUrl)
+        if (engine.needsProxy && !serpProxyUrl)
             return { got: 0, outcome: 'unavailable', detail: 'the Google SERP proxy is not available to this run' };
         for (let p = 0; p < maxPages && timeLeft(); p += 1) {
-            try {
-                const { anchors, ...info } = await serpFetch({ url: googleUrl(query, p), proxyUrl: serpProxyUrl });
-                const res = classifySearchPage({ title: info.title, text: info.text, anchors, excludeWords });
-                outcome = res.status;
-                if (res.status !== 'ok') {
-                    const links = info.links.map((h) => unwrapSearchUrl(h) ?? h).map((h) => h.slice(0, 100));
-                    detail = `${info.title} | ${info.head} | ${info.diag} | links: ${links.join(' ')}`.slice(0, 900);
+            let page = null;
+            for (let attempt = 0; attempt <= RATE_LIMIT_RETRIES && timeLeft(); attempt += 1) {
+                try {
+                    await engine.gate();
+                    page = await engine.fetch({ url: engine.urlFor(query, p) });
+                    break;
+                } catch (err) {
+                    if (err?.rateLimited) {
+                        outcome = 'rate_limited';
+                        detail = `${err.message}; waited ${engine.backoffMs / 1000} s and tried again`;
+                        if (attempt < RATE_LIMIT_RETRIES) {
+                            await sleep(engine.backoffMs);
+                            continue;
+                        }
+                        engine.rateLimited += 1;
+                        if (engine.rateLimited >= RATE_LIMITS_BEFORE_DROP) engine.blocked = true;
+                        break;
+                    }
+                    outcome = 'error';
+                    detail = String(err?.message ?? err)
+                        .split('\n')[0]
+                        .slice(0, 160);
                     break;
                 }
-                const before = byHandle.size;
-                addHits(res.hits, keyword);
-                got += res.hits.length;
-                if (byHandle.size === before && p > 0) break; // a further page added no new creator
-            } catch (err) {
-                outcome = 'error';
-                detail = String(err?.message ?? err)
-                    .split('\n')[0]
-                    .slice(0, 160);
+            }
+            if (!page) break;
+            const { anchors, ...info } = page;
+            const res = classifySearchPage({ title: info.title, text: info.text, anchors, excludeWords });
+            outcome = res.status;
+            detail = null;
+            if (res.status !== 'ok') {
+                const links = info.links.map((h) => unwrapSearchUrl(h) ?? h).map((h) => h.slice(0, 100));
+                detail = `${info.title} | ${info.head} | ${info.diag} | links: ${links.join(' ')}`.slice(0, 900);
                 break;
             }
+            const before = byHandle.size;
+            addHits(res.hits, keyword);
+            got += res.hits.length;
+            if (byHandle.size === before && p > 0) break; // a further page added no new creator
         }
         return { got, outcome: got ? 'ok' : outcome, detail };
     }
 
-    async function runKeyword(entryRef) {
-        const entry = entryRef; // filled in place
-        for (let variant = 0; variant < QUERY_VARIANTS && timeLeft(); variant += 1) {
-            const query = buildQuery({ keyword: entry.keyword, variant, modifiers });
-            const startedMs = Date.now();
-            const { got, outcome, detail } = await ask(entry.keyword, query);
-            const seconds = Math.round((Date.now() - startedMs) / 1000);
-            log(`Search "${query}": ${outcome}, ${got} hit(s), ${seconds} s`);
-            entry.attempts.push({ query, status: outcome, results: got, seconds, ...(detail ? { detail } : {}) });
-            if (outcome === 'blocked') {
-                report.blocked = true;
-                log('Google answered with a bot check: no more searches are asked in this run (nothing was solved)');
-                return;
-            }
-            if (outcome === 'unavailable') return;
-            if (got) {
-                entry.hits = got;
-                return;
+    async function runKeyword(entry) {
+        for (const engine of engines) {
+            if (handlesFor(entry.keyword)) return; // an earlier engine found creators for this keyword
+            for (let variant = 0; variant < QUERY_VARIANTS && timeLeft() && !engine.blocked; variant += 1) {
+                const query = engine.queryFor({ keyword: entry.keyword, variant, modifiers });
+                const startedMs = Date.now();
+                const { got, outcome, detail } = await ask(engine, entry.keyword, query);
+                const seconds = Math.round((Date.now() - startedMs) / 1000);
+                log(`Search (${engine.name}) "${query}": ${outcome}, ${got} hit(s), ${seconds} s`);
+                entry.attempts.push({
+                    engine: engine.name,
+                    query,
+                    status: outcome,
+                    results: got,
+                    seconds,
+                    ...(detail ? { detail } : {}),
+                });
+                if (outcome === 'blocked') {
+                    engine.blocked = true;
+                    log(
+                        `${engine.name} answered with a bot check: it is not asked again in this run (nothing was solved)`,
+                    );
+                }
+                if (outcome === 'unavailable') break;
+                if (got) entry.hits += got;
+                if (handlesFor(entry.keyword) >= PER_KEYWORD_TARGET) return;
             }
         }
     }
@@ -400,7 +527,11 @@ export async function discoverCreators({
         while (next < queue.length) {
             const item = queue[next];
             next += 1;
-            if (!shouldContinue() || report.blocked) return;
+            if (!shouldContinue()) return;
+            if (engines.every((e) => e.blocked)) {
+                report.blocked = true;
+                return;
+            }
             if (!timeLeft()) {
                 if (!report.stoppedOnTime) {
                     report.stoppedOnTime = true;
@@ -412,6 +543,7 @@ export async function discoverCreators({
         }
     }
     await Promise.all(Array.from({ length: SEARCH_PARALLEL }, () => worker()));
+    if (engines.every((e) => e.blocked)) report.blocked = true;
     report.queries = report.queries.filter((e) => e.attempts.length);
     return { candidates: [...byHandle.values()], report };
 }

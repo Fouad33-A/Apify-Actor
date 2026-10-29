@@ -1,7 +1,7 @@
 {
     "name": "tiktok-creator-search",
     "version": "0.1.0",
-    "description": "Finds TikTok creators for keywords and hashtags through Google search results, optionally enriched with profile stats.",
+    "description": "Finds TikTok creators for keywords and hashtags through Brave Search results (Google as a fallback), optionally enriched with profile stats.",
     "type": "module",
     "main": "src/main.js",
     "scripts": {

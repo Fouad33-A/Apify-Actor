@@ -1,6 +1,6 @@
 ## What does TikTok Creator Search do?
 
-Finds **TikTok creators for keywords and hashtags**. TikTok's own search and hashtag pages do not load for a visitor who is not logged in, so the Actor asks **Google** (through Apify's Google SERP proxy) for `tiktok.com` results and extracts the creator handles from them. Optionally it then adds **followers, likes, bio, bio link and e-mails** by running your _TikTok Profile and Video Stats_ Actor in `profileOnly` mode.
+Finds **TikTok creators for keywords and hashtags**. TikTok's own search and hashtag pages do not load for a visitor who is not logged in, so the Actor asks **Brave Search** (plain HTTP, no proxy needed; Google through Apify's Google SERP proxy is the fallback) for `tiktok.com` results and extracts the creator handles from them. Optionally it then adds **followers, likes, bio, bio link and e-mails** by running your _TikTok Profile and Video Stats_ Actor in `profileOnly` mode.
 
 ## Why use it?
 
@@ -43,7 +43,7 @@ Finds **TikTok creators for keywords and hashtags**. TikTok's own search and has
 
 ## Limits
 
-- **Yield is limited and varies.** Google returns different results from run to run, and many results are accounts outside a mid-size range or not creators. Expect a handful of handles per query, not hundreds. The `OUTPUT` record lists every search attempt.
+- **Yield is limited and varies.** In a live test one keyword gave about 25 handles over two result pages, and a few keywords together gave around 50. Search results change from run to run, and many results are accounts outside a mid-size range or not creators, so expect tens of handles per keyword, not hundreds. The `OUTPUT` record lists every search attempt.
 - Follower figures in search snippets are only used to order the profile lookups; the numbers in the dataset come from the profile Actor.
-- If Google answers with a bot check the run stops searching and says so; nothing is solved or bypassed.
+- Brave Search limits how fast it can be asked. Requests are spaced about 5 seconds apart and a "too many requests" answer is waited out; if it keeps limiting, Brave is dropped for the run (Google is used instead when the account has the Google SERP proxy) and the report says so. Nothing is solved, rotated or bypassed.
 - The profile step uses your account's Actor and its compute is billed to you.

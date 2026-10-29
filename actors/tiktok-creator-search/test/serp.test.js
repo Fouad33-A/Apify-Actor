@@ -2,13 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import {
     accountsInText,
+    braveUrl,
+    buildBraveQuery,
     buildQuery,
     classifySearchPage,
     discoverCreators,
     followerHint,
     handleFromSnippet,
     handleFromTitle,
+    defaultEngines,
     handleFromUrl,
+    makeGate,
     parseFollowerHint,
     parseSerpHtml,
     unwrapSearchUrl,
@@ -163,6 +167,7 @@ describe('discoverCreators', () => {
         expect(saving.attempts.map((a) => [a.query, a.status])).toEqual([
             ['site:tiktok.com #saving', 'unrecognised'],
             ['#saving tiktok followers', 'ok'],
+            ['#saving "tiktok.com"', 'unrecognised'], // a keyword keeps trying wordings until it has enough creators
         ]);
     });
 
@@ -205,5 +210,118 @@ describe('discoverCreators', () => {
         });
         expect(report.queries).toEqual([]);
         expect(report.stoppedOnTime).toBe(true);
+    });
+});
+
+describe('Brave Search engine', () => {
+    // Brave links are direct (no /url?q= wrapper)
+    const bravePage = (handles) =>
+        `<html><head><title>q - Brave Search</title></head><body>${handles
+            .map(
+                (h) =>
+                    `<div class="snippet"><a href="https://www.tiktok.com/@${h}"><h3>${h} (@${h}) | TikTok</h3></a><p>Budget tips from ${h}</p></div>`,
+            )
+            .join('\n')}</body></html>`;
+    const fast = (over = {}) => ({
+        ...defaultEngines({ braveFetch: over.braveFetch, serpProxyUrl: over.proxy })[0],
+        paceMs: 0,
+        backoffMs: 0,
+    });
+
+    it('builds the Brave address and the wordings', () => {
+        expect(braveUrl('site:tiktok.com/@ a b', 1)).toBe(
+            'https://search.brave.com/search?q=site%3Atiktok.com%2F%40%20a%20b&offset=1&source=web',
+        );
+        expect([0, 1, 2].map((variant) => buildBraveQuery({ keyword: 'x', variant, modifiers: ['mom'] }))).toEqual([
+            'site:tiktok.com/@ x mom',
+            'site:tiktok.com x mom',
+            'tiktok x creator @ mom',
+        ]);
+    });
+
+    it('reads creators from direct links, pages through, and stops asking wordings at the target', async () => {
+        const asked = [];
+        const braveFetch = async ({ url }) => {
+            const u = new URL(url);
+            asked.push(`${u.searchParams.get('q')}#${u.searchParams.get('offset')}`);
+            const off = Number(u.searchParams.get('offset'));
+            const names = Array.from({ length: 16 }, (_, i) => `b${off}x${i}`);
+            return parseSerpHtml(bravePage(names));
+        };
+        const { candidates, report } = await discoverCreators({
+            keywords: ['budget'],
+            engines: [fast({ braveFetch })],
+            maxPages: 2,
+        });
+        expect(candidates).toHaveLength(32);
+        expect(asked).toEqual(['site:tiktok.com/@ budget#0', 'site:tiktok.com/@ budget#1']);
+        expect(report.queries[0].attempts).toMatchObject([{ engine: 'brave', status: 'ok', results: 32 }]);
+    });
+
+    it('waits out a 429 and retries the same page', async () => {
+        let calls = 0;
+        const braveFetch = async () => {
+            calls += 1;
+            if (calls === 1) throw Object.assign(new Error('HTTP 429'), { rateLimited: true });
+            return parseSerpHtml(bravePage(['one', 'two']));
+        };
+        const { candidates, report } = await discoverCreators({
+            keywords: ['k'],
+            engines: [fast({ braveFetch })],
+            maxPages: 1,
+        });
+        expect(calls).toBeGreaterThanOrEqual(2);
+        expect(candidates.map((c) => c.handle).sort()).toEqual(['one', 'two']);
+        expect(report.queries[0].attempts[0].status).toBe('ok');
+    });
+
+    it('drops Brave after repeated limits and falls back to Google', async () => {
+        const braveFetch = async () => {
+            throw Object.assign(new Error('HTTP 429'), { rateLimited: true });
+        };
+        const engines = defaultEngines({
+            serpProxyUrl: 'http://x',
+            braveFetch,
+            serpFetch: async () =>
+                parseSerpHtml(
+                    page([
+                        resultBlock({ href: 'https://www.tiktok.com/@gee', title: 'Gee (@gee)', line: 'TikTok · gee' }),
+                    ]),
+                ),
+        }).map((e) => ({ ...e, paceMs: 0, backoffMs: 0 }));
+        const { candidates, report } = await discoverCreators({ keywords: ['a', 'b', 'c'], engines, maxPages: 1 });
+        expect(candidates.map((c) => c.handle)).toEqual(['gee']);
+        expect(report.blocked).toBe(false);
+        const engineOf = (kw) => report.queries.find((q) => q.keyword === kw).attempts.map((x) => x.engine);
+        expect(engineOf('a')).toContain('google');
+        expect(
+            report.queries.flatMap((q) => q.attempts).filter((x) => x.engine === 'brave' && x.status === 'rate_limited')
+                .length,
+        ).toBeGreaterThanOrEqual(2);
+    });
+
+    it('reports the run as blocked when every engine is limited', async () => {
+        const braveFetch = async () => {
+            throw Object.assign(new Error('HTTP 429'), { rateLimited: true });
+        };
+        const { candidates, report } = await discoverCreators({
+            keywords: ['a', 'b', 'c', 'd'],
+            engines: [fast({ braveFetch })],
+            maxPages: 1,
+        });
+        expect(candidates).toEqual([]);
+        expect(report.blocked).toBe(true);
+    });
+
+    it('spaces requests with the gate', async () => {
+        const gate = makeGate(40);
+        const t0 = Date.now();
+        await Promise.all([gate(), gate(), gate()]);
+        expect(Date.now() - t0).toBeGreaterThanOrEqual(75);
+    });
+
+    it('uses Google only when a proxy exists', () => {
+        expect(defaultEngines({}).map((e) => e.name)).toEqual(['brave']);
+        expect(defaultEngines({ serpProxyUrl: 'http://x' }).map((e) => e.name)).toEqual(['brave', 'google']);
     });
 });
