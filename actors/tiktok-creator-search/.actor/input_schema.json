@@ -32,6 +32,7 @@
         "maxSearchPages": {
             "title": "Google result pages per query",
             "type": "integer",
+            "editor": "number",
             "description": "Pages of Google results read for each query wording (about 10 results each).",
             "default": 2,
             "minimum": 1,
@@ -40,6 +41,7 @@
         "maxSearchSeconds": {
             "title": "Search time budget (seconds)",
             "type": "integer",
+            "editor": "number",
             "description": "No new Google search is started after this time. Google through the search proxy can take up to a minute per request.",
             "default": 300,
             "minimum": 30
@@ -47,6 +49,7 @@
         "maxCreators": {
             "title": "Maximum creators returned",
             "type": "integer",
+            "editor": "number",
             "description": "Hard cap on creators per run (and on profiles looked up).",
             "default": 100,
             "minimum": 1
@@ -54,30 +57,35 @@
         "enrichProfiles": {
             "title": "Add profile data",
             "type": "boolean",
+            "editor": "checkbox",
             "description": "Runs your TikTok Profile and Video Stats Actor in profileOnly mode for the creators found and adds followers, likes, bio, bio link and e-mails. Its compute is billed to your account.",
             "default": true
         },
         "profileActor": {
             "title": "Profile Actor",
             "type": "string",
+            "editor": "textfield",
             "description": "Actor used for the profile data: its ID or username/name. It must accept usernames and mode (profileOnly) and return rows with rowType profile.",
             "default": "fouad_dp/tiktok-profile-video-stats"
         },
         "minFollowers": {
             "title": "Minimum followers",
             "type": "integer",
+            "editor": "number",
             "description": "Optional. Needs 'Add profile data'. Creators below this are marked passesFilters false.",
             "minimum": 0
         },
         "maxFollowers": {
             "title": "Maximum followers",
             "type": "integer",
+            "editor": "number",
             "description": "Optional. Needs 'Add profile data'. Creators above this are marked passesFilters false.",
             "minimum": 0
         },
         "onlyPassing": {
             "title": "Return only creators inside the follower range",
             "type": "boolean",
+            "editor": "checkbox",
             "description": "Off returns every creator found with passesFilters true, false or null (null = followers unknown).",
             "default": false
         }

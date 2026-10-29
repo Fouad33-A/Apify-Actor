@@ -27,6 +27,7 @@
         "maxAppsPerSearch": {
             "title": "Apps per keyword and store",
             "type": "integer",
+            "editor": "number",
             "description": "How many top search results are mined for each keyword.",
             "default": 5,
             "minimum": 1,
@@ -42,12 +43,14 @@
         "language": {
             "title": "Google Play language",
             "type": "string",
+            "editor": "textfield",
             "description": "Language code for Google Play reviews and app details, for example en.",
             "default": "en"
         },
         "maxReviewsPerApp": {
             "title": "Reviews kept per app and country",
             "type": "integer",
+            "editor": "number",
             "description": "Cap on reviews kept for each app and country, after the filters below. The App Store feed itself only exposes the 500 most recent reviews.",
             "default": 200,
             "minimum": 1
@@ -55,6 +58,7 @@
         "maxRating": {
             "title": "Keep reviews rated up to (stars)",
             "type": "integer",
+            "editor": "number",
             "description": "2 keeps 1-star and 2-star reviews (complaints). 5 keeps every rating.",
             "default": 2,
             "minimum": 1,
@@ -69,12 +73,14 @@
         "recentDays": {
             "title": "Only reviews from the last N days",
             "type": "integer",
+            "editor": "number",
             "description": "Optional. Drops older reviews.",
             "minimum": 1
         },
         "minReviewLength": {
             "title": "Minimum review length (characters)",
             "type": "integer",
+            "editor": "number",
             "description": "Title plus text shorter than this is dropped (for example 'bad').",
             "default": 15,
             "minimum": 0
@@ -82,6 +88,7 @@
         "themedOnly": {
             "title": "Only reviews that match a complaint theme",
             "type": "boolean",
+            "editor": "checkbox",
             "description": "Keeps only reviews with at least one theme (crashes_bugs, login_account, billing_subscription, price_value, ads, performance, ux_design, support, missing_features, privacy_trust, plus your own).",
             "default": false
         },
@@ -94,12 +101,14 @@
         "includeReviews": {
             "title": "Return one row per review",
             "type": "boolean",
+            "editor": "checkbox",
             "description": "Off returns only the per-app summary rows with theme counts and example quotes.",
             "default": true
         },
         "maxReviewRows": {
             "title": "Maximum review rows per run",
             "type": "integer",
+            "editor": "number",
             "description": "Hard cap on review rows in one run.",
             "default": 5000,
             "minimum": 1
