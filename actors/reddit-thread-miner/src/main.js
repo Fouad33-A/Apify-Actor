@@ -1,9 +1,8 @@
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 
-import { fetchArchivedComments } from './archive.js';
 import { classifyResponse, parseAtom, searchFeed, subredditFeed, threadFeed } from './feed.js';
-import { discoverRedditThreads } from './search.js';
+import { discoverRedditComments, discoverRedditThreads } from './search.js';
 import { DEFAULT_COMPETITORS, mergeThemes, tagText } from './themes.js';
 
 const DEFAULTS = {
@@ -48,10 +47,10 @@ export async function fetchFeed(url, { proxyUrl } = {}) {
 }
 
 export async function run({
-    input, pushData, fetch = fetchFeed, discover = discoverRedditThreads, readArchive = fetchArchivedComments,
+    input, pushData, fetch = fetchFeed, discover = discoverRedditThreads, discoverComments = discoverRedditComments,
     shouldStop = () => false, now = () => new Date(), backoffMs = 30_000,
 }) {
-    const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, archiveCommentThreads: 0 };
+    const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, searchCommentThreads: 0 };
     const stamp = () => now().toISOString();
     async function ask(url) {
         for (let attempt = 0; ; attempt += 1) {
@@ -63,14 +62,21 @@ export async function run({
         }
     }
 
-    async function archivedComments(thread, input) {
+    async function searchComments(sub, thread) {
         try {
-            const archived = await readArchive(thread.url, { limit: input.maxCommentsPerThread });
-            const comments = archived.comments?.map((c) => ({ ...c, ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) })) ?? [];
-            if (comments.length) totals.archiveCommentThreads += 1;
-            return { status: archived.status, comments, source: 'public_archive' };
+            const found = await discoverComments({
+                subreddit: sub,
+                threadId: thread.id,
+                maxComments: input.maxCommentsPerThread,
+                maxPages: 2,
+                shouldStop,
+                log: (m) => log.info(m),
+            });
+            const comments = (found.comments ?? []).map((c) => ({ ...c, ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
+            if (comments.length) totals.searchCommentThreads += 1;
+            return { status: found.status, comments, source: 'public_search', attempts: found.attempts ?? [] };
         } catch (error) {
-            return { status: 'archive_error', comments: [], source: 'public_archive', detail: String(error?.message ?? error) };
+            return { status: 'search_error', comments: [], source: 'public_search', attempts: [], detail: String(error?.message ?? error) };
         }
     }
 
@@ -134,22 +140,23 @@ export async function run({
             if (input.includeComments && withComments < input.maxThreadsWithComments && input.maxCommentsPerThread > 0) {
                 withComments += 1;
                 if (thread.discoverySource === 'public_search') {
-                    const archived = await archivedComments(thread, input);
-                    commentsStatus = archived.status;
-                    commentsSource = archived.source;
-                    comments = archived.comments;
+                    const searched = await searchComments(sub, thread);
+                    commentsStatus = searched.status;
+                    commentsSource = searched.source;
+                    comments = searched.comments;
+                    if (!comments.length) problems.push({ source: 'public_search_comments', threadId: thread.id, status: searched.status, detail: searched.detail ?? null, attempts: searched.attempts });
                 } else {
                     const res = await ask(threadFeed(thread.url));
                     commentsStatus = res.status;
                     commentsSource = 'reddit_rss';
                     if (res.status === 'ok') {
-                        comments = parseAtom(res.body).filter((e) => e.kind === 'comment').slice(0, input.maxCommentsPerThread).map((c) => ({ author: c.author, createdAt: c.updated, text: c.text.slice(0, 1500), url: c.url, score: null, source: 'reddit_rss', ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
+                        comments = parseAtom(res.body).filter((e) => e.kind === 'comment').slice(0, input.maxCommentsPerThread).map((c) => ({ author: c.author, createdAt: c.updated, text: c.text.slice(0, 1500), url: c.url, score: null, source: 'reddit_rss', rankBasis: 'reddit_top_feed', ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
                     } else if (res.status === 'blocked' || res.status === 'rate_limited') {
-                        const archived = await archivedComments(thread, input);
-                        commentsSource = archived.source;
-                        comments = archived.comments;
-                        commentsStatus = archived.status === 'ok' ? 'ok' : `${res.status}_archive_${archived.status}`;
-                        if (!comments.length) problems.push({ source: 'public_archive', threadId: thread.id, status: archived.status, detail: archived.detail ?? null });
+                        const searched = await searchComments(sub, thread);
+                        commentsSource = searched.source;
+                        comments = searched.comments;
+                        commentsStatus = searched.status === 'ok' ? 'ok' : `${res.status}_search_${searched.status}`;
+                        if (!comments.length) problems.push({ source: 'public_search_comments', threadId: thread.id, status: searched.status, detail: searched.detail ?? null, attempts: searched.attempts });
                     }
                 }
             }
@@ -174,7 +181,7 @@ export async function run({
     }
     return {
         ...totals,
-        note: 'Reddit RSS is tried first. If Reddit blocks thread discovery, Brave Search discovers indexed Reddit threads. For each selected thread, Reddit comment RSS is tried first; if that comment request is blocked or rate-limited, a free public Reddit archive is tried immediately for that same thread, regardless of how the thread was discovered. Available archive comments are sorted by Reddit score before the requested limit. Archive coverage can lag or be incomplete. Nothing is bypassed and no paid service is used.',
+        note: 'Reddit RSS is tried first. If Reddit blocks thread discovery, Brave Search discovers indexed Reddit threads. For selected threads, Reddit comment RSS is tried when available; otherwise Brave public search discovers indexed Reddit comment permalinks and snippets. RSS comments retain Reddit top-feed order. Search-derived comments are explicitly marked rankBasis=search_relevance because public search does not reliably expose Reddit vote scores. No login, paid API, archive provider, client impersonation, or access-control bypass is used.',
     };
 }
 
@@ -188,7 +195,7 @@ async function main() {
         const proxyUrl = proxy ? await proxy.newUrl() : undefined;
         const summary = await run({ input, pushData: (r) => Actor.pushData(r), fetch: (u) => fetchFeed(u, { proxyUrl }), shouldStop: () => stop });
         await Actor.setValue('OUTPUT', summary);
-        log.info(`Done: ${summary.threads} thread(s), ${summary.comments} comment(s), ${summary.blocked} subreddit(s) blocked, ${summary.searchFallbacks} search fallback(s), ${summary.archiveCommentThreads} thread(s) with archived comments.`);
+        log.info(`Done: ${summary.threads} thread(s), ${summary.comments} comment(s), ${summary.blocked} subreddit(s) blocked, ${summary.searchFallbacks} thread-search fallback(s), ${summary.searchCommentThreads} thread(s) with search-indexed comments.`);
     } catch (error) {
         log.error(String(error?.message ?? error));
         await Actor.fail(String(error?.message ?? error)); return;
