@@ -157,7 +157,7 @@ async function main() {
         const input = readInput(await Actor.getInput());
         const proxyConfiguration = input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] };
         const proxy = await Actor.createProxyConfiguration(proxyConfiguration); if (!proxy) throw new Error('Apify proxy configuration was not created.');
-        const sessionId = `fb-public-${Math.random().toString(36).slice(2, 12)}`;
+        const sessionId = `fb_public_${Math.random().toString(36).slice(2, 12)}`;
         const proxyUrl = await proxy.newUrl(sessionId);
         log.info(`Network route: ${input.proxyConfiguration ? 'input proxy configuration' : 'Apify RESIDENTIAL default'} with one sticky anonymous session; Facebook authentication is not used.`);
         browserReader = await createLoggedOutBrowserReader({ proxyUrl, shouldStop: () => stop });
