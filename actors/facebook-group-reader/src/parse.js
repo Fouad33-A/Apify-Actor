@@ -10,8 +10,7 @@ export function normalizeGroup(input) {
         /^([A-Za-z0-9._-]{3,})$/.exec(raw);
     if (!m) return { error: 'not_a_group_address' };
     const id = m[1];
-    if (['feed', 'discover', 'joins', 'create', 'search'].includes(id.toLowerCase()))
-        return { error: 'not_a_group_address' };
+    if (['feed', 'discover', 'joins', 'create', 'search'].includes(id.toLowerCase())) return { error: 'not_a_group_address' };
     return { id, url: `https://www.facebook.com/groups/${id}` };
 }
 
@@ -36,8 +35,7 @@ export function parseGroupMeta(html) {
     const hay = `${description ?? ''} ${$('body').text().slice(0, 20_000)}`;
     const mm = /([\d][\d.,]*\s*[KMB]?)\s+(?:members|member)\b/i.exec(hay);
     let privacy = /\bpublic group\b/i.test(hay) ? 'public' : /\bprivate group\b/i.test(hay) ? 'private' : null;
-    if (!privacy && /Anyone can see who(?:'|’)s in the group and what they post\./i.test(String(html)))
-        privacy = 'public';
+    if (!privacy && /Anyone can see who(?:'|’)s in the group and what they post\./i.test(String(html))) privacy = 'public';
     return { name, description, memberCount: mm ? num(mm[1]) : null, privacy };
 }
 
@@ -57,8 +55,7 @@ function* walk(root) {
     }
 }
 
-const validPostUrl = (value) =>
-    typeof value === 'string' && /facebook\.com\/groups\/[^/]+\/(?:posts|permalink)\/\d+/i.test(value);
+const validPostUrl = (value) => typeof value === 'string' && /facebook\.com\/groups\/[^/]+\/(?:posts|permalink)\/\d+/i.test(value);
 const legacyIdFromUrl = (value) => /\/(?:posts|permalink)\/(\d+)/i.exec(String(value ?? ''))?.[1] ?? null;
 const isoFromUnix = (value) => {
     const n = Number(value);
@@ -89,7 +86,9 @@ function textFromNode(node) {
 
     const rich = node?.comet_sections?.content?.story?.comet_sections?.message?.rich_message;
     if (Array.isArray(rich)) {
-        const blocks = rich.map((block) => (typeof block?.text === 'string' ? block.text.trim() : '')).filter(Boolean);
+        const blocks = rich
+            .map((block) => (typeof block?.text === 'string' ? block.text.trim() : ''))
+            .filter(Boolean);
         if (blocks.length) return blocks.join('\n');
     }
     return null;
@@ -97,27 +96,18 @@ function textFromNode(node) {
 
 function mergeRecord(target, node) {
     const message = textFromNode(node);
-    const url =
-        [
-            node?.permalink_url,
-            node?.url,
-            node?.wwwURL,
-            node?.comet_sections?.content?.story?.comet_sections?.message?.story?.url,
-        ].find(validPostUrl) ?? null;
+    const url = [
+        node?.permalink_url,
+        node?.url,
+        node?.wwwURL,
+        node?.comet_sections?.content?.story?.comet_sections?.message?.story?.url,
+    ].find(validPostUrl) ?? null;
     const legacyId = String(node?.post_id ?? legacyIdFromUrl(url) ?? '') || null;
     const nestedStoryId = node?.comet_sections?.content?.story?.comet_sections?.message?.story?.id;
-    const storyId =
-        typeof node?.id === 'string' && node.id.startsWith('Uzpf')
-            ? node.id
-            : typeof nestedStoryId === 'string' && nestedStoryId.startsWith('Uzpf')
-              ? nestedStoryId
-              : null;
-    const feedbackId =
-        typeof node?.feedback?.id === 'string'
-            ? node.feedback.id
-            : typeof node?.feedback_id === 'string'
-              ? node.feedback_id
-              : null;
+    const storyId = typeof node?.id === 'string' && node.id.startsWith('Uzpf') ? node.id :
+        (typeof nestedStoryId === 'string' && nestedStoryId.startsWith('Uzpf') ? nestedStoryId : null);
+    const feedbackId = typeof node?.feedback?.id === 'string' ? node.feedback.id :
+        (typeof node?.feedback_id === 'string' ? node.feedback_id : null);
     const createdAt = isoFromUnix(node?.creation_time ?? node?.creationTime ?? node?.created_time);
     const actor = node?.actors?.[0] ?? node?.feedback?.owning_profile ?? node?.author ?? null;
     const fb = node?.feedback ?? {};
@@ -163,19 +153,7 @@ export function parsePosts(html, { includeAuthors = false } = {}) {
             const existing = aliases.get(key);
             if (existing) return existing;
         }
-        const record = {
-            postId: null,
-            storyId: null,
-            feedbackId: null,
-            url: null,
-            text: null,
-            createdAt: null,
-            reactions: null,
-            comments: null,
-            shares: null,
-            author: null,
-            authorId: null,
-        };
+        const record = { postId: null, storyId: null, feedbackId: null, url: null, text: null, createdAt: null, reactions: null, comments: null, shares: null, author: null, authorId: null };
         records.add(record);
         return record;
     };
@@ -184,29 +162,19 @@ export function parsePosts(html, { includeAuthors = false } = {}) {
         const raw = $(el).contents().text();
         if (!/GroupsCometFeedRegularStories|group_feed/i.test(raw)) return;
         let json;
-        try {
-            json = JSON.parse(raw);
-        } catch {
-            return;
-        }
+        try { json = JSON.parse(raw); } catch { return; }
 
         for (const node of walk(json)) {
             const nestedUrl = node?.comet_sections?.content?.story?.comet_sections?.message?.story?.url;
             const url = [node?.permalink_url, node?.url, node?.wwwURL, nestedUrl].find(validPostUrl) ?? null;
             const postId = node?.post_id != null ? String(node.post_id) : legacyIdFromUrl(url);
             const nestedStoryId = node?.comet_sections?.content?.story?.comet_sections?.message?.story?.id;
-            const storyId =
-                typeof node?.id === 'string' && node.id.startsWith('Uzpf')
-                    ? node.id
-                    : typeof nestedStoryId === 'string' && nestedStoryId.startsWith('Uzpf')
-                      ? nestedStoryId
-                      : null;
+            const storyId = typeof node?.id === 'string' && node.id.startsWith('Uzpf') ? node.id :
+                (typeof nestedStoryId === 'string' && nestedStoryId.startsWith('Uzpf') ? nestedStoryId : null);
             const feedbackId = typeof node?.feedback?.id === 'string' ? node.feedback.id : null;
             if (!(postId || storyId || url)) continue;
 
-            const keys = [postId && `p:${postId}`, storyId && `s:${storyId}`, feedbackId && `f:${feedbackId}`].filter(
-                Boolean,
-            );
+            const keys = [postId && `p:${postId}`, storyId && `s:${storyId}`, feedbackId && `f:${feedbackId}`].filter(Boolean);
             const record = getRecord(keys);
             for (const key of keys) aliases.set(key, record);
             mergeRecord(record, node);

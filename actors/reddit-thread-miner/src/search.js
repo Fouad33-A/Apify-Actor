@@ -18,9 +18,7 @@ export async function fetchBrave(url) {
 
 function decodedHref(value) {
     let href = String(value ?? '');
-    try {
-        href = decodeURIComponent(href);
-    } catch {}
+    try { href = decodeURIComponent(href); } catch {}
     return href;
 }
 
@@ -56,15 +54,8 @@ export function redditCommentsIn(html, subreddit, submissionId) {
     const seen = new Set();
     $('a[href]').each((_, el) => {
         const href = decodedHref($(el).attr('href'));
-        const m = href.match(
-            /https?:\/\/(?:www\.)?reddit\.com\/r\/([^/?#]+)\/comments\/([a-z0-9]+)\/[^/?#]+\/([a-z0-9]+)(?:[/?#]|$)/i,
-        );
-        if (
-            !m ||
-            m[1].toLowerCase() !== String(subreddit).toLowerCase() ||
-            m[2].toLowerCase() !== String(submissionId).toLowerCase()
-        )
-            return;
+        const m = href.match(/https?:\/\/(?:www\.)?reddit\.com\/r\/([^/?#]+)\/comments\/([a-z0-9]+)\/[^/?#]+\/([a-z0-9]+)(?:[/?#]|$)/i);
+        if (!m || m[1].toLowerCase() !== String(subreddit).toLowerCase() || m[2].toLowerCase() !== String(submissionId).toLowerCase()) return;
         const commentId = m[3].toLowerCase();
         if (seen.has(commentId)) return;
         const box = $(el).closest('div').parent();
@@ -88,15 +79,8 @@ export function redditCommentsIn(html, subreddit, submissionId) {
 }
 
 export async function discoverRedditThreads({
-    subreddit,
-    keywords = [],
-    maxThreads = 100,
-    maxPages = 2,
-    fetch = fetchBrave,
-    paceMs = 4000,
-    backoffMs = 20_000,
-    shouldStop = () => false,
-    log = () => {},
+    subreddit, keywords = [], maxThreads = 100, maxPages = 2, fetch = fetchBrave,
+    paceMs = 4000, backoffMs = 20_000, shouldStop = () => false, log = () => {},
 }) {
     const terms = keywords.length ? keywords : [''];
     const found = new Map();
@@ -118,13 +102,10 @@ export async function discoverRedditThreads({
                 const known = found.get(row.id);
                 if (known) {
                     if (keyword && !known.matchedKeywords.includes(keyword)) known.matchedKeywords.push(keyword);
-                } else if (found.size < maxThreads)
-                    found.set(row.id, { ...row, matchedKeywords: keyword ? [keyword] : [] });
+                } else if (found.size < maxThreads) found.set(row.id, { ...row, matchedKeywords: keyword ? [keyword] : [] });
             }
             attempts.push({ query, page, status: res.status, found: rows.length, added: found.size - before });
-            log(
-                `Search "${query}" page ${page + 1}: HTTP ${res.status}, ${rows.length} Reddit thread(s), ${found.size - before} new`,
-            );
+            log(`Search "${query}" page ${page + 1}: HTTP ${res.status}, ${rows.length} Reddit thread(s), ${found.size - before} new`);
             if (res.status !== 200 || (page > 0 && found.size === before)) break;
             if (paceMs) await sleep(paceMs);
         }
@@ -134,15 +115,8 @@ export async function discoverRedditThreads({
 }
 
 export async function discoverRedditComments({
-    subreddit,
-    threadId,
-    maxComments = 20,
-    maxPages = 2,
-    fetch = fetchBrave,
-    paceMs = 1200,
-    backoffMs = 10_000,
-    shouldStop = () => false,
-    log = () => {},
+    subreddit, threadId, maxComments = 20, maxPages = 2, fetch = fetchBrave,
+    paceMs = 1200, backoffMs = 10_000, shouldStop = () => false, log = () => {},
 }) {
     const id = String(threadId).replace(/^t3_/, '').toLowerCase();
     const query = `site:reddit.com/r/${subreddit}/comments/${id}/`;
@@ -159,15 +133,9 @@ export async function discoverRedditComments({
         const before = found.size;
         for (const row of rows) if (!found.has(row.id) && found.size < maxComments) found.set(row.id, row);
         attempts.push({ query, page, status: res.status, found: rows.length, added: found.size - before });
-        log(
-            `Comment search ${id} page ${page + 1}: HTTP ${res.status}, ${rows.length} indexed comment(s), ${found.size - before} new`,
-        );
+        log(`Comment search ${id} page ${page + 1}: HTTP ${res.status}, ${rows.length} indexed comment(s), ${found.size - before} new`);
         if (res.status !== 200 || !rows.length || (page > 0 && found.size === before)) break;
         if (paceMs) await sleep(paceMs);
     }
-    return {
-        status: found.size ? 'ok' : attempts.some((a) => a.status === 429) ? 'rate_limited' : 'no_comments',
-        comments: [...found.values()],
-        attempts,
-    };
+    return { status: found.size ? 'ok' : attempts.some((a) => a.status === 429) ? 'rate_limited' : 'no_comments', comments: [...found.values()], attempts };
 }

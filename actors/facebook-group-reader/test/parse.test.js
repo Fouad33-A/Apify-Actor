@@ -14,7 +14,7 @@ const post = (id, text, created, extra = {}) => ({
     ...extra,
 });
 const page = (posts) =>
-    `<html><head><title>IGCSE Help | Facebook</title><meta property="og:title" content="IGCSE Help"/><meta property="og:description" content="Public group · 12.5K members. Help for IGCSE students."/></head><body><script type="application/json" data-sjs>${JSON.stringify({ require: [{ group_feed: posts }] })}</script></body></html>`;
+    `<html><head><title>IGCSE Help | Facebook</title><meta property="og:title" content="IGCSE Help"/><meta property="og:description" content="Public group · 12.5K members. Help for IGCSE students."/></head><body><script type="application/json" data-sjs>${JSON.stringify({ require: [{ posts }] })}</script></body></html>`;
 
 describe('addresses', () => {
     it('accepts group addresses and ids, rejects the rest', () => {
@@ -48,10 +48,7 @@ describe('page reading', () => {
         ]);
         const posts = parsePosts(html);
         expect(posts).toHaveLength(2);
-        // newest post first
-        expect(posts.map((p) => p.postId)).toEqual(['2', '1']);
-        const first = posts.find((p) => p.postId === '1');
-        expect(first).toMatchObject({
+        expect(posts[0]).toMatchObject({
             postId: '1',
             text: 'Is it worth paying for notes?',
             reactions: 12,
@@ -59,7 +56,7 @@ describe('page reading', () => {
             shares: 1,
             createdAt: '2025-10-09T08:53:20.000Z',
         });
-        expect(first.author).toBeUndefined();
+        expect(posts[0].author).toBeUndefined();
         expect(parsePosts(html, { includeAuthors: true })[0].author).toBe('Some Person');
         expect(parsePosts('<html></html>')).toEqual([]);
     });
@@ -75,14 +72,14 @@ describe('run', () => {
                 ...readInput({ groups: ['https://www.facebook.com/groups/g1', 'nope!'], delayBetweenGroupsMs: 0 }),
             },
             pushData: push,
-            fetchAttempt: async () => ({
+            fetch: async () => ({
                 status: 200,
                 html: '<title>Log in to Facebook</title>',
                 finalUrl: 'https://www.facebook.com/login/?next=x',
             }),
         });
         expect(rows.map((r) => r.status)).toEqual(['invalid_input', 'login_wall']);
-        expect(rows[1].statusDetail).toMatch(/redirected the anonymous public feed to login/);
+        expect(rows[1].statusDetail).toMatch(/never logs in/);
         expect(summary).toMatchObject({ groups: 1, loginWall: 1, posts: 0 });
     });
     it('returns the group row and post rows, newest filter applied', async () => {
@@ -91,7 +88,7 @@ describe('run', () => {
         const summary = await run({
             input: readInput({ groups: ['g1abc'], sinceDate: '2026-01-01', delayBetweenGroupsMs: 0 }),
             pushData: push,
-            fetchAttempt: async (url) => ({ status: 200, html, finalUrl: url }),
+            fetch: async (url) => ({ status: 200, html, finalUrl: url }),
         });
         expect(rows.map((r) => [r.recordType, r.status])).toEqual([
             ['group', 'ok'],
@@ -106,7 +103,7 @@ describe('run', () => {
         await run({
             input: readInput({ groups: ['g1abc', 'g2abc'], delayBetweenGroupsMs: 0 }),
             pushData: push,
-            fetchAttempt: async (url) =>
+            fetch: async (url) =>
                 url.endsWith('g2abc')
                     ? { status: 404, html: '', finalUrl: url }
                     : { status: 200, html: page([]), finalUrl: url },

@@ -1,1 +1,4 @@
 package-lock.json
+
+# the Actors under actors/ are separate packages with their own formatting
+actors
