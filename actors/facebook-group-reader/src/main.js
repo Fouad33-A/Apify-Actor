@@ -45,6 +45,18 @@ export async function run({
 }) {
     const totals = { groups: 0, ok: 0, loginWall: 0, posts: 0, diagnostics: 0 };
     const stamp = () => now().toISOString();
+
+    const captureDiagnostic = async (group, res) => {
+        try {
+            const key = await saveDiagnostic(group, res);
+            if (key) totals.diagnostics += 1;
+            return key;
+        } catch (error) {
+            log.warning(`Could not save diagnostic for group ${group.id}: ${String(error?.message ?? error)}`);
+            return null;
+        }
+    };
+
     for (const bad of input.invalid) {
         await pushData({
             recordType: 'group',
@@ -82,12 +94,14 @@ export async function run({
             });
         } else if (isLoginWall({ finalUrl: res.finalUrl, html: res.html })) {
             totals.loginWall += 1;
+            const diagnosticKey = await captureDiagnostic(group, res);
             await pushData({
                 recordType: 'group',
                 ...base,
                 status: 'login_wall',
                 statusDetail:
-                    'Facebook showed its login page instead of the group. This Actor never logs in or uses cookies, so nothing was read. The group may be private, or Facebook may not show public groups to this logged-out visitor.',
+                    'Facebook returned a response classified as a login wall. The exact already-fetched response was saved for validation because a login prompt can coexist with publicly visible group content in a browser. The Actor did not make another Facebook request or authenticate.',
+                diagnosticKey,
                 scrapedAt: stamp(),
             });
         } else {
@@ -95,15 +109,7 @@ export async function run({
             let posts = parsePosts(res.html, { includeAuthors: input.includeAuthors });
             if (input.sinceMs != null) posts = posts.filter((p) => Date.parse(p.createdAt) >= input.sinceMs);
             posts = posts.slice(0, input.maxPostsPerGroup);
-            let diagnosticKey = null;
-            if (!posts.length) {
-                try {
-                    diagnosticKey = await saveDiagnostic(group, res);
-                    if (diagnosticKey) totals.diagnostics += 1;
-                } catch (error) {
-                    log.warning(`Could not save diagnostic for group ${group.id}: ${String(error?.message ?? error)}`);
-                }
-            }
+            const diagnosticKey = posts.length ? null : await captureDiagnostic(group, res);
             await pushData({
                 recordType: 'group',
                 ...base,
@@ -115,7 +121,7 @@ export async function run({
                 status: posts.length ? 'ok' : 'no_posts_visible',
                 statusDetail: posts.length
                     ? null
-                    : 'The public group page loaded without a login wall, but the current parser found no posts. A diagnostic copy of that already-fetched response was saved for parser validation; no extra Facebook request was made.',
+                    : 'The public group page loaded without a login-wall classification, but the current parser found no posts. A diagnostic copy of that already-fetched response was saved for parser validation; no extra Facebook request was made.',
                 diagnosticKey,
                 scrapedAt: stamp(),
             });
@@ -136,7 +142,7 @@ export async function run({
     }
     return {
         ...totals,
-        note: 'Only what a public Facebook group shows to a logged-out visitor is read. The Actor uses Apify proxy infrastructure for network access but never logs in, supplies Facebook cookies/tokens, or bypasses a login wall. When a public page loads but the parser finds no posts, the already-fetched HTML may be saved as a diagnostic for parser development.',
+        note: 'Only what Facebook returns to a logged-out visitor is read. The Actor uses Apify proxy infrastructure but never logs in or supplies Facebook cookies/tokens. Responses classified as login walls are also saved as diagnostics because a dismissible login prompt can coexist with public group content.',
     };
 }
 
@@ -166,16 +172,16 @@ async function main() {
             fetch: (u) => fetchGroup(u, { proxyUrl }),
             saveDiagnostic: async (group, res) => {
                 const key = `DIAGNOSTIC_GROUP_${String(group.id).replace(/[^A-Za-z0-9_-]/g, '_')}`;
-                const header = `<!-- facebook-group-reader diagnostic\nrequested: ${group.url}\nfinal: ${res.finalUrl}\nhttpStatus: ${res.status}\nThis is the exact already-fetched logged-out public response used by the parser.\n-->\n`;
+                const header = `<!-- facebook-group-reader diagnostic\nrequested: ${group.url}\nfinal: ${res.finalUrl}\nhttpStatus: ${res.status}\nThis is the exact already-fetched logged-out public response used by the parser/classifier.\n-->\n`;
                 await Actor.setValue(key, `${header}${res.html}`, { contentType: 'text/html; charset=utf-8' });
-                log.info(`Saved parser diagnostic to key-value store key ${key} (${Buffer.byteLength(res.html, 'utf8')} bytes); no extra Facebook request.`);
+                log.info(`Saved response diagnostic to key-value store key ${key} (${Buffer.byteLength(res.html, 'utf8')} bytes); no extra Facebook request.`);
                 return key;
             },
             shouldStop: () => stop,
         });
         await Actor.setValue('OUTPUT', summary);
         log.info(
-            `Done: ${summary.groups} group(s), ${summary.posts} post(s), ${summary.loginWall} behind a login wall, ${summary.diagnostics} parser diagnostic(s).`,
+            `Done: ${summary.groups} group(s), ${summary.posts} post(s), ${summary.loginWall} login-wall classification(s), ${summary.diagnostics} response diagnostic(s).`,
         );
     } catch (error) {
         log.error(String(error?.message ?? error));
