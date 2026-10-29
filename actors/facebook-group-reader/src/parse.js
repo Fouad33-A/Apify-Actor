@@ -1,7 +1,5 @@
-// What a public Facebook group page shows to a visitor who is not logged in. No login, cookie or token is used. When
-// Facebook answers with its login page the result is "login_wall" and nothing is read. The page structure is not
-// documented and changes often, so the post reader is a best effort: it looks for Facebook's own embedded JSON for
-// message text, creation time and counts. Pure functions.
+// Parse only data Facebook itself embeds in public logged-out group HTML.
+// No Facebook authentication, account cookies, access tokens, private API calls, or CAPTCHA handling.
 import * as cheerio from 'cheerio';
 
 export function normalizeGroup(input) {
@@ -12,8 +10,7 @@ export function normalizeGroup(input) {
         /^([A-Za-z0-9._-]{3,})$/.exec(raw);
     if (!m) return { error: 'not_a_group_address' };
     const id = m[1];
-    if (['feed', 'discover', 'joins', 'create', 'search'].includes(id.toLowerCase()))
-        return { error: 'not_a_group_address' };
+    if (['feed', 'discover', 'joins', 'create', 'search'].includes(id.toLowerCase())) return { error: 'not_a_group_address' };
     return { id, url: `https://www.facebook.com/groups/${id}` };
 }
 
@@ -37,52 +34,139 @@ export function parseGroupMeta(html) {
     const description = og('description');
     const hay = `${description ?? ''} ${$('body').text().slice(0, 20_000)}`;
     const mm = /([\d][\d.,]*\s*[KMB]?)\s+(?:members|member)\b/i.exec(hay);
-    const privacy = /\bpublic group\b/i.test(hay) ? 'public' : /\bprivate group\b/i.test(hay) ? 'private' : null;
+    let privacy = /\bpublic group\b/i.test(hay) ? 'public' : /\bprivate group\b/i.test(hay) ? 'private' : null;
+    if (!privacy && /Anyone can see who(?:'|’)s in the group and what they post\./i.test(String(html))) privacy = 'public';
     return { name, description, memberCount: mm ? num(mm[1]) : null, privacy };
 }
 
-function* walk(node, depth = 0) {
-    if (depth > 40) return;
-    if (Array.isArray(node)) for (const n of node) yield* walk(n, depth + 1);
-    else if (node && typeof node === 'object') {
+function* walk(root) {
+    const stack = [root];
+    const seen = new Set();
+    while (stack.length) {
+        const node = stack.pop();
+        if (!node || typeof node !== 'object' || seen.has(node)) continue;
+        seen.add(node);
         yield node;
-        for (const v of Object.values(node)) yield* walk(v, depth + 1);
+        if (Array.isArray(node)) {
+            for (let i = node.length - 1; i >= 0; i--) stack.push(node[i]);
+        } else {
+            for (const value of Object.values(node)) stack.push(value);
+        }
     }
 }
 
-// posts from the JSON blobs embedded in the page: an object with message.text and a creation time
+const validPostUrl = (value) => typeof value === 'string' && /facebook\.com\/groups\/[^/]+\/(?:posts|permalink)\/\d+/i.test(value);
+const legacyIdFromUrl = (value) => /\/(?:posts|permalink)\/(\d+)/i.exec(String(value ?? ''))?.[1] ?? null;
+const isoFromUnix = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return new Date(n > 1e12 ? n : n * 1000).toISOString();
+};
+
+function firstNumber(...values) {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+    }
+    return null;
+}
+
+function mergeRecord(target, node) {
+    const message = typeof node?.message?.text === 'string' ? node.message.text.trim() : null;
+    const url = [node?.permalink_url, node?.url, node?.wwwURL].find(validPostUrl) ?? null;
+    const legacyId = String(node?.post_id ?? legacyIdFromUrl(url) ?? '') || null;
+    const storyId = typeof node?.id === 'string' && node.id.startsWith('Uzpf') ? node.id : null;
+    const feedbackId = typeof node?.feedback?.id === 'string' ? node.feedback.id :
+        (typeof node?.feedback_id === 'string' ? node.feedback_id : null);
+    const createdAt = isoFromUnix(node?.creation_time ?? node?.creationTime ?? node?.created_time);
+    const actor = node?.actors?.[0] ?? node?.feedback?.owning_profile ?? node?.author ?? null;
+    const fb = node?.feedback ?? {};
+    const reactions = firstNumber(
+        fb?.reaction_count?.count,
+        fb?.reactors?.count,
+        fb?.reaction_count_reduced,
+        node?.reaction_count?.count,
+    );
+    const comments = firstNumber(
+        fb?.comment_rendering_instance?.comments?.total_count,
+        fb?.comments_count_summary_renderer?.feedback?.comment_rendering_instance?.comments?.total_count,
+        fb?.comment_count?.total_count,
+        node?.comment_rendering_instance?.comments?.total_count,
+    );
+    const shares = firstNumber(fb?.share_count?.count, node?.share_count?.count);
+
+    if (message && !target.text) target.text = message;
+    if (url && !target.url) target.url = url;
+    if (legacyId && !target.postId) target.postId = legacyId;
+    if (storyId && !target.storyId) target.storyId = storyId;
+    if (feedbackId && !target.feedbackId) target.feedbackId = feedbackId;
+    if (createdAt && !target.createdAt) target.createdAt = createdAt;
+    if (actor?.name && !target.author) target.author = actor.name;
+    if (actor?.id && !target.authorId) target.authorId = actor.id;
+    if (reactions != null) target.reactions = reactions;
+    if (comments != null) target.comments = comments;
+    if (shares != null) target.shares = shares;
+}
+
+// Facebook's public group HTML streams a story in several Relay JSON fragments. Message, creation time,
+// permalink and engagement often live in DIFFERENT objects with the same Story id/post_id. The old parser
+// required them to coexist in one object and therefore returned zero posts from valid public responses.
+// This parser joins those public fragments by Story id / legacy post id and intentionally limits itself to
+// scripts belonging to the regular group feed, excluding highlighted/featured units.
 export function parsePosts(html, { includeAuthors = false } = {}) {
     const $ = cheerio.load(String(html ?? ''));
-    const posts = new Map();
-    $('script[type="application/json"]').each((_, el) => {
-        let json;
-        try {
-            json = JSON.parse($(el).contents().text());
-        } catch {
-            return;
+    const records = new Map();
+    const aliases = new Map();
+
+    const getRecord = (keys) => {
+        for (const key of keys) {
+            const existing = aliases.get(key);
+            if (existing) return existing;
         }
+        const record = { postId: null, storyId: null, feedbackId: null, url: null, text: null, createdAt: null, reactions: null, comments: null, shares: null, author: null, authorId: null };
+        records.set(record, record);
+        return record;
+    };
+
+    $('script[type="application/json"]').each((_, el) => {
+        const raw = $(el).contents().text();
+        // Avoid mixing old Highlights/Featured stories into the chronological discussion feed.
+        if (!/GroupsCometFeedRegularStories|group_feed/i.test(raw)) return;
+        let json;
+        try { json = JSON.parse(raw); } catch { return; }
+
         for (const node of walk(json)) {
-            const text = node?.message?.text;
-            const created = node?.creation_time ?? node?.creationTime ?? node?.created_time;
-            if (typeof text !== 'string' || !text.trim() || !created) continue;
-            const fb = node.feedback ?? node.comet_sections?.feedback ?? {};
-            const url = node.url ?? node.wwwURL ?? node.permalink_url ?? null;
-            const key = String(node.post_id ?? node.id ?? url ?? text.slice(0, 60));
-            if (posts.has(key)) continue;
-            posts.set(key, {
-                postId: node.post_id ?? node.id ?? null,
-                url,
-                text: text.trim().slice(0, 5000),
-                createdAt: new Date(Number(created) > 1e12 ? Number(created) : Number(created) * 1000).toISOString(),
-                reactions: fb.reaction_count?.count ?? fb.i18n_reaction_count ?? null,
-                comments:
-                    fb.comment_count?.total_count ??
-                    fb.comments_count_summary_renderer?.feedback?.comment_count?.total_count ??
-                    null,
-                shares: fb.share_count?.count ?? null,
-                ...(includeAuthors ? { author: node.actors?.[0]?.name ?? node.author?.name ?? null } : {}),
-            });
+            const url = [node?.permalink_url, node?.url, node?.wwwURL].find(validPostUrl) ?? null;
+            const postId = node?.post_id != null ? String(node.post_id) : legacyIdFromUrl(url);
+            const storyId = typeof node?.id === 'string' && node.id.startsWith('Uzpf') ? node.id : null;
+            const feedbackId = typeof node?.feedback?.id === 'string' ? node.feedback.id : null;
+            const hasPostSignal = Boolean(postId || storyId || url);
+            if (!hasPostSignal) continue;
+
+            const keys = [postId && `p:${postId}`, storyId && `s:${storyId}`, feedbackId && `f:${feedbackId}`].filter(Boolean);
+            const record = getRecord(keys);
+            for (const key of keys) aliases.set(key, record);
+            mergeRecord(record, node);
         }
     });
-    return [...posts.values()];
+
+    const out = [];
+    const dedupe = new Set();
+    for (const record of records.keys()) {
+        if (!record.text || !record.createdAt || !(record.postId || record.url)) continue;
+        const key = record.postId ?? record.url;
+        if (dedupe.has(key)) continue;
+        dedupe.add(key);
+        out.push({
+            postId: record.postId,
+            url: record.url,
+            text: record.text.slice(0, 5000),
+            createdAt: record.createdAt,
+            reactions: record.reactions,
+            comments: record.comments,
+            shares: record.shares,
+            ...(includeAuthors ? { author: record.author, authorId: record.authorId } : {}),
+        });
+    }
+    return out.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
