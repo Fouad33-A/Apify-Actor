@@ -69,3 +69,13 @@ export function postedAtFromId(videoId) {
         return null;
     }
 }
+
+// creator handles named anywhere in a result page (profile or video addresses)
+export function handlesIn(html) {
+    const text = String(html ?? '')
+        .replace(/%2F/gi, '/')
+        .replace(/%40/gi, '@');
+    const found = new Set();
+    for (const m of text.matchAll(new RegExp(`tiktok\\.com/@(${WORD})`, 'g'))) found.add(m[1].toLowerCase());
+    return [...found];
+}

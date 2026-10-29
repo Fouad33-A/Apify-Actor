@@ -3,7 +3,7 @@
 // answer is waited out; nothing is rotated or bypassed.
 import { gotScraping } from 'got-scraping';
 
-import { videoUrlsIn } from './video.js';
+import { handlesIn, videoUrlsIn } from './video.js';
 
 const sleep = (ms) =>
     new Promise((resolve) => {
@@ -38,6 +38,7 @@ export async function findVideoUrls({
     log = () => {},
 }) {
     const urls = new Map();
+    const handles = new Set();
     const attempts = [];
     let rateLimits = 0;
     for (const q of WORDINGS(tag)) {
@@ -50,6 +51,7 @@ export async function findVideoUrls({
                 if (attempt < 2) await sleep(backoffMs);
             }
             const found = res.status === 200 ? videoUrlsIn(res.body) : [];
+            if (res.status === 200) for (const h of handlesIn(res.body)) handles.add(h);
             const before = urls.size;
             for (const u of found) urls.set(u.split('/video/')[1], u);
             attempts.push({
@@ -68,5 +70,5 @@ export async function findVideoUrls({
         }
         if (urls.size >= want) break;
     }
-    return { urls: [...urls.values()], attempts, rateLimited: rateLimits > 0 };
+    return { urls: [...urls.values()], handles: [...handles], attempts, rateLimited: rateLimits > 0 };
 }

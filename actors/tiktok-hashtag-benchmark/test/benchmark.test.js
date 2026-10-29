@@ -178,3 +178,56 @@ describe('freshness', () => {
         expect(rows.find((r) => r.recordType === 'benchmark').dropped.tooOld).toBe(1);
     });
 });
+
+describe('creator embed', () => {
+    const idAt = (iso) => String((BigInt(Math.floor(Date.parse(iso) / 1000)) << 32n) + 7n);
+    const embedPage = (videos) =>
+        `<html><script id="__FRONTITY_CONNECT_STATE__" type="application/json">${JSON.stringify({ source: { data: { list: videos } } })}</script><script>var x=1</script></html>`;
+    it('reads videos with their id, caption, plays and post time, and keeps tagged recent ones', async () => {
+        const { parseEmbedPage, taggedRecent } = await import('../src/embed.js');
+        const recent = idAt('2026-10-10T00:00:00Z');
+        const old = idAt('2023-01-01T00:00:00Z');
+        const videos = parseEmbedPage(
+            embedPage([
+                { id: recent, desc: 'Tips #IGCSE', playCount: 5000, authorUniqueId: 'tutor' },
+                { id: old, desc: '#igcse', playCount: 1 },
+                { id: idAt('2026-10-11T00:00:00Z'), desc: 'no tag', playCount: 9 },
+            ]),
+        );
+        expect(videos).toHaveLength(3);
+        expect(videos[0]).toMatchObject({ id: recent, views: 5000, author: 'tutor' });
+        expect(taggedRecent(videos, { tag: 'igcse', recentDays: 365, now: NOW }).map((v) => v.id)).toEqual([recent]);
+    });
+    it('adds creator videos to the candidates and reports how many were found', async () => {
+        const rows = [];
+        const recent = idAt('2026-10-10T00:00:00Z');
+        const reads = [];
+        await run({
+            input: readInput({
+                hashtags: ['igcse'],
+                delayBetweenVideosMs: 0,
+                delayBetweenCreatorsMs: 0,
+                concurrency: 1,
+                maxCreatorsToRead: 2,
+            }),
+            pushData: async (r) => void rows.push(r),
+            search: async () => ({ urls: [], handles: ['tutor', 'other', 'third'], attempts: [], rateLimited: false }),
+            readEmbed: async (h) => (
+                reads.push(h),
+                {
+                    status: 200,
+                    html: embedPage(
+                        h === 'tutor'
+                            ? [{ id: recent, desc: 'x #igcse', playCount: 100, authorUniqueId: 'tutor' }]
+                            : [],
+                    ),
+                }
+            ),
+            fetchVideo: async () => ({ status: 200, html: page(item({ id: recent })) }),
+            now: () => NOW,
+        });
+        expect(reads).toEqual(['tutor', 'other']);
+        const b = rows.find((r) => r.recordType === 'benchmark');
+        expect(b).toMatchObject({ creatorsRead: 2, videosFromCreators: 1, videosUsed: 1 });
+    });
+});

@@ -60,7 +60,7 @@ Each video is one small page read. A hashtag with 50 videos costs a few cents of
 
 ## Tips and limits
 
-- **The sample is what search engines return**, usually tens of videos, not TikTok's own "top 50", which is not available without logging in. The row says `thin_sample` when fewer videos than your threshold were found.
+- **The sample is not TikTok's own "top 50"**, which is not available without logging in. The Actor finds creators who post under the hashtag through search, then reads each creator's recent videos from TikTok's public creator embed and keeps those that carry the hashtag. Search alone mostly returns old videos, so this second step is what gives a recent sample. The row says `thin_sample` when fewer videos than your threshold were found, and shows `creatorsRead` and `dropped` so you can see why.
 - Views are the numbers shown on each video page at the time it was read.
 - The search step is spaced about 5 seconds per request and waits out "too many requests" answers. Nothing is bypassed.
 - Country comes from TikTok's own "posted from" field; some videos have none and are counted as `unknown`.

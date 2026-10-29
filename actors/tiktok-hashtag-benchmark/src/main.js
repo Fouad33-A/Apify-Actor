@@ -1,6 +1,7 @@
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 
+import { fetchEmbed, parseEmbedPage, taggedRecent } from './embed.js';
 import { findVideoUrls, freshnessFor } from './search.js';
 import { summariseVideos } from './stats.js';
 import { parseVideoPage, postedAtFromId } from './video.js';
@@ -14,6 +15,8 @@ const DEFAULTS = {
     delayBetweenVideosMs: 600,
     concurrency: 3,
     minVideosForBenchmark: 10,
+    maxCreatorsToRead: 30,
+    delayBetweenCreatorsMs: 1500,
 };
 const sleep = (ms) =>
     new Promise((resolve) => {
@@ -60,6 +63,7 @@ export async function run({
     pushData,
     search = findVideoUrls,
     fetchVideo = fetchVideoPage,
+    readEmbed = fetchEmbed,
     shouldStop = () => false,
     now = () => Date.now(),
 }) {
@@ -74,6 +78,32 @@ export async function run({
             shouldStop,
             log: (m) => log.info(m),
         });
+        // recent videos with the hashtag from the creators the search found (TikTok's public creator embed)
+        const embed = { creatorsRead: 0, rateLimited: 0, videosFound: 0 };
+        const byId = new Map(found.urls.map((u) => [u.split('/video/')[1], u]));
+        for (const handle of (found.handles ?? []).slice(0, input.maxCreatorsToRead)) {
+            if (shouldStop()) break;
+            let res;
+            try {
+                res = await readEmbed(handle);
+                if (res.status === 429) {
+                    embed.rateLimited += 1;
+                    await sleep(15_000);
+                    res = await readEmbed(handle);
+                }
+            } catch {
+                continue;
+            }
+            if (res.status === 429) embed.rateLimited += 1;
+            if (res.status !== 200) continue;
+            embed.creatorsRead += 1;
+            for (const v of taggedRecent(parseEmbedPage(res.html), { tag, recentDays: input.recentDays, now: now() })) {
+                if (!byId.has(v.id)) embed.videosFound += 1;
+                byId.set(v.id, `https://www.tiktok.com/@${(v.author ?? handle).toLowerCase()}/video/${v.id}`);
+            }
+            if (input.delayBetweenCreatorsMs) await sleep(input.delayBetweenCreatorsMs);
+        }
+        found.urls = [...byId.values()];
         const dropped = { notTagged: 0, tooOld: 0, otherRegion: 0, unavailable: 0 };
         const kept = [];
         // the video id carries the post time, so old videos are skipped without reading their pages
@@ -137,6 +167,9 @@ export async function run({
             regionsWanted: input.regions,
             recentDays: input.recentDays,
             videoAddressesFound: found.urls.length,
+            creatorsRead: embed.creatorsRead,
+            videosFromCreators: embed.videosFound,
+            creatorEmbedRateLimited: embed.rateLimited,
             dropped,
             ...(stats ?? {}),
             searchAttempts: found.attempts,
