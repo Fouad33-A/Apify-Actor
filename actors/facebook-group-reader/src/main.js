@@ -53,8 +53,6 @@ function extractPublicFeedBootstrap(html) {
     const spinB = /"__spin_b"\s*:\s*"([^"]+)"/.exec(source)?.[1] ?? null;
     const spinT = /"__spin_t"\s*:\s*(\d+)/.exec(source)?.[1] ?? null;
 
-    // The first paginationGroup occurrence belongs to the streamed story payload. The regular-feed
-    // page_info arrives much later in RelayPrefetchedStreamCache, so inspect every matching label.
     let cursor = null;
     let hasNextPage = false;
     const label = 'GroupsCometFeedRegularStories_paginationGroup';
@@ -193,7 +191,7 @@ async function main() {
             discoverPagination: async (html, attempt) => discoverPaginationArtifacts(html, { proxyUrl: await proxyForAttempt(attempt), shouldStop: () => stop }),
             saveDiscovery: async (group, discovery) => {
                 const key = `PAGINATION_DISCOVERY_${String(group.id).replace(/[^A-Za-z0-9_-]/g, '_')}`;
-                await Actor.setValue(key, discovery, { contentType: 'application/json; charset=utf-8' }); return key;
+                await Actor.setValue(key, JSON.stringify(discovery, null, 2), { contentType: 'application/json; charset=utf-8' }); return key;
             },
             saveDiagnostic: async (group, response, label) => {
                 const suffix = String(label).replace(/[^A-Za-z0-9_-]/g, '_').toUpperCase();
