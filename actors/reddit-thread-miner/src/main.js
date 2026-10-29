@@ -63,6 +63,17 @@ export async function run({
         }
     }
 
+    async function archivedComments(thread, input) {
+        try {
+            const archived = await readArchive(thread.url, { limit: input.maxCommentsPerThread });
+            const comments = archived.comments?.map((c) => ({ ...c, ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) })) ?? [];
+            if (comments.length) totals.archiveCommentThreads += 1;
+            return { status: archived.status, comments, source: 'public_archive' };
+        } catch (error) {
+            return { status: 'archive_error', comments: [], source: 'public_archive', detail: String(error?.message ?? error) };
+        }
+    }
+
     for (const sub of input.subreddits) {
         if (shouldStop()) break;
         totals.subreddits += 1;
@@ -123,23 +134,22 @@ export async function run({
             if (input.includeComments && withComments < input.maxThreadsWithComments && input.maxCommentsPerThread > 0) {
                 withComments += 1;
                 if (thread.discoverySource === 'public_search') {
-                    const archived = await readArchive(thread.url, { limit: input.maxCommentsPerThread });
-                    commentsStatus = archived.status === 'ok' ? 'ok' : archived.status;
-                    commentsSource = 'public_archive';
-                    comments = archived.comments.map((c) => ({ ...c, ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
-                    if (comments.length) totals.archiveCommentThreads += 1;
+                    const archived = await archivedComments(thread, input);
+                    commentsStatus = archived.status;
+                    commentsSource = archived.source;
+                    comments = archived.comments;
                 } else {
                     const res = await ask(threadFeed(thread.url));
                     commentsStatus = res.status;
                     commentsSource = 'reddit_rss';
-                    if (res.status === 'ok') comments = parseAtom(res.body).filter((e) => e.kind === 'comment').slice(0, input.maxCommentsPerThread).map((c) => ({ author: c.author, createdAt: c.updated, text: c.text.slice(0, 1500), url: c.url, score: null, source: 'reddit_rss', ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
-                    else if (res.status === 'blocked') {
-                        const archived = await readArchive(thread.url, { limit: input.maxCommentsPerThread });
-                        if (archived.status === 'ok') {
-                            commentsStatus = 'ok'; commentsSource = 'public_archive';
-                            comments = archived.comments.map((c) => ({ ...c, ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
-                            totals.archiveCommentThreads += 1;
-                        } else halted ??= res;
+                    if (res.status === 'ok') {
+                        comments = parseAtom(res.body).filter((e) => e.kind === 'comment').slice(0, input.maxCommentsPerThread).map((c) => ({ author: c.author, createdAt: c.updated, text: c.text.slice(0, 1500), url: c.url, score: null, source: 'reddit_rss', ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
+                    } else if (res.status === 'blocked' || res.status === 'rate_limited') {
+                        const archived = await archivedComments(thread, input);
+                        commentsSource = archived.source;
+                        comments = archived.comments;
+                        commentsStatus = archived.status === 'ok' ? 'ok' : `${res.status}_archive_${archived.status}`;
+                        if (!comments.length) problems.push({ source: 'public_archive', threadId: thread.id, status: archived.status, detail: archived.detail ?? null });
                     }
                 }
             }
@@ -157,14 +167,14 @@ export async function run({
             totals.threads += 1;
         }
         totals.comments += commentsRead;
-        if (halted?.status === 'blocked') totals.blocked += 1;
+        if (halted?.status === 'blocked' && !threads.size) totals.blocked += 1;
         const status = threads.size ? 'ok' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_threads';
         await pushData({ recordType: 'subreddit', subreddit: sub, status, statusDetail: status === 'ok' || status === 'no_threads' ? null : (halted?.detail ?? problems[0]?.detail ?? null), sourceMode, threadsRead: threads.size, threadsWithComments: withComments, commentsRead, themeCounts, competitorCounts, problems, scrapedAt: stamp() });
         log.info(`r/${sub}: ${status}, ${threads.size} thread(s), ${commentsRead} comment(s), source ${sourceMode}`);
     }
     return {
         ...totals,
-        note: 'Reddit RSS is tried first. If Reddit blocks the Apify server, Brave Search discovers indexed Reddit threads. For top comments, the actor first uses Reddit thread RSS; when that is blocked, it reads a free public Reddit archive and sorts available comments by Reddit score before applying the requested limit. Archive coverage can lag or be incomplete. Nothing is bypassed and no paid service is used.',
+        note: 'Reddit RSS is tried first. If Reddit blocks thread discovery, Brave Search discovers indexed Reddit threads. For each selected thread, Reddit comment RSS is tried first; if that comment request is blocked or rate-limited, a free public Reddit archive is tried immediately for that same thread, regardless of how the thread was discovered. Available archive comments are sorted by Reddit score before the requested limit. Archive coverage can lag or be incomplete. Nothing is bypassed and no paid service is used.',
     };
 }
 
