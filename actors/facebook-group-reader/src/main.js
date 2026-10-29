@@ -80,7 +80,7 @@ export async function run({ input, pushData, fetch = fetchGroup, shouldStop = ()
                 ...base,
                 status: 'login_wall',
                 statusDetail:
-                    'Facebook showed its login page instead of the group. This Actor never logs in or uses cookies, so nothing was read. The group may be private, or Facebook may not show public groups to this kind of visitor.',
+                    'Facebook showed its login page instead of the group. This Actor never logs in or uses cookies, so nothing was read. The group may be private, or Facebook may not show public groups to this logged-out visitor.',
                 scrapedAt: stamp(),
             });
         } else {
@@ -99,7 +99,7 @@ export async function run({ input, pushData, fetch = fetchGroup, shouldStop = ()
                 status: posts.length ? 'ok' : 'no_posts_visible',
                 statusDetail: posts.length
                     ? null
-                    : 'the page loaded without a login but no posts could be read from it (they may need scrolling or a login to show)',
+                    : 'The public group page loaded without a login wall, but the current parser found no posts. This is reported separately so live Facebook markup can be validated without claiming success.',
                 scrapedAt: stamp(),
             });
             for (const p of posts)
@@ -119,7 +119,7 @@ export async function run({ input, pushData, fetch = fetchGroup, shouldStop = ()
     }
     return {
         ...totals,
-        note: 'Only what a public group shows to a logged-out visitor is read: no login, cookie or token. A group page that redirects to the Facebook login is reported as login_wall.',
+        note: 'Only what a public Facebook group shows to a logged-out visitor is read. The Actor uses Apify proxy infrastructure for network access but never logs in, supplies Facebook cookies/tokens, or bypasses a login wall. A page that Facebook redirects to login is reported as login_wall.',
     };
 }
 
@@ -133,8 +133,16 @@ async function main() {
     });
     try {
         const input = readInput(await Actor.getInput());
-        const proxy = input.proxyConfiguration ? await Actor.createProxyConfiguration(input.proxyConfiguration) : null;
-        const proxyUrl = proxy ? await proxy.newUrl() : undefined;
+        const proxyConfiguration = input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] };
+        let proxy;
+        try {
+            proxy = await Actor.createProxyConfiguration(proxyConfiguration);
+        } catch (error) {
+            throw new Error(`Could not initialize the configured Apify proxy: ${String(error?.message ?? error)}`);
+        }
+        if (!proxy) throw new Error('Apify proxy configuration was not created. Public Facebook group access requires the configured proxy route.');
+        const proxyUrl = await proxy.newUrl();
+        log.info(`Network route: ${input.proxyConfiguration ? 'input proxy configuration' : 'Apify RESIDENTIAL default'}; Facebook login/cookies are not used.`);
         const summary = await run({
             input,
             pushData: (r) => Actor.pushData(r),
