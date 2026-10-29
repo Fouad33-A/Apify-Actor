@@ -130,7 +130,6 @@ describe('run', () => {
             maxReviewRows: 1,
         });
         const summary = await run({ input, pushData, apple: appleStub, play: playStub, now });
-        // second target (gb) is not read: the cap of 1 review row was reached by the first
         expect(out.filter((r) => r.recordType === 'app')).toHaveLength(1);
         expect(summary.stoppedBecause).toBe('maxReviewRows');
     });
@@ -153,12 +152,14 @@ describe('run', () => {
         ]);
     });
 
-    it('can return summaries only', async () => {
+    it('can return summaries only without treating analyzed reviews as emitted review rows', async () => {
         const { out, pushData } = collect();
-        const input = readInput({ apps: ['111111'], includeReviews: false });
-        await run({ input, pushData, apple: appleStub, play: playStub, now });
+        const input = readInput({ apps: ['111111', '222222'], includeReviews: false, maxReviewRows: 1 });
+        const summary = await run({ input, pushData, apple: appleStub, play: playStub, now });
         expect(out.every((r) => r.recordType === 'app')).toBe(true);
+        expect(out).toHaveLength(2);
         expect(out[0].themeCounts.map((t) => t.theme)).toEqual(['crashes_bugs', 'support']);
         expect(out[0].reviewsKept).toBe(2);
+        expect(summary).toMatchObject({ appsRead: 2, reviewRows: 0, stoppedBecause: 'completed' });
     });
 });
