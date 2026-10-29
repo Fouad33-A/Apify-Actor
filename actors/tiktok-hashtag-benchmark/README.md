@@ -52,7 +52,7 @@ You can download the dataset in various formats such as JSON, HTML, CSV, or Exce
 | `medianEngagementRatePct`                         | Median of (likes + comments + shares) / views.                                   |
 | `viewTargets`                                     | Conservative, typical and ambitious targets (25th, 50th, 75th percentile).       |
 | `dropped`                                         | Why found videos were left out: not tagged, too old, other country, unavailable. |
-| `status`                                          | `ok`, `thin_sample`, `no_videos`.                                                |
+| `status`                                          | `ok`, `thin_sample`, `no_videos`, `discovery_rate_limited`, or `discovery_failed`.                                                |
 
 ## How much does it cost?
 

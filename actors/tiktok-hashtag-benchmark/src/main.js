@@ -75,6 +75,7 @@ export async function run({
             tag,
             want: input.maxVideosPerHashtag * 2,
             maxPages: input.maxSearchPages,
+            freshness: freshnessFor(input.recentDays),
             shouldStop,
             log: (m) => log.info(m),
         });
@@ -151,7 +152,18 @@ export async function run({
             for (const v of kept) await pushData({ recordType: 'video', hashtag: tag, status: 'ok', ...v, scrapedAt });
         totals.videosKept += kept.length;
         const stats = summariseVideos(kept);
-        const status = !kept.length ? 'no_videos' : kept.length < input.minVideosForBenchmark ? 'thin_sample' : 'ok';
+        const status =
+            !kept.length && found.discoveryStatus === 'rate_limited'
+                ? 'discovery_rate_limited'
+                : !kept.length && found.discoveryStatus === 'failed'
+                  ? 'discovery_failed'
+                  : !kept.length && found.urls.length > 0
+                    ? 'no_matching_videos'
+                    : !kept.length
+                      ? 'no_videos'
+                      : kept.length < input.minVideosForBenchmark
+                      ? 'thin_sample'
+                      : 'ok';
         await pushData({
             recordType: 'benchmark',
             hashtag: tag,
@@ -159,11 +171,15 @@ export async function run({
             statusDetail:
                 status === 'ok'
                     ? null
-                    : found.rateLimited && !found.urls.length
-                      ? 'the search engine limited the requests; try again later'
-                      : status === 'no_videos'
-                        ? 'no public video matching the filters was found through search'
-                        : `only ${kept.length} video(s) matched; treat the numbers as a rough guide`,
+                    : status === 'discovery_rate_limited'
+                      ? 'all public discovery sources were blocked or rate-limited; no benchmark was produced'
+                      : status === 'discovery_failed'
+                        ? 'all public discovery sources failed; no benchmark was produced'
+                        : status === 'no_matching_videos'
+                          ? `${found.urls.length} candidate video address(es) found; none matched the requested filters (tooOld=${dropped.tooOld}, otherRegion=${dropped.otherRegion}, notTagged=${dropped.notTagged}, unavailable=${dropped.unavailable})`
+                          : status === 'no_videos'
+                            ? 'public discovery succeeded but returned no candidate video addresses'
+                            : `only ${kept.length} video(s) matched; treat the numbers as a rough guide`,
             regionsWanted: input.regions,
             recentDays: input.recentDays,
             videoAddressesFound: found.urls.length,
@@ -172,6 +188,8 @@ export async function run({
             creatorEmbedRateLimited: embed.rateLimited,
             dropped,
             ...(stats ?? {}),
+            discoveryStatus: found.discoveryStatus ?? 'ok',
+            discoverySources: found.sourceResults ?? [],
             searchAttempts: found.attempts,
             scrapedAt,
         });
