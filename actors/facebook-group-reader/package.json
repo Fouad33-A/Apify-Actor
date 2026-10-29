@@ -1,7 +1,7 @@
 {
     "name": "facebook-group-reader",
     "version": "0.1.0",
-    "description": "Reads public Facebook groups in a logged-out browser session: group metadata and visible posts with engagement counts.",
+    "description": "Reads public Facebook group metadata and structured posts from logged-out public HTML.",
     "type": "module",
     "main": "src/main.js",
     "scripts": {
@@ -11,8 +11,7 @@
     "dependencies": {
         "apify": "^3.2.0",
         "cheerio": "^1.0.0",
-        "got-scraping": "^4.0.0",
-        "playwright": "*"
+        "got-scraping": "^4.0.0"
     },
     "engines": {
         "node": ">=18.0.0"
