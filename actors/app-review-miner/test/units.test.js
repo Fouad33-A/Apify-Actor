@@ -155,17 +155,25 @@ describe('readPlayReviews', () => {
                 if (star === 1) {
                     return {
                         data: [
-                            { id: 'one-new', score: 1, text: 'Newest one star complaint', date: '2026-10-30T00:00:00Z' },
-                            { id: 'one-mid', score: 1, text: 'Another one star complaint', date: '2026-10-29T00:00:00Z' },
+                            {
+                                id: 'one-new',
+                                score: 1,
+                                text: 'Newest one star complaint',
+                                date: '2026-10-30T00:00:00Z',
+                            },
+                            {
+                                id: 'one-mid',
+                                score: 1,
+                                text: 'Another one star complaint',
+                                date: '2026-10-29T00:00:00Z',
+                            },
                             { id: 'one-old', score: 1, text: 'Older one star complaint', date: '2026-10-28T00:00:00Z' },
                         ],
                         nextPaginationToken: null,
                     };
                 }
                 return {
-                    data: [
-                        { id: 'two-old', score: 2, text: 'Older two star complaint', date: '2026-10-01T00:00:00Z' },
-                    ],
+                    data: [{ id: 'two-old', score: 2, text: 'Older two star complaint', date: '2026-10-01T00:00:00Z' }],
                     nextPaginationToken: null,
                 };
             },

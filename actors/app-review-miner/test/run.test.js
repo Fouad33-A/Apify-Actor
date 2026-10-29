@@ -9,23 +9,70 @@ const collect = () => {
 };
 
 const appleStub = {
-    lookupApp: async (id) => ({ status: 200, app: { appId: id, name: 'Rival Notes', developer: 'Rival Inc', averageRating: 3.1, ratingCount: 900, url: 'https://apps.apple.com/x' } }),
+    lookupApp: async (id) => ({
+        status: 200,
+        app: {
+            appId: id,
+            name: 'Rival Notes',
+            developer: 'Rival Inc',
+            averageRating: 3.1,
+            ratingCount: 900,
+            url: 'https://apps.apple.com/x',
+        },
+    }),
     searchApps: async (term) => ({ apps: [{ appId: '222222', name: `${term} app` }] }),
     readAppleReviews: async (id, country, { accept }) => {
         const all = [
-            { reviewId: 'a1', rating: 1, title: 'Crash', text: 'Crashes all the time, and support never replied', date: '2026-10-20T00:00:00.000Z', helpfulVotes: 3 },
-            { reviewId: 'a2', rating: 5, title: 'Love', text: 'Best app ever, five stars from me', date: '2026-10-21T00:00:00.000Z', helpfulVotes: 0 },
-            { reviewId: 'a3', rating: 2, title: 'Meh', text: 'Nothing special about it at all', date: '2026-10-22T00:00:00.000Z', helpfulVotes: 0 },
+            {
+                reviewId: 'a1',
+                rating: 1,
+                title: 'Crash',
+                text: 'Crashes all the time, and support never replied',
+                date: '2026-10-20T00:00:00.000Z',
+                helpfulVotes: 3,
+            },
+            {
+                reviewId: 'a2',
+                rating: 5,
+                title: 'Love',
+                text: 'Best app ever, five stars from me',
+                date: '2026-10-21T00:00:00.000Z',
+                helpfulVotes: 0,
+            },
+            {
+                reviewId: 'a3',
+                rating: 2,
+                title: 'Meh',
+                text: 'Nothing special about it at all',
+                date: '2026-10-22T00:00:00.000Z',
+                helpfulVotes: 0,
+            },
         ];
         return { reviews: all.filter(accept), reviewsRead: all.length, pages: 1, note: null };
     },
 };
 const playStub = {
-    lookupPlayApp: async (id) => ({ appId: id, name: 'Rival Notes', developer: 'Rival Inc', averageRating: 3.4, ratingCount: 5000, url: 'https://play.google.com/x' }),
+    lookupPlayApp: async (id) => ({
+        appId: id,
+        name: 'Rival Notes',
+        developer: 'Rival Inc',
+        averageRating: 3.4,
+        ratingCount: 5000,
+        url: 'https://play.google.com/x',
+    }),
     searchPlayApps: async () => [{ appId: 'com.rival.notes' }],
     readPlayReviews: async (id, { stars, accept }) => {
         expect(stars).toEqual([1, 2]);
-        const all = [{ reviewId: 'g1', rating: 1, title: null, text: 'Charged twice, I want a refund now', date: '2026-10-25T00:00:00.000Z', helpfulVotes: 7 }];
+        const all = [
+            {
+                reviewId: 'g1',
+                rating: 1,
+                title: null,
+                text: 'Charged twice, I want a refund now',
+                date: '2026-10-25T00:00:00.000Z',
+                helpfulVotes: 7,
+            },
+        ];
         return { reviews: all.filter(accept), reviewsRead: 40, note: null };
     },
 };
@@ -56,7 +103,9 @@ describe('makeAccept', () => {
 describe('run', () => {
     it('mines both stores, classifies complaints and writes review and app rows', async () => {
         const { out, pushData } = collect();
-        const input = readInput({ apps: ['https://apps.apple.com/us/app/rival/id111111', 'com.rival.notes', 'not an app'] });
+        const input = readInput({
+            apps: ['https://apps.apple.com/us/app/rival/id111111', 'com.rival.notes', 'not an app'],
+        });
         const summary = await run({ input, pushData, apple: appleStub, play: playStub, now });
         const reviews = out.filter((r) => r.recordType === 'review');
         expect(reviews.map((r) => [r.store, r.reviewId, r.themes])).toEqual([
@@ -66,14 +115,21 @@ describe('run', () => {
         ]);
         const apps = out.filter((r) => r.recordType === 'app');
         expect(apps.map((a) => [a.store ?? null, a.status, a.reviewsRead ?? null, a.reviewsKept ?? null])).toEqual([
-            [null, 'invalid_input', null, null], ['apple', 'ok', 3, 2], ['google', 'ok', 40, 1],
+            [null, 'invalid_input', null, null],
+            ['apple', 'ok', 3, 2],
+            ['google', 'ok', 40, 1],
         ]);
         expect(summary).toMatchObject({ appsRead: 2, reviewRows: 3, stoppedBecause: 'completed' });
     });
 
     it('finds apps by keyword and honours maxReviewRows', async () => {
         const { out, pushData } = collect();
-        const input = readInput({ searchKeywords: ['notes'], searchStores: ['apple'], countries: ['us', 'gb'], maxReviewRows: 1 });
+        const input = readInput({
+            searchKeywords: ['notes'],
+            searchStores: ['apple'],
+            countries: ['us', 'gb'],
+            maxReviewRows: 1,
+        });
         const summary = await run({ input, pushData, apple: appleStub, play: playStub, now });
         expect(out.filter((r) => r.recordType === 'app')).toHaveLength(1);
         expect(summary.stoppedBecause).toBe('maxReviewRows');
@@ -81,32 +137,59 @@ describe('run', () => {
 
     it('enforces maxAppsPerSearch and keeps Apple and Google targets distinct', async () => {
         const { out, pushData } = collect();
-        const noisyApple = { ...appleStub, searchApps: async () => ({ apps: [{ appId: '111111' }, { appId: '222222' }] }) };
-        const noisyPlay = { ...playStub, searchPlayApps: async () => [{ appId: 'com.one.app' }, { appId: 'com.two.app' }] };
-        const input = readInput({ searchKeywords: ['notes'], searchStores: ['apple', 'google'], maxAppsPerSearch: 1, maxReviewsPerApp: 1, maxReviewRows: 2 });
+        const noisyApple = {
+            ...appleStub,
+            searchApps: async () => ({ apps: [{ appId: '111111' }, { appId: '222222' }] }),
+        };
+        const noisyPlay = {
+            ...playStub,
+            searchPlayApps: async () => [{ appId: 'com.one.app' }, { appId: 'com.two.app' }],
+        };
+        const input = readInput({
+            searchKeywords: ['notes'],
+            searchStores: ['apple', 'google'],
+            maxAppsPerSearch: 1,
+            maxReviewsPerApp: 1,
+            maxReviewRows: 10, // the fake Apple reader ignores the review budget, so leave room for its rows
+        });
         const summary = await run({ input, pushData, apple: noisyApple, play: noisyPlay, now });
         expect(out.filter((r) => r.recordType === 'app').map((r) => [r.store, r.appId])).toEqual([
-            ['apple', '111111'], ['google', 'com.one.app'],
+            ['apple', '111111'],
+            ['google', 'com.one.app'],
         ]);
         expect(summary).toMatchObject({ appsRead: 2, targets: 2 });
     });
 
     it('isolates keyword-search failures by store', async () => {
         const { out, pushData } = collect();
-        const failingApple = { ...appleStub, searchApps: async () => { throw new Error('Apple search down'); } };
+        const failingApple = {
+            ...appleStub,
+            searchApps: async () => {
+                throw new Error('Apple search down');
+            },
+        };
         const input = readInput({ searchKeywords: ['notes'], searchStores: ['apple', 'google'], maxAppsPerSearch: 1 });
         const summary = await run({ input, pushData, apple: failingApple, play: playStub, now });
         expect(out.filter((r) => r.recordType === 'app').map((r) => r.store)).toEqual(['google']);
-        expect(summary.problems).toEqual([{ input: 'notes', store: 'apple', problem: 'search failed: Apple search down' }]);
+        expect(summary.problems).toEqual([
+            { input: 'notes', store: 'apple', problem: 'search failed: Apple search down' },
+        ]);
     });
 
     it('reports a store failure on the app row instead of stopping the run', async () => {
         const { out, pushData } = collect();
         const input = readInput({ apps: ['com.gone.app', 'com.rival.notes'] });
-        const failing = { ...playStub, lookupPlayApp: async (id) => { if (id === 'com.gone.app') throw new Error('App not found (404)'); return playStub.lookupPlayApp(id); } };
+        const failing = {
+            ...playStub,
+            lookupPlayApp: async (id) => {
+                if (id === 'com.gone.app') throw new Error('App not found (404)');
+                return playStub.lookupPlayApp(id);
+            },
+        };
         await run({ input, pushData, apple: appleStub, play: failing, now });
         expect(out.filter((r) => r.recordType === 'app').map((a) => [a.appId, a.status])).toEqual([
-            ['com.gone.app', 'not_found'], ['com.rival.notes', 'ok'],
+            ['com.gone.app', 'not_found'],
+            ['com.rival.notes', 'ok'],
         ]);
     });
 

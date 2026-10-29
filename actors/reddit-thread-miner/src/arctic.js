@@ -45,12 +45,18 @@ export async function fetchArcticComments(threadUrlOrId, { limit = 20, fetch = f
     }
 
     const comments = [...byId.values()]
-        .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || (Number(a.created_utc) || 0) - (Number(b.created_utc) || 0))
+        .sort(
+            (a, b) =>
+                (Number(b.score) || 0) - (Number(a.score) || 0) ||
+                (Number(a.created_utc) || 0) - (Number(b.created_utc) || 0),
+        )
         .slice(0, limit)
         .map((row) => ({
             id: row.id,
             author: row.author && row.author !== '[deleted]' ? row.author : null,
-            createdAt: Number.isFinite(Number(row.created_utc)) ? new Date(Number(row.created_utc) * 1000).toISOString() : null,
+            createdAt: Number.isFinite(Number(row.created_utc))
+                ? new Date(Number(row.created_utc) * 1000).toISOString()
+                : null,
             text: row.body.slice(0, 1500),
             score: Number.isFinite(Number(row.score)) ? Number(row.score) : null,
             url: `https://www.reddit.com/comments/${threadId}/_/${row.id}/`,

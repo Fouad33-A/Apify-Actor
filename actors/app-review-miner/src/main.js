@@ -94,7 +94,11 @@ export async function run({ input, pushData, apple = {}, play = {}, now = Date.n
                     for (const country of input.countries) add('apple', app.appId, country, term);
                 }
             } catch (error) {
-                problems.push({ input: term, store: 'apple', problem: `search failed: ${String(error?.message ?? error)}` });
+                problems.push({
+                    input: term,
+                    store: 'apple',
+                    problem: `search failed: ${String(error?.message ?? error)}`,
+                });
             }
         }
         if (input.searchStores.includes('google')) {
@@ -108,7 +112,11 @@ export async function run({ input, pushData, apple = {}, play = {}, now = Date.n
                     for (const country of input.countries) add('google', app.appId, country, term);
                 }
             } catch (error) {
-                problems.push({ input: term, store: 'google', problem: `search failed: ${String(error?.message ?? error)}` });
+                problems.push({
+                    input: term,
+                    store: 'google',
+                    problem: `search failed: ${String(error?.message ?? error)}`,
+                });
             }
         }
     }

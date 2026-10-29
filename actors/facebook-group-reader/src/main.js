@@ -139,8 +139,8 @@ export async function run({
             totals.httpAttempts++;
             if (attempt > 1) totals.sessionRotations++;
             log.info(
-                `group ${group.id}: anonymous HTTP attempt ${attempt}/${input.maxSessionAttempts}; `
-                + `collected=${posts.length}/${input.maxPostsPerGroup}.`,
+                `group ${group.id}: anonymous HTTP attempt ${attempt}/${input.maxSessionAttempts}; ` +
+                    `collected=${posts.length}/${input.maxPostsPerGroup}.`,
             );
 
             let response;
@@ -173,8 +173,8 @@ export async function run({
             const before = posts.length;
             posts = mergePosts(posts, found);
             log.info(
-                `group ${group.id}: public HTML exposed ${found.length} structured post(s); `
-                + `${posts.length - before} new; merged total=${posts.length}.`,
+                `group ${group.id}: public HTML exposed ${found.length} structured post(s); ` +
+                    `${posts.length - before} new; merged total=${posts.length}.`,
             );
         }
 
@@ -191,9 +191,10 @@ export async function run({
                 postsVisible: posts.length,
                 sourceSurface: 'public_html',
                 status: 'ok',
-                statusDetail: posts.length < input.maxPostsPerGroup
-                    ? `Anonymous public HTML exposed ${posts.length}/${input.maxPostsPerGroup} requested post(s).`
-                    : null,
+                statusDetail:
+                    posts.length < input.maxPostsPerGroup
+                        ? `Anonymous public HTML exposed ${posts.length}/${input.maxPostsPerGroup} requested post(s).`
+                        : null,
                 scrapedAt: stamp(),
             });
             for (const post of posts) {
@@ -228,13 +229,13 @@ export async function run({
                 status: sawLoginWall
                     ? 'login_wall'
                     : bestResponse?.status === 404
-                        ? 'not_found'
-                        : lastError
-                            ? 'http_error'
-                            : 'no_posts_visible',
+                      ? 'not_found'
+                      : lastError
+                        ? 'http_error'
+                        : 'no_posts_visible',
                 statusDetail: sawLoginWall
                     ? 'Facebook redirected the anonymous public feed to login.'
-                    : lastError?.message ?? 'No parseable public posts were exposed.',
+                    : (lastError?.message ?? 'No parseable public posts were exposed.'),
                 diagnosticKey,
                 scrapedAt: stamp(),
             });
@@ -269,9 +270,9 @@ async function main() {
         if (!proxy) throw new Error('Apify proxy configuration was not created.');
 
         log.info(
-            `Network route: ${input.proxyConfiguration ? 'input proxy configuration' : 'Apify RESIDENTIAL default'} `
-            + `with up to ${input.maxSessionAttempts} anonymous HTTP session attempt(s) per group; `
-            + 'Facebook authentication is not used.',
+            `Network route: ${input.proxyConfiguration ? 'input proxy configuration' : 'Apify RESIDENTIAL default'} ` +
+                `with up to ${input.maxSessionAttempts} anonymous HTTP session attempt(s) per group; ` +
+                'Facebook authentication is not used.',
         );
 
         const proxyByAttempt = new Map();
@@ -286,11 +287,14 @@ async function main() {
         const summary = await run({
             input,
             pushData: (record) => Actor.pushData(record),
-            fetchAttempt: async (url, attempt) => fetchGroup(url, {
-                proxyUrl: await proxyForAttempt(attempt),
-            }),
+            fetchAttempt: async (url, attempt) =>
+                fetchGroup(url, {
+                    proxyUrl: await proxyForAttempt(attempt),
+                }),
             saveDiagnostic: async (group, response, label) => {
-                const suffix = String(label).replace(/[^A-Za-z0-9_-]/g, '_').toUpperCase();
+                const suffix = String(label)
+                    .replace(/[^A-Za-z0-9_-]/g, '_')
+                    .toUpperCase();
                 const key = `DIAGNOSTIC_GROUP_${String(group.id).replace(/[^A-Za-z0-9_-]/g, '_')}_${suffix}`;
                 await Actor.setValue(key, response.html, { contentType: 'text/html; charset=utf-8' });
                 return key;
@@ -300,9 +304,9 @@ async function main() {
 
         await Actor.setValue('OUTPUT', summary);
         log.info(
-            `Done: ${summary.groups} group(s), ${summary.posts} post(s), `
-            + `${summary.httpAttempts} HTTP attempt(s), ${summary.sessionRotations} session rotation(s), `
-            + `${summary.diagnostics} diagnostic(s).`,
+            `Done: ${summary.groups} group(s), ${summary.posts} post(s), ` +
+                `${summary.httpAttempts} HTTP attempt(s), ${summary.sessionRotations} session rotation(s), ` +
+                `${summary.diagnostics} diagnostic(s).`,
         );
     } catch (error) {
         log.error(String(error.stack ?? error.message ?? error));

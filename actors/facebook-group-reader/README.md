@@ -16,14 +16,14 @@ Reads what a **public Facebook group exposes in logged-out public HTML**: group 
 
 ## Input
 
-| Field | Meaning |
-| --- | --- |
-| `groups` | Public Facebook group addresses. |
-| `maxPostsPerGroup` | Maximum posts requested. Facebook may expose fewer in logged-out HTML. |
-| `sinceDate` | Optional lower date bound for returned posts. |
-| `includeAuthors` | Off by default so personal names are not collected unless requested. |
+| Field                | Meaning                                                                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `groups`             | Public Facebook group addresses.                                                                                                                     |
+| `maxPostsPerGroup`   | Maximum posts requested. Facebook may expose fewer in logged-out HTML.                                                                               |
+| `sinceDate`          | Optional lower date bound for returned posts.                                                                                                        |
+| `includeAuthors`     | Off by default so personal names are not collected unless requested.                                                                                 |
 | `maxSessionAttempts` | Fresh anonymous HTTP attempts per group. Default `1`; increase only for login/block resilience. Extra sessions do not guarantee deeper feed results. |
-| `proxyConfiguration` | Optional. By default the Actor uses Apify residential proxies. |
+| `proxyConfiguration` | Optional. By default the Actor uses Apify residential proxies.                                                                                       |
 
 ## Output
 
@@ -45,12 +45,12 @@ The dataset can be exported through Apify in formats such as JSON, CSV and Excel
 
 ### Data table
 
-| Field | Meaning |
-| --- | --- |
-| `memberCount`, `name`, `privacy` | Group metadata when Facebook exposes it publicly. |
-| `text`, `createdAt`, `url`, `postId` | Structured public post fields when embedded in the page. |
-| `reactions`, `comments`, `shares` | Engagement counts when present in the public payload. |
-| `status` | `ok`, `no_posts_visible`, `login_wall`, `not_found`, `http_error`, or `invalid_input`. |
+| Field                                | Meaning                                                                                |
+| ------------------------------------ | -------------------------------------------------------------------------------------- |
+| `memberCount`, `name`, `privacy`     | Group metadata when Facebook exposes it publicly.                                      |
+| `text`, `createdAt`, `url`, `postId` | Structured public post fields when embedded in the page.                               |
+| `reactions`, `comments`, `shares`    | Engagement counts when present in the public payload.                                  |
+| `status`                             | `ok`, `no_posts_visible`, `login_wall`, `not_found`, `http_error`, or `invalid_input`. |
 
 ## Cost behavior
 

@@ -19,3 +19,30 @@ jobs:
             - run: npm run lint
             - run: npm run format:check
             - run: npm test
+
+    actors:
+        runs-on: ubuntu-24.04
+        strategy:
+            fail-fast: false
+            matrix:
+                actor:
+                    - app-review-miner
+                    - competitor-price-watcher
+                    - facebook-group-reader
+                    - reddit-thread-miner
+                    - search-interest-snapshot
+                    - telegram-channel-stats
+                    - tiktok-creator-search
+                    - tiktok-hashtag-benchmark
+        defaults:
+            run:
+                working-directory: actors/${{ matrix.actor }}
+        steps:
+            - uses: actions/checkout@v7
+            - uses: actions/setup-node@v7
+              with:
+                  node-version: 24
+                  cache: npm
+                  cache-dependency-path: actors/${{ matrix.actor }}/package-lock.json
+            - run: npm ci
+            - run: npm test
