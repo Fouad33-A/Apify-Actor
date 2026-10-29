@@ -7,7 +7,7 @@ import { parseVideoPage } from './video.js';
 
 const DEFAULTS = {
     maxVideosPerHashtag: 50,
-    recentDays: 90,
+    recentDays: 365,
     regions: [],
     maxSearchPages: 2,
     includeVideos: true,

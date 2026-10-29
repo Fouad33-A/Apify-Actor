@@ -16,13 +16,13 @@ Finds **public TikTok videos for a hashtag** (for example `#igcse`, `#satmath`, 
 
 ## Input
 
-| Field                               | Meaning                                                                   |
-| ----------------------------------- | ------------------------------------------------------------------------- |
-| `hashtags`                          | Hashtags, with or without #.                                              |
-| `regions`                           | Optional country codes; only videos posted from these countries are used. |
-| `maxVideosPerHashtag`, `recentDays` | How many videos to use and how recent they must be.                       |
-| `minVideosForBenchmark`             | Below this the row says `thin_sample`.                                    |
-| `includeVideos`                     | Add the video rows.                                                       |
+| Field                               | Meaning                                                                          |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| `hashtags`                          | Hashtags, with or without #.                                                     |
+| `regions`                           | Optional country codes; only videos posted from these countries are used.        |
+| `maxVideosPerHashtag`, `recentDays` | How many videos to use and how recent they must be (default: the last 365 days). |
+| `minVideosForBenchmark`             | Below this the row says `thin_sample`.                                           |
+| `includeVideos`                     | Add the video rows.                                                              |
 
 ## Output
 

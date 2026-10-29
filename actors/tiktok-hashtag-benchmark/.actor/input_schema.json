@@ -29,9 +29,9 @@
         "recentDays": {
             "title": "Only videos from the last (days)",
             "type": "integer",
-            "description": "Older videos are left out of the benchmark.",
+            "description": "Older videos are left out of the benchmark. Search engines tend to return older videos, so the default is a year; lower it for a fresher but smaller sample (the benchmark row shows how many videos were dropped as too old).",
             "editor": "number",
-            "default": 90,
+            "default": 365,
             "minimum": 1
         },
         "minVideosForBenchmark": {
