@@ -196,9 +196,9 @@ export async function run({ input, pushData, fetch = fetchGroup, browserRead = n
         const desktopMeta = parseGroupMeta(desktop.html), desktopWall = isLoginWall({ finalUrl: desktop.finalUrl, html: desktop.html });
         let selected = desktop, surface = 'desktop_html', posts = desktopWall ? [] : parsePosts(desktop.html, { includeAuthors: input.includeAuthors });
         const hasMeta = !desktopWall && (Boolean(desktopMeta.name && desktopMeta.name !== 'Facebook') || Boolean(desktopMeta.description));
-        if (!posts.length && browserRead && hasMeta && !shouldStop()) {
+        if (!posts.length && browserRead && !shouldStop()) {
             totals.browserFallbacks++;
-            log.info(`group ${group.id}: public HTML has metadata but no feed records; continuing the same anonymous residential session in Chromium and establishing Facebook cookie consent before retrying the public group.`);
+            log.info(`group ${group.id}: HTTP 200 returned no feed records; trying the public group in the same anonymous residential Chromium session with Facebook cookie state.`);
             try {
                 const rendered = await browserRead(group, { maxPosts: input.maxPostsPerGroup, includeAuthors: input.includeAuthors, cookies: desktop.cookies ?? [] });
                 selected = rendered; surface = 'logged_out_browser_cookie_retry'; posts = rendered.posts?.length ? rendered.posts : parsePosts(rendered.html, { includeAuthors: input.includeAuthors });
@@ -214,7 +214,7 @@ export async function run({ input, pushData, fetch = fetchGroup, browserRead = n
             await pushData({ recordType: 'group', ...base, status: 'login_wall', statusDetail: 'Facebook returned no usable public group content; the Actor never logs in, supplies credentials, or bypasses the wall.', diagnosticKey, scrapedAt: stamp() });
         } else {
             const diagnosticKey = posts.length ? null : await capture(group, selected, surface);
-            await pushData({ recordType: 'group', ...base, ...meta, postsVisible: posts.length, sourceSurface: surface, status: posts.length ? 'ok' : 'no_posts_visible', statusDetail: posts.length ? null : `Facebook exposed public group metadata but no parseable posts after the ${surface} attempt.`, diagnosticKey, scrapedAt: stamp() });
+            await pushData({ recordType: 'group', ...base, ...meta, postsVisible: posts.length, sourceSurface: surface, status: posts.length ? 'ok' : 'no_posts_visible', statusDetail: posts.length ? null : `Facebook exposed no parseable public posts after the ${surface} attempt.`, diagnosticKey, scrapedAt: stamp() });
             for (const p of posts) await pushData({ recordType: 'post', groupId: group.id, groupUrl: group.url, sourceSurface: surface, ...p, status: 'ok', scrapedAt: stamp() });
             totals.posts += posts.length; if (posts.length) totals.ok++;
         }
