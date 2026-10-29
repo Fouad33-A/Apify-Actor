@@ -52,8 +52,9 @@ export async function searchPlayApps(term, { country, lang, limit = 10, gplay } 
 }
 
 /**
- * Reads reviews filtered by star rating (the store filters, so no low-rating review is skipped by a page limit).
- * `stars` is a list such as [1, 2]; with an empty list every rating is read.
+ * Reads reviews filtered by star rating (the store filters, so no low-rating review is skipped by an unfiltered page).
+ * Each requested star stream is read independently, then all accepted reviews are merged and the newest `maxReviews`
+ * are returned overall. This avoids imposing an artificial equal quota per star rating.
  */
 export async function readPlayReviews(
     appId,
@@ -61,21 +62,24 @@ export async function readPlayReviews(
 ) {
     const g = gplay ?? (await loadGplay());
     const kept = [];
+    const seen = new Set();
     let read = 0;
     let note = null;
     const starList = stars.length ? stars : [null];
-    const perStar = Math.ceil(maxReviews / starList.length);
+
     for (const star of starList) {
         let token = null;
-        let got = 0;
+        let acceptedForStar = 0;
         try {
             do {
+                const remaining = maxReviews - acceptedForStar;
+                if (remaining <= 0) break;
                 const res = await g.reviews({
                     appId,
                     country,
                     lang,
                     sort: g.sort.NEWEST,
-                    num: Math.min(150, perStar - got),
+                    num: Math.min(150, remaining),
                     paginate: true,
                     nextPaginationToken: token,
                     ...(star ? { stars: star } : {}),
@@ -84,18 +88,22 @@ export async function readPlayReviews(
                 read += res.data.length;
                 for (const r of res.data) {
                     const review = wrap(r, appId, country);
-                    if (accept(review) && got < perStar) {
-                        kept.push(review);
-                        got += 1;
-                    }
+                    if (!accept(review)) continue;
+                    const key = review.reviewId ?? `${review.rating}:${review.date}:${review.author}:${review.text}`;
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    kept.push(review);
+                    acceptedForStar += 1;
+                    if (acceptedForStar >= maxReviews) break;
                 }
                 if (!res.data.length) break;
-            } while (token && got < perStar);
+            } while (token && acceptedForStar < maxReviews);
         } catch (error) {
             note = `Google Play review reading stopped: ${String(error?.message ?? error)}`;
             break;
         }
     }
-    kept.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+    kept.sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
     return { reviews: kept.slice(0, maxReviews), reviewsRead: read, note };
 }
