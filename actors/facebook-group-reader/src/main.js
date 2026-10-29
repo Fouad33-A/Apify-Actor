@@ -35,8 +35,15 @@ export async function fetchGroup(url, { proxyUrl } = {}) {
     return { status: res.statusCode, html: res.body, finalUrl: res.url };
 }
 
-export async function run({ input, pushData, fetch = fetchGroup, shouldStop = () => false, now = () => new Date() }) {
-    const totals = { groups: 0, ok: 0, loginWall: 0, posts: 0 };
+export async function run({
+    input,
+    pushData,
+    fetch = fetchGroup,
+    saveDiagnostic = async () => null,
+    shouldStop = () => false,
+    now = () => new Date(),
+}) {
+    const totals = { groups: 0, ok: 0, loginWall: 0, posts: 0, diagnostics: 0 };
     const stamp = () => now().toISOString();
     for (const bad of input.invalid) {
         await pushData({
@@ -88,6 +95,15 @@ export async function run({ input, pushData, fetch = fetchGroup, shouldStop = ()
             let posts = parsePosts(res.html, { includeAuthors: input.includeAuthors });
             if (input.sinceMs != null) posts = posts.filter((p) => Date.parse(p.createdAt) >= input.sinceMs);
             posts = posts.slice(0, input.maxPostsPerGroup);
+            let diagnosticKey = null;
+            if (!posts.length) {
+                try {
+                    diagnosticKey = await saveDiagnostic(group, res);
+                    if (diagnosticKey) totals.diagnostics += 1;
+                } catch (error) {
+                    log.warning(`Could not save diagnostic for group ${group.id}: ${String(error?.message ?? error)}`);
+                }
+            }
             await pushData({
                 recordType: 'group',
                 ...base,
@@ -99,7 +115,8 @@ export async function run({ input, pushData, fetch = fetchGroup, shouldStop = ()
                 status: posts.length ? 'ok' : 'no_posts_visible',
                 statusDetail: posts.length
                     ? null
-                    : 'The public group page loaded without a login wall, but the current parser found no posts. This is reported separately so live Facebook markup can be validated without claiming success.',
+                    : 'The public group page loaded without a login wall, but the current parser found no posts. A diagnostic copy of that already-fetched response was saved for parser validation; no extra Facebook request was made.',
+                diagnosticKey,
                 scrapedAt: stamp(),
             });
             for (const p of posts)
@@ -119,7 +136,7 @@ export async function run({ input, pushData, fetch = fetchGroup, shouldStop = ()
     }
     return {
         ...totals,
-        note: 'Only what a public Facebook group shows to a logged-out visitor is read. The Actor uses Apify proxy infrastructure for network access but never logs in, supplies Facebook cookies/tokens, or bypasses a login wall. A page that Facebook redirects to login is reported as login_wall.',
+        note: 'Only what a public Facebook group shows to a logged-out visitor is read. The Actor uses Apify proxy infrastructure for network access but never logs in, supplies Facebook cookies/tokens, or bypasses a login wall. When a public page loads but the parser finds no posts, the already-fetched HTML may be saved as a diagnostic for parser development.',
     };
 }
 
@@ -147,11 +164,18 @@ async function main() {
             input,
             pushData: (r) => Actor.pushData(r),
             fetch: (u) => fetchGroup(u, { proxyUrl }),
+            saveDiagnostic: async (group, res) => {
+                const key = `DIAGNOSTIC_GROUP_${String(group.id).replace(/[^A-Za-z0-9_-]/g, '_')}`;
+                const header = `<!-- facebook-group-reader diagnostic\nrequested: ${group.url}\nfinal: ${res.finalUrl}\nhttpStatus: ${res.status}\nThis is the exact already-fetched logged-out public response used by the parser.\n-->\n`;
+                await Actor.setValue(key, `${header}${res.html}`, { contentType: 'text/html; charset=utf-8' });
+                log.info(`Saved parser diagnostic to key-value store key ${key} (${Buffer.byteLength(res.html, 'utf8')} bytes); no extra Facebook request.`);
+                return key;
+            },
             shouldStop: () => stop,
         });
         await Actor.setValue('OUTPUT', summary);
         log.info(
-            `Done: ${summary.groups} group(s), ${summary.posts} post(s), ${summary.loginWall} behind a login wall.`,
+            `Done: ${summary.groups} group(s), ${summary.posts} post(s), ${summary.loginWall} behind a login wall, ${summary.diagnostics} parser diagnostic(s).`,
         );
     } catch (error) {
         log.error(String(error?.message ?? error));
