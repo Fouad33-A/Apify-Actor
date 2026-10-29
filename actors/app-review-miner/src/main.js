@@ -110,11 +110,13 @@ export async function run({ input, pushData, apple = {}, play = {}, now = Date.n
             stoppedBecause = 'aborted';
             break;
         }
-        if (reviewRows >= input.maxReviewRows) {
+        if (input.includeReviews && reviewRows >= input.maxReviewRows) {
             stoppedBecause = 'maxReviewRows';
             break;
         }
-        const budget = Math.min(input.maxReviewsPerApp, input.maxReviewRows - reviewRows);
+        const budget = input.includeReviews
+            ? Math.min(input.maxReviewsPerApp, input.maxReviewRows - reviewRows)
+            : input.maxReviewsPerApp;
         let details = null;
         let result = null;
         let status = 'ok';
@@ -154,8 +156,6 @@ export async function run({ input, pushData, apple = {}, play = {}, now = Date.n
                 await pushData(reviewRow(k.review, app, k.hits));
                 reviewRows += 1;
             }
-        } else {
-            reviewRows += kept.length;
         }
         await pushData(appRow(app, details, result, kept, { maxRating: input.maxRating, status, statusDetail }));
         appsRead += 1;
