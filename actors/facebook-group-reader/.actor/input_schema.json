@@ -13,7 +13,7 @@
         "maxPostsPerGroup": {
             "title": "Posts per group",
             "type": "integer",
-            "description": "Upper limit of unique public posts returned for each group (up to 500).",
+            "description": "Upper limit of unique public posts returned for each group (up to 500). Facebook may expose fewer posts in logged-out public HTML.",
             "editor": "number",
             "default": 50,
             "minimum": 1,
@@ -22,9 +22,9 @@
         "maxSessionAttempts": {
             "title": "Anonymous session attempts",
             "type": "integer",
-            "description": "Maximum fresh anonymous residential HTTP sessions tried per group. Stops early when the requested post count is reached. Login/block sessions are discarded rather than reused.",
+            "description": "Maximum fresh anonymous residential HTTP sessions tried per group. Default 1 minimizes proxy usage. Increase only for resilience when Facebook returns a login/block response; extra sessions do not guarantee deeper feed results.",
             "editor": "number",
-            "default": 3,
+            "default": 1,
             "minimum": 1,
             "maximum": 6
         },
@@ -52,7 +52,7 @@
         "proxyConfiguration": {
             "title": "Proxy configuration",
             "type": "object",
-            "description": "Optional. By default the Actor uses Apify residential proxies and fresh anonymous sessions. The Actor never logs into Facebook or supplies Facebook account cookies.",
+            "description": "Optional. By default the Actor uses Apify residential proxies with anonymous public requests. The Actor never logs into Facebook or supplies Facebook account cookies.",
             "editor": "proxy"
         }
     },
