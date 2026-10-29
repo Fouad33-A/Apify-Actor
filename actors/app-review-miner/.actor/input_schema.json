@@ -6,9 +6,8 @@
         "apps": {
             "title": "Apps to mine",
             "type": "array",
-            "description": "Competitor apps: an App Store link or numeric id (https://apps.apple.com/us/app/name/id389801252 or 389801252), or a Google Play link or package name (https://play.google.com/store/apps/details?id=com.spotify.music or com.spotify.music).",
+            "description": "Optional when search keywords are provided. Competitor apps: an App Store link or numeric id (https://apps.apple.com/us/app/name/id389801252 or 389801252), or a Google Play link or package name (https://play.google.com/store/apps/details?id=com.spotify.music or com.spotify.music).",
             "editor": "stringList",
-            "default": ["https://apps.apple.com/us/app/spotify-music-and-podcasts/id324684580"],
             "prefill": ["https://apps.apple.com/us/app/spotify-music-and-podcasts/id324684580", "com.spotify.music"]
         },
         "searchKeywords": {
