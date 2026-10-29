@@ -83,7 +83,7 @@ describe('run', () => {
         const { out, pushData } = collect();
         const noisyApple = { ...appleStub, searchApps: async () => ({ apps: [{ appId: '111111' }, { appId: '222222' }] }) };
         const noisyPlay = { ...playStub, searchPlayApps: async () => [{ appId: 'com.one.app' }, { appId: 'com.two.app' }] };
-        const input = readInput({ searchKeywords: ['notes'], searchStores: ['apple', 'google'], maxAppsPerSearch: 1, maxReviewsPerApp: 1, maxReviewRows: 2 });
+        const input = readInput({ searchKeywords: ['notes'], searchStores: ['apple', 'google'], maxAppsPerSearch: 1, maxReviewsPerApp: 1, maxReviewRows: 10 }); // the fake Apple reader ignores the review budget, so leave room for its rows
         const summary = await run({ input, pushData, apple: noisyApple, play: noisyPlay, now });
         expect(out.filter((r) => r.recordType === 'app').map((r) => [r.store, r.appId])).toEqual([
             ['apple', '111111'], ['google', 'com.one.app'],

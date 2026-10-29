@@ -141,6 +141,9 @@ describe('run', () => {
             input: readInput({ subreddits: ['igcse', 'SAT'], ...quick }),
             pushData: async (r) => void rows.push(r),
             fetch: async () => ({ status: 403, body: 'Blocked' }),
+            // Brave search is the fallback when Reddit refuses; here it finds nothing
+            discover: async () => ({ threads: [], attempts: [], rateLimited: false }),
+            readArchive: async () => ({ status: 'ok', comments: [] }),
         });
         expect(rows.filter((r) => r.recordType === 'subreddit').map((r) => r.status)).toEqual(['blocked', 'blocked']);
         expect(rows[0].statusDetail).toMatch(/does not give the feed/);
