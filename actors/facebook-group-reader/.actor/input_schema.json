@@ -13,11 +13,20 @@
         "maxPostsPerGroup": {
             "title": "Posts per group",
             "type": "integer",
-            "description": "Upper limit of posts returned for each group (up to 500). A logged-out page shows only the first posts it loads.",
+            "description": "Upper limit of unique public posts returned for each group (up to 500).",
             "editor": "number",
             "default": 50,
             "minimum": 1,
             "maximum": 500
+        },
+        "maxSessionAttempts": {
+            "title": "Anonymous session attempts",
+            "type": "integer",
+            "description": "Maximum fresh anonymous residential HTTP sessions tried per group. Stops early when the requested post count is reached. Login/block sessions are discarded rather than reused.",
+            "editor": "number",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 6
         },
         "sinceDate": {
             "title": "Only posts since (date)",
@@ -43,7 +52,7 @@
         "proxyConfiguration": {
             "title": "Proxy configuration",
             "type": "object",
-            "description": "Optional. Facebook treats visitors from different networks differently. If you have a proxy plan you may select it; the Actor never logs in or sends cookies either way.",
+            "description": "Optional. By default the Actor uses Apify residential proxies and fresh anonymous sessions. The Actor never logs into Facebook or supplies Facebook account cookies.",
             "editor": "proxy"
         }
     },
