@@ -1,0 +1,42 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "creators": {
+            "title": "Creators",
+            "transformation": {
+                "fields": [
+                    "handle",
+                    "displayName",
+                    "followers",
+                    "likes",
+                    "videos",
+                    "emails",
+                    "bioLink",
+                    "passesFilters",
+                    "queriesMatched",
+                    "timesSeen",
+                    "profileStatus",
+                    "profileUrl"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "handle": { "label": "Handle", "format": "text" },
+                    "displayName": { "label": "Name", "format": "text" },
+                    "followers": { "label": "Followers", "format": "number" },
+                    "likes": { "label": "Likes", "format": "number" },
+                    "videos": { "label": "Videos", "format": "number" },
+                    "emails": { "label": "E-mails", "format": "array" },
+                    "bioLink": { "label": "Bio link", "format": "link" },
+                    "passesFilters": { "label": "In range", "format": "boolean" },
+                    "queriesMatched": { "label": "Found for", "format": "array" },
+                    "timesSeen": { "label": "Times seen", "format": "number" },
+                    "profileStatus": { "label": "Profile", "format": "text" },
+                    "profileUrl": { "label": "Link", "format": "link" }
+                }
+            }
+        }
+    }
+}

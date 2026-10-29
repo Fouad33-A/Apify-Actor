@@ -1,0 +1,109 @@
+{
+    "title": "App Review Miner Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "apps": {
+            "title": "Apps to mine",
+            "type": "array",
+            "description": "Competitor apps: an App Store link or numeric id (https://apps.apple.com/us/app/name/id389801252 or 389801252), or a Google Play link or package name (https://play.google.com/store/apps/details?id=com.spotify.music or com.spotify.music).",
+            "editor": "stringList",
+            "default": ["https://apps.apple.com/us/app/spotify-music-and-podcasts/id324684580"],
+            "prefill": ["https://apps.apple.com/us/app/spotify-music-and-podcasts/id324684580", "com.spotify.music"]
+        },
+        "searchKeywords": {
+            "title": "Find competitor apps by keyword",
+            "type": "array",
+            "description": "Optional. Each keyword is searched in the stores and the top apps are mined too (for example 'meditation app').",
+            "editor": "stringList"
+        },
+        "searchStores": {
+            "title": "Stores to search",
+            "type": "array",
+            "description": "Which stores the keyword search covers: apple, google, or both.",
+            "editor": "stringList",
+            "default": ["apple", "google"]
+        },
+        "maxAppsPerSearch": {
+            "title": "Apps per keyword and store",
+            "type": "integer",
+            "description": "How many top search results are mined for each keyword.",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 20
+        },
+        "countries": {
+            "title": "Countries",
+            "type": "array",
+            "description": "Two-letter store countries such as us, gb, de. Each app is read once per country.",
+            "editor": "stringList",
+            "default": ["us"]
+        },
+        "language": {
+            "title": "Google Play language",
+            "type": "string",
+            "description": "Language code for Google Play reviews and app details, for example en.",
+            "default": "en"
+        },
+        "maxReviewsPerApp": {
+            "title": "Reviews kept per app and country",
+            "type": "integer",
+            "description": "Cap on reviews kept for each app and country, after the filters below. The App Store feed itself only exposes the 500 most recent reviews.",
+            "default": 200,
+            "minimum": 1
+        },
+        "maxRating": {
+            "title": "Keep reviews rated up to (stars)",
+            "type": "integer",
+            "description": "2 keeps 1-star and 2-star reviews (complaints). 5 keeps every rating.",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 5
+        },
+        "keywords": {
+            "title": "Only reviews mentioning",
+            "type": "array",
+            "description": "Optional. Keep only reviews whose title or text contains one of these words or phrases.",
+            "editor": "stringList"
+        },
+        "recentDays": {
+            "title": "Only reviews from the last N days",
+            "type": "integer",
+            "description": "Optional. Drops older reviews.",
+            "minimum": 1
+        },
+        "minReviewLength": {
+            "title": "Minimum review length (characters)",
+            "type": "integer",
+            "description": "Title plus text shorter than this is dropped (for example 'bad').",
+            "default": 15,
+            "minimum": 0
+        },
+        "themedOnly": {
+            "title": "Only reviews that match a complaint theme",
+            "type": "boolean",
+            "description": "Keeps only reviews with at least one theme (crashes_bugs, login_account, billing_subscription, price_value, ads, performance, ux_design, support, missing_features, privacy_trust, plus your own).",
+            "default": false
+        },
+        "customThemes": {
+            "title": "Your own themes",
+            "type": "object",
+            "description": "Optional. Theme name mapped to a list of words or phrases, for example {\"sync\": [\"sync\", \"out of sync\"]}. A name that already exists adds words to that theme.",
+            "editor": "json"
+        },
+        "includeReviews": {
+            "title": "Return one row per review",
+            "type": "boolean",
+            "description": "Off returns only the per-app summary rows with theme counts and example quotes.",
+            "default": true
+        },
+        "maxReviewRows": {
+            "title": "Maximum review rows per run",
+            "type": "integer",
+            "description": "Hard cap on review rows in one run.",
+            "default": 5000,
+            "minimum": 1
+        }
+    },
+    "required": []
+}
