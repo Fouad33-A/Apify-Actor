@@ -1,8 +1,9 @@
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 
+import { fetchArcticComments } from './arctic.js';
 import { classifyResponse, parseAtom, searchFeed, subredditFeed, threadFeed } from './feed.js';
-import { discoverRedditComments, discoverRedditThreads } from './search.js';
+import { discoverRedditThreads } from './search.js';
 import { DEFAULT_COMPETITORS, mergeThemes, tagText } from './themes.js';
 
 const DEFAULTS = {
@@ -47,11 +48,12 @@ export async function fetchFeed(url, { proxyUrl } = {}) {
 }
 
 export async function run({
-    input, pushData, fetch = fetchFeed, discover = discoverRedditThreads, discoverComments = discoverRedditComments,
+    input, pushData, fetch = fetchFeed, discover = discoverRedditThreads, readArchive = fetchArcticComments,
     shouldStop = () => false, now = () => new Date(), backoffMs = 30_000,
 }) {
-    const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, searchCommentThreads: 0 };
+    const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, archiveCommentThreads: 0 };
     const stamp = () => now().toISOString();
+
     async function ask(url) {
         for (let attempt = 0; ; attempt += 1) {
             await sleep(input.delayBetweenRequestsMs);
@@ -62,21 +64,17 @@ export async function run({
         }
     }
 
-    async function searchComments(sub, thread) {
+    async function archiveComments(thread) {
         try {
-            const found = await discoverComments({
-                subreddit: sub,
-                threadId: thread.id,
-                maxComments: input.maxCommentsPerThread,
-                maxPages: 2,
-                shouldStop,
-                log: (m) => log.info(m),
-            });
-            const comments = (found.comments ?? []).map((c) => ({ ...c, ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
-            if (comments.length) totals.searchCommentThreads += 1;
-            return { status: found.status, comments, source: 'public_search', attempts: found.attempts ?? [] };
+            const archived = await readArchive(thread.url || thread.id, { limit: input.maxCommentsPerThread });
+            const comments = (archived.comments ?? []).map((c) => ({
+                ...c,
+                ...tagText(c.text, { themes: input.themes, competitors: input.competitors }),
+            }));
+            if (comments.length) totals.archiveCommentThreads += 1;
+            return { status: archived.status, comments, source: 'arctic_shift_archive', detail: archived.detail ?? null };
         } catch (error) {
-            return { status: 'search_error', comments: [], source: 'public_search', attempts: [], detail: String(error?.message ?? error) };
+            return { status: 'archive_error', comments: [], source: 'arctic_shift_archive', detail: String(error?.message ?? error) };
         }
     }
 
@@ -90,6 +88,7 @@ export async function run({
             : [{ keyword: null, url: (after) => subredditFeed(sub, { after }) }];
         let halted = null;
         let sourceMode = 'reddit_rss';
+
         for (const source of sources) {
             let after;
             for (let page = 0; page < MAX_PAGES && threads.size < input.maxThreadsPerSubreddit && !shouldStop(); page += 1) {
@@ -117,8 +116,16 @@ export async function run({
         }
 
         if (!threads.size && halted?.status === 'blocked' && !shouldStop()) {
-            sourceMode = 'public_search'; totals.searchFallbacks += 1;
-            const fallback = await discover({ subreddit: sub, keywords: input.keywords, maxThreads: input.maxThreadsPerSubreddit, maxPages: Math.min(3, Math.max(1, Math.ceil(input.maxThreadsPerSubreddit / 20))), shouldStop, log: (m) => log.info(m) });
+            sourceMode = 'public_search';
+            totals.searchFallbacks += 1;
+            const fallback = await discover({
+                subreddit: sub,
+                keywords: input.keywords,
+                maxThreads: input.maxThreadsPerSubreddit,
+                maxPages: Math.min(3, Math.max(1, Math.ceil(input.maxThreadsPerSubreddit / 20))),
+                shouldStop,
+                log: (m) => log.info(m),
+            });
             problems.push(...fallback.attempts.map((a) => ({ source: 'public_search', ...a })));
             for (const p of fallback.threads) {
                 if ((input.dateFromMs != null || input.dateToMs != null) && !p.updated) continue;
@@ -131,39 +138,63 @@ export async function run({
         const competitorCounts = {};
         let commentsRead = 0;
         let withComments = 0;
+
         for (const thread of threads.values()) {
             if (shouldStop()) break;
             const own = tagText(`${thread.title}\n${thread.text}`, { themes: input.themes, competitors: input.competitors });
             let comments = [];
             let commentsStatus = input.includeComments ? 'skipped_limit' : 'not_requested';
             let commentsSource = null;
+
             if (input.includeComments && withComments < input.maxThreadsWithComments && input.maxCommentsPerThread > 0) {
                 withComments += 1;
-                if (thread.discoverySource === 'public_search') {
-                    const searched = await searchComments(sub, thread);
-                    commentsStatus = searched.status;
-                    commentsSource = searched.source;
-                    comments = searched.comments;
-                    if (!comments.length) problems.push({ source: 'public_search_comments', threadId: thread.id, status: searched.status, detail: searched.detail ?? null, attempts: searched.attempts });
-                } else {
+
+                if (thread.discoverySource === 'reddit_rss') {
                     const res = await ask(threadFeed(thread.url));
                     commentsStatus = res.status;
                     commentsSource = 'reddit_rss';
                     if (res.status === 'ok') {
-                        comments = parseAtom(res.body).filter((e) => e.kind === 'comment').slice(0, input.maxCommentsPerThread).map((c) => ({ author: c.author, createdAt: c.updated, text: c.text.slice(0, 1500), url: c.url, score: null, source: 'reddit_rss', rankBasis: 'reddit_top_feed', ...tagText(c.text, { themes: input.themes, competitors: input.competitors }) }));
-                    } else if (res.status === 'blocked' || res.status === 'rate_limited') {
-                        const searched = await searchComments(sub, thread);
-                        commentsSource = searched.source;
-                        comments = searched.comments;
-                        commentsStatus = searched.status === 'ok' ? 'ok' : `${res.status}_search_${searched.status}`;
-                        if (!comments.length) problems.push({ source: 'public_search_comments', threadId: thread.id, status: searched.status, detail: searched.detail ?? null, attempts: searched.attempts });
+                        comments = parseAtom(res.body)
+                            .filter((e) => e.kind === 'comment')
+                            .slice(0, input.maxCommentsPerThread)
+                            .map((c) => ({
+                                author: c.author,
+                                createdAt: c.updated,
+                                text: c.text.slice(0, 1500),
+                                url: c.url,
+                                score: null,
+                                source: 'reddit_rss',
+                                rankBasis: 'reddit_top_feed',
+                                ...tagText(c.text, { themes: input.themes, competitors: input.competitors }),
+                            }));
                     }
+
+                    if (!comments.length && ['ok', 'blocked', 'rate_limited'].includes(res.status)) {
+                        const archived = await archiveComments(thread);
+                        if (archived.comments.length) {
+                            comments = archived.comments;
+                            commentsStatus = 'ok';
+                            commentsSource = archived.source;
+                        } else {
+                            commentsStatus = `${res.status}_archive_${archived.status}`;
+                            commentsSource = archived.source;
+                            problems.push({ source: 'arctic_shift_archive', threadId: thread.id, status: archived.status, detail: archived.detail });
+                        }
+                    }
+                } else {
+                    const archived = await archiveComments(thread);
+                    comments = archived.comments;
+                    commentsStatus = archived.status;
+                    commentsSource = archived.source;
+                    if (!comments.length) problems.push({ source: 'arctic_shift_archive', threadId: thread.id, status: archived.status, detail: archived.detail });
                 }
             }
+
             commentsRead += comments.length;
             const all = new Set([...own.themes, ...comments.flatMap((c) => c.themes)]);
             for (const t of all) themeCounts[t] = (themeCounts[t] ?? 0) + 1;
             for (const c of new Set([...own.competitorsMentioned, ...comments.flatMap((c) => c.competitorsMentioned)])) competitorCounts[c] = (competitorCounts[c] ?? 0) + 1;
+
             await pushData({
                 recordType: 'thread', subreddit: sub, threadId: thread.id.replace(/^t3_/, ''), title: thread.title,
                 body: thread.text.slice(0, 5000), author: thread.author, createdAt: thread.updated, url: thread.url, score: null,
@@ -173,15 +204,22 @@ export async function run({
             });
             totals.threads += 1;
         }
+
         totals.comments += commentsRead;
         if (halted?.status === 'blocked' && !threads.size) totals.blocked += 1;
         const status = threads.size ? 'ok' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_threads';
-        await pushData({ recordType: 'subreddit', subreddit: sub, status, statusDetail: status === 'ok' || status === 'no_threads' ? null : (halted?.detail ?? problems[0]?.detail ?? null), sourceMode, threadsRead: threads.size, threadsWithComments: withComments, commentsRead, themeCounts, competitorCounts, problems, scrapedAt: stamp() });
+        await pushData({
+            recordType: 'subreddit', subreddit: sub, status,
+            statusDetail: status === 'ok' || status === 'no_threads' ? null : (halted?.detail ?? problems[0]?.detail ?? null),
+            sourceMode, threadsRead: threads.size, threadsWithComments: withComments, commentsRead,
+            themeCounts, competitorCounts, problems, scrapedAt: stamp(),
+        });
         log.info(`r/${sub}: ${status}, ${threads.size} thread(s), ${commentsRead} comment(s), source ${sourceMode}`);
     }
+
     return {
         ...totals,
-        note: 'Reddit RSS is tried first. If Reddit blocks thread discovery, Brave Search discovers indexed Reddit threads. For selected threads, Reddit comment RSS is tried when available; otherwise Brave public search discovers indexed Reddit comment permalinks and snippets. RSS comments retain Reddit top-feed order. Search-derived comments are explicitly marked rankBasis=search_relevance because public search does not reliably expose Reddit vote scores. No login, paid API, archive provider, client impersonation, or access-control bypass is used.',
+        note: 'Reddit RSS is tried first for thread discovery and comments. If Reddit blocks thread discovery, Brave Search discovers indexed Reddit threads. If comment RSS is blocked, rate-limited, empty, or the thread came from public search, the actor queries the independent Arctic Shift public archive by Reddit submission ID. Archived comments retain their archived Reddit score and are ranked by that score before the requested limit. Archive coverage can lag or be incomplete. No Reddit login, client impersonation, paid API, or access-control bypass is used.',
     };
 }
 
@@ -195,10 +233,11 @@ async function main() {
         const proxyUrl = proxy ? await proxy.newUrl() : undefined;
         const summary = await run({ input, pushData: (r) => Actor.pushData(r), fetch: (u) => fetchFeed(u, { proxyUrl }), shouldStop: () => stop });
         await Actor.setValue('OUTPUT', summary);
-        log.info(`Done: ${summary.threads} thread(s), ${summary.comments} comment(s), ${summary.blocked} subreddit(s) blocked, ${summary.searchFallbacks} thread-search fallback(s), ${summary.searchCommentThreads} thread(s) with search-indexed comments.`);
+        log.info(`Done: ${summary.threads} thread(s), ${summary.comments} comment(s), ${summary.blocked} subreddit(s) blocked, ${summary.searchFallbacks} thread-search fallback(s), ${summary.archiveCommentThreads} thread(s) with archived comments.`);
     } catch (error) {
         log.error(String(error?.message ?? error));
-        await Actor.fail(String(error?.message ?? error)); return;
+        await Actor.fail(String(error?.message ?? error));
+        return;
     }
     await Actor.exit();
 }
