@@ -16,14 +16,17 @@ Finds **TikTok creators for keywords and hashtags**. TikTok's own search and has
 
 ## Input
 
-| Field                                         | Meaning                                                                                |
-| --------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `keywords`, `hashtags`                        | What to search. Hashtags may be written with or without `#`.                           |
-| `excludeWords`, `searchModifiers`             | Drop results mentioning words (course, coach...); add words to every query (creator).  |
-| `maxSearchPages`, `maxSearchSeconds`          | How deep and how long to search.                                                       |
-| `maxCreators`                                 | Cap on creators returned and profiles looked up.                                       |
-| `enrichProfiles`, `profileActor`              | Add profile data using your own Actor (default `fouad_dp/tiktok-profile-video-stats`). |
-| `minFollowers`, `maxFollowers`, `onlyPassing` | Follower range and whether to return only creators inside it.                          |
+| Field                                                                   | Meaning                                                                                                                                      |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `keywords`, `hashtags`                                                  | What to search. Hashtags may be written with or without `#`.                                                                                 |
+| `excludeWords`, `searchModifiers`                                       | Drop results mentioning words (course, coach...); add words to every query (creator).                                                        |
+| `maxSearchPages`, `maxSearchSeconds`                                    | How deep and how long to search.                                                                                                             |
+| `maxCreators`                                                           | Cap on creators returned and profiles looked up.                                                                                             |
+| `enrichProfiles`, `profileActor`                                        | Add profile data using your own Actor (default `fouad_dp/tiktok-profile-video-stats`).                                                       |
+| `minFollowers`, `maxFollowers`, `onlyPassing`                           | Follower range and whether to return only creators inside it.                                                                                |
+| `examPresets`                                                           | Optional starting keywords and hashtags for `igcse`, `sat`, `ib`, `ap`, `a_level`.                                                           |
+| `regions`, `languages`, `matchMode`                                     | Prefer (or only keep) creators whose profile says they are in these countries or use these languages. Unknown locations are kept and marked. |
+| `addMedianViews`, `videosForMedian`, `minMedianViews`, `maxMedianViews` | Median views of the newest videos (1-10) as an optional figure and filter. Runs your profile Actor in its fuller mode, which costs more.     |
 
 ## Output
 
@@ -40,6 +43,10 @@ Finds **TikTok creators for keywords and hashtags**. TikTok's own search and has
     "sampleVideoUrls": ["https://www.tiktok.com/@examplecreator/video/..."]
 }
 ```
+
+## Matching Gulf creators and reach
+
+These are **inputs, not fixed results**: leave them empty and the Actor behaves as before. A creator's country and language come from the profile data, so they need "Add profile data" and many profiles show none (those rows say `locationMatch: null`). To steer the search itself toward a region, add words such as `UAE` or `Dubai` to `searchModifiers`. The exam presets are popular starting wordings, not a complete list.
 
 ## Limits
 

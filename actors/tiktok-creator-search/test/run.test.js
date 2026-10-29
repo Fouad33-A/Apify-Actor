@@ -155,3 +155,76 @@ describe('run', () => {
         expect(out[0].enrichNote).toBe('enrichProfiles is off');
     });
 });
+
+describe('exam presets, region/language and median views', () => {
+    it('adds preset keywords and hashtags to the searches and rejects unknown presets', () => {
+        const input = readInput({ keywords: ['my own'], examPresets: ['igcse', 'a-level'] });
+        expect(input.searches).toEqual(expect.arrayContaining(['my own', 'igcse revision', '#igcse', '#alevels']));
+        expect(() => readInput({ keywords: ['x'], examPresets: ['gmat'] })).toThrow(/Unknown exam preset/);
+    });
+
+    it('turns the median lookup on only when asked, and validates the new inputs', () => {
+        expect(readInput({ keywords: ['x'] }).wantMedian).toBe(false);
+        expect(readInput({ keywords: ['x'], addMedianViews: true }).wantMedian).toBe(true);
+        expect(readInput({ keywords: ['x'], minMedianViews: 1000 }).wantMedian).toBe(true);
+        expect(() => readInput({ keywords: ['x'], videosForMedian: 11 })).toThrow(/1 to 10/);
+        expect(() => readInput({ keywords: ['x'], minMedianViews: 5, maxMedianViews: 1 })).toThrow(/larger/);
+        expect(() => readInput({ keywords: ['x'], matchMode: 'strict' })).toThrow(/matchMode/);
+    });
+
+    it('judges median views as a filter, not a fixed result', () => {
+        const f = { minMedianViews: 1000, maxMedianViews: 50_000 };
+        expect(checkFilters({ followers: 10, medianViews: 5000 }, f).passes).toBe(true);
+        expect(checkFilters({ followers: 10, medianViews: 200 }, f)).toMatchObject({
+            passes: false,
+            failures: [expect.stringMatching(/below 1000/)],
+        });
+        expect(checkFilters({ followers: 10, medianViews: null }, f).passes).toBeNull(); // needed figure unknown
+        expect(checkFilters({ followers: 10, medianViews: 5000 }, {}).passes).toBe(true); // no filter set
+    });
+
+    const profile = (name, over) => [
+        name,
+        { rowType: 'profile', username: name, status: 'ok', followers: 20_000, emails: [], ...over },
+    ];
+    const profilesMap = new Map([
+        profile('mid_one', { region: 'GB', language: 'en', medianPlays: 8000, videosAnalyzed: 10 }),
+        profile('small_one', { region: 'AE', language: 'en', medianPlays: 300, videosAnalyzed: 10 }),
+        profile('big_one', { region: null, language: null }),
+    ]);
+    const run = async (extra) => {
+        const out = [];
+        const calls = [];
+        const enrich = async (actor, names, options) => {
+            calls.push(options);
+            return new Map(names.filter((n) => profilesMap.has(n)).map((n) => [n, profilesMap.get(n)]));
+        };
+        await runSearch({
+            input: readInput({ keywords: ['budgeting'], maxSearchPages: 1, ...extra }),
+            pushData: async (r) => out.push(r),
+            serpProxyUrl: 'http://x',
+            serpFetch,
+            enrich,
+        });
+        return { out, calls };
+    };
+
+    it('passes the median options to the profile Actor and carries the median into the row', async () => {
+        const { out, calls } = await run({ minMedianViews: 1000, videosForMedian: 5 });
+        expect(calls[0]).toEqual({ medianViews: true, videosForMedian: 5 });
+        const by = Object.fromEntries(out.map((r) => [r.handle, r]));
+        expect(by.mid_one).toMatchObject({ medianViews: 8000, videosAnalyzed: 10, passesFilters: true });
+        expect(by.small_one).toMatchObject({ medianViews: 300, passesFilters: false });
+        expect((await run({})).calls[0]).toEqual({ medianViews: false, videosForMedian: 10 });
+    });
+
+    it('puts creators from the wanted country first (prefer) or leaves confirmed others out (only)', async () => {
+        const prefer = await run({ regions: ['ae'] });
+        expect(prefer.out[0]).toMatchObject({ handle: 'small_one', regionMatch: true, locationMatch: true });
+        expect(prefer.out.at(-1).locationMatch).toBe(false);
+        const only = await run({ regions: ['AE'], matchMode: 'only' });
+        expect(only.out.map((r) => r.handle)).not.toContain('mid_one');
+        expect(only.out.map((r) => r.handle)).toContain('big_one'); // unknown country is kept and marked
+        expect(only.out.find((r) => r.handle === 'big_one').locationMatch).toBeNull();
+    });
+});

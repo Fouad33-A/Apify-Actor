@@ -1,0 +1,15 @@
+{
+    "actorSpecification": 1,
+    "name": "search-interest-snapshot",
+    "title": "Search Interest Snapshot (Google Trends by country)",
+    "description": "Google Trends interest over time and related queries for a keyword list, country by country, as a flat table you can download as CSV. No login.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 512
+}

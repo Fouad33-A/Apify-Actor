@@ -1,5 +1,6 @@
 import { Actor, log } from 'apify';
 
+import { presetSearches } from './presets.js';
 import { defaultEngines, discoverCreators, parseFollowerHint } from './serp.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
@@ -14,12 +15,19 @@ const DEFAULTS = {
     enrichProfiles: true,
     profileActor: PROFILE_ACTOR,
     onlyPassing: false,
+    regions: [],
+    languages: [],
+    matchMode: 'prefer',
+    examPresets: [],
+    addMedianViews: false,
+    videosForMedian: 10,
 };
 
 export function readInput(raw) {
     const input = { ...DEFAULTS, ...Object.fromEntries(Object.entries(raw ?? {}).filter(([, v]) => v != null)) };
-    const keywords = (input.keywords ?? []).map((k) => String(k).trim()).filter(Boolean);
-    const hashtags = (input.hashtags ?? [])
+    const presets = presetSearches(input.examPresets);
+    const keywords = [...(input.keywords ?? []), ...presets.keywords].map((k) => String(k).trim()).filter(Boolean);
+    const hashtags = [...(input.hashtags ?? []), ...presets.hashtags]
         .map((h) => String(h).trim().replace(/^#+/, ''))
         .filter(Boolean)
         .map((h) => `#${h}`);
@@ -32,7 +40,23 @@ export function readInput(raw) {
     if (input.minFollowers != null && input.maxFollowers != null && input.minFollowers > input.maxFollowers) {
         throw new Error('"minFollowers" is larger than "maxFollowers".');
     }
-    return { ...input, searches: [...keywords, ...hashtags] };
+    if (input.minMedianViews != null && input.maxMedianViews != null && input.minMedianViews > input.maxMedianViews) {
+        throw new Error('"minMedianViews" is larger than "maxMedianViews".');
+    }
+    if (!Number.isInteger(input.videosForMedian) || input.videosForMedian < 1 || input.videosForMedian > 10)
+        throw new Error(
+            'Input "videosForMedian" must be a whole number from 1 to 10 (TikTok\'s public embed exposes up to 10 recent videos).',
+        );
+    if (!['prefer', 'only'].includes(input.matchMode)) throw new Error('"matchMode" must be "prefer" or "only".');
+    const upper = (xs) => [...new Set((xs ?? []).map((x) => String(x).trim()).filter(Boolean))];
+    const wantMedian = input.addMedianViews || input.minMedianViews != null || input.maxMedianViews != null;
+    return {
+        ...input,
+        regions: upper(input.regions).map((r) => r.toUpperCase()),
+        languages: upper(input.languages).map((l) => l.toLowerCase()),
+        wantMedian,
+        searches: [...new Set([...keywords, ...hashtags])],
+    };
 }
 
 // Candidates in the order they are enriched: a search-snippet follower figure inside the wanted range first, unknown
@@ -52,14 +76,41 @@ export function orderCandidates(candidates, { minFollowers = null, maxFollowers 
     );
 }
 
-export function checkFilters(row, { minFollowers, maxFollowers }) {
+export function checkFilters(row, { minFollowers, maxFollowers, minMedianViews, maxMedianViews }) {
     const failures = [];
-    if (row.followers == null) return { passes: null, failures };
-    if (minFollowers != null && row.followers < minFollowers)
-        failures.push(`followers ${row.followers} below ${minFollowers}`);
-    if (maxFollowers != null && row.followers > maxFollowers)
-        failures.push(`followers ${row.followers} above ${maxFollowers}`);
-    return { passes: failures.length === 0, failures };
+    const judged = [];
+    if (row.followers != null) {
+        judged.push('followers');
+        if (minFollowers != null && row.followers < minFollowers)
+            failures.push(`followers ${row.followers} below ${minFollowers}`);
+        if (maxFollowers != null && row.followers > maxFollowers)
+            failures.push(`followers ${row.followers} above ${maxFollowers}`);
+    }
+    if (row.medianViews != null) {
+        judged.push('medianViews');
+        if (minMedianViews != null && row.medianViews < minMedianViews)
+            failures.push(`median views ${row.medianViews} below ${minMedianViews}`);
+        if (maxMedianViews != null && row.medianViews > maxMedianViews)
+            failures.push(`median views ${row.medianViews} above ${maxMedianViews}`);
+    }
+    const asked = (minFollowers != null || maxFollowers != null ? ['followers'] : []).concat(
+        minMedianViews != null || maxMedianViews != null ? ['medianViews'] : [],
+    );
+    // a creator is judged only when every figure the filters need is known (or a known figure already fails)
+    if (failures.length) return { passes: false, failures };
+    if (row.followers == null && row.medianViews == null) return { passes: null, failures };
+    if (asked.some((a) => !judged.includes(a))) return { passes: null, failures };
+    return { passes: true, failures };
+}
+
+// Where the creator's own profile says they are: a requested country or language matches or not (null = unknown)
+export function matchRegionLanguage(row, { regions = [], languages = [] }) {
+    const m = (wanted, value, fold) => (!wanted.length ? null : value == null ? null : wanted.includes(fold(value)));
+    const region = m(regions, row.region, (v) => String(v).toUpperCase());
+    const language = m(languages, row.language, (v) => String(v).toLowerCase().split('-')[0]);
+    const parts = [region, language].filter((x) => x != null);
+    if (!regions.length && !languages.length) return { regionMatch: null, languageMatch: null, locationMatch: null };
+    return { regionMatch: region, languageMatch: language, locationMatch: parts.length ? parts.every(Boolean) : null };
 }
 
 export function creatorRow(candidate, profile, enrichNote) {
@@ -91,21 +142,52 @@ export function creatorRow(candidate, profile, enrichNote) {
         emails: p.emails ?? [],
         region: p.region ?? null,
         language: p.language ?? null,
+        medianViews: p.medianPlays ?? null,
+        videosAnalyzed: p.videosAnalyzed ?? null,
+        medianViewsPctOfFollowers: p.medianPlaysPctFollowers ?? null,
+        postsPerWeek: p.postsPerWeek ?? null,
     };
 }
 
 // Default enrichment: runs the account's own profile Actor (profileOnly) and returns its profile rows by username.
-export async function callProfileActor(actorId, usernames) {
+// With { medianViews: true } the profile Actor runs in "full" mode (recent videos too) and its per-creator summary row
+// (medianPlays over the recent videos) is merged into the profile row; otherwise it runs in profileOnly mode.
+export async function callProfileActor(actorId, usernames, { medianViews = false, videosForMedian = 10 } = {}) {
+    const perCreator = medianViews ? videosForMedian + 3 : 1;
     const run = await Actor.call(
         actorId,
-        { usernames, mode: 'profileOnly', maxItems: usernames.length + 5, concurrency: 2 },
-        { waitSecs: 600 },
+        {
+            usernames,
+            mode: medianViews ? 'full' : 'profileOnly',
+            ...(medianViews ? { videosPerProfile: videosForMedian } : {}),
+            maxItems: usernames.length * perCreator + 5,
+            concurrency: 2,
+        },
+        { waitSecs: 900 },
     );
     if (!run?.defaultDatasetId) throw new Error(`Run of ${actorId} returned no dataset (status ${run?.status})`);
-    const { items } = await Actor.apifyClient.dataset(run.defaultDatasetId).listItems({ limit: usernames.length + 10 });
+    const { items } = await Actor.apifyClient
+        .dataset(run.defaultDatasetId)
+        .listItems({ limit: usernames.length * perCreator + 10 });
     const byName = new Map();
-    for (const item of items)
-        if (item.rowType === 'profile' && item.username) byName.set(String(item.username).toLowerCase(), item);
+    const summaries = new Map();
+    for (const item of items) {
+        const name = String(item.username ?? '').toLowerCase();
+        if (!name) continue;
+        if (item.rowType === 'profile') byName.set(name, item);
+        else if (item.rowType === 'summary') summaries.set(name, item);
+    }
+    for (const [name, row] of byName) {
+        const s = summaries.get(name);
+        if (s)
+            byName.set(name, {
+                ...row,
+                medianPlays: s.medianPlays ?? null,
+                videosAnalyzed: s.videosAnalyzed ?? null,
+                medianPlaysPctFollowers: s.medianPlaysPctFollowers ?? null,
+                postsPerWeek: s.postsPerWeek ?? null,
+            });
+    }
     return byName;
 }
 
@@ -141,7 +223,11 @@ export async function runSearch({
         for (let i = 0; i < ordered.length && !shouldStop(); i += BATCH) {
             const names = ordered.slice(i, i + BATCH).map((c) => c.handle);
             try {
-                for (const [name, row] of await enrich(input.profileActor, names)) profiles.set(name, row);
+                for (const [name, row] of await enrich(input.profileActor, names, {
+                    medianViews: input.wantMedian,
+                    videosForMedian: input.videosForMedian,
+                }))
+                    profiles.set(name, row);
             } catch (error) {
                 enrichNote = `Profile enrichment failed: ${String(error?.message ?? error)}`;
                 log.warning(enrichNote);
@@ -150,7 +236,16 @@ export async function runSearch({
         }
     }
 
-    const counts = { returned: 0, passing: 0, outOfRange: 0, unenriched: 0, profileProblems: 0 };
+    const counts = {
+        returned: 0,
+        passing: 0,
+        outOfRange: 0,
+        unenriched: 0,
+        profileProblems: 0,
+        locationMatches: 0,
+        locationMismatches: 0,
+    };
+    const rows = [];
     for (const c of ordered) {
         const profile = profiles.get(c.handle) ?? null;
         const row = creatorRow(
@@ -166,11 +261,22 @@ export async function runSearch({
         const { passes, failures } = checkFilters(row, input);
         row.passesFilters = passes;
         row.filterFailures = failures;
+        Object.assign(row, matchRegionLanguage(row, input));
         if (!profile) counts.unenriched += 1;
         else if (row.profileStatus !== 'ok') counts.profileProblems += 1;
         if (passes === true) counts.passing += 1;
         if (passes === false) counts.outOfRange += 1;
-        if (input.onlyPassing && passes !== true) continue;
+        if (row.locationMatch === true) counts.locationMatches += 1;
+        if (row.locationMatch === false) counts.locationMismatches += 1;
+        rows.push(row);
+    }
+    // "prefer": creators from the wanted countries / languages first, unknown next, confirmed others last. "only": the
+    // confirmed others are left out (a creator whose location is not known is kept and marked locationMatch null).
+    const locationRank = (r) => (r.locationMatch === true ? 0 : r.locationMatch === null ? 1 : 2);
+    if (input.regions.length || input.languages.length) rows.sort((a, b) => locationRank(a) - locationRank(b));
+    for (const row of rows) {
+        if (input.onlyPassing && row.passesFilters !== true) continue;
+        if (input.matchMode === 'only' && row.locationMatch === false) continue;
         await pushData(row);
         counts.returned += 1;
     }

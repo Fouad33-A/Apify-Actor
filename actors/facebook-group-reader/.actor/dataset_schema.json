@@ -1,0 +1,42 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "groups": {
+            "title": "Groups and posts",
+            "transformation": {
+                "fields": [
+                    "recordType",
+                    "groupId",
+                    "name",
+                    "status",
+                    "memberCount",
+                    "text",
+                    "createdAt",
+                    "reactions",
+                    "comments",
+                    "shares",
+                    "url",
+                    "scrapedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "recordType": { "label": "Row", "format": "text" },
+                    "groupId": { "label": "Group", "format": "text" },
+                    "name": { "label": "Name", "format": "text" },
+                    "status": { "label": "Status", "format": "text" },
+                    "memberCount": { "label": "Members", "format": "number" },
+                    "text": { "label": "Post text", "format": "text" },
+                    "createdAt": { "label": "Posted", "format": "date" },
+                    "reactions": { "label": "Reactions", "format": "number" },
+                    "comments": { "label": "Comments", "format": "number" },
+                    "shares": { "label": "Shares", "format": "number" },
+                    "url": { "label": "Link", "format": "link" },
+                    "scrapedAt": { "label": "Read at", "format": "date" }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,51 @@
+{
+    "title": "Facebook Public Group Reader Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "groups": {
+            "title": "Public group addresses",
+            "type": "array",
+            "description": "Addresses like https://www.facebook.com/groups/groupname or .../groups/1234567890. Only public groups can be read without a login.",
+            "editor": "stringList",
+            "prefill": ["https://www.facebook.com/groups/example"]
+        },
+        "maxPostsPerGroup": {
+            "title": "Posts per group",
+            "type": "integer",
+            "description": "Upper limit of posts returned for each group (up to 500). A logged-out page shows only the first posts it loads.",
+            "editor": "number",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 500
+        },
+        "sinceDate": {
+            "title": "Only posts since (date)",
+            "type": "string",
+            "description": "Optional date such as 2026-01-31.",
+            "editor": "textfield"
+        },
+        "includeAuthors": {
+            "title": "Include author names",
+            "type": "boolean",
+            "description": "Off by default so personal names are not collected unless you need them.",
+            "editor": "checkbox",
+            "default": false
+        },
+        "delayBetweenGroupsMs": {
+            "title": "Delay between groups (ms)",
+            "type": "integer",
+            "description": "Pause between two groups.",
+            "editor": "number",
+            "default": 3000,
+            "minimum": 0
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "description": "Optional. Facebook treats visitors from different networks differently. If you have a proxy plan you may select it; the Actor never logs in or sends cookies either way.",
+            "editor": "proxy"
+        }
+    },
+    "required": ["groups"]
+}

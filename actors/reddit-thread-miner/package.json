@@ -1,0 +1,22 @@
+{
+    "name": "reddit-thread-miner",
+    "version": "0.1.0",
+    "description": "Reads public Reddit threads and top comments through Reddit's RSS feeds, tags price, worth-it, free-alternative and competitor language.",
+    "type": "module",
+    "main": "src/main.js",
+    "scripts": {
+        "start": "node src/main.js",
+        "test": "vitest run"
+    },
+    "dependencies": {
+        "apify": "^3.2.0",
+        "cheerio": "^1.0.0",
+        "got-scraping": "^4.0.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "devDependencies": {
+        "vitest": "^5.0.2"
+    }
+}

@@ -1,0 +1,79 @@
+{
+    "title": "TikTok Hashtag Benchmark Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "hashtags": {
+            "title": "Hashtags",
+            "type": "array",
+            "description": "Hashtags to benchmark, with or without #, for example igcse, satmath, apcalculus, ibmaths.",
+            "editor": "stringList",
+            "default": ["igcse"],
+            "prefill": ["igcse", "satmath"]
+        },
+        "regions": {
+            "title": "Countries of the videos",
+            "type": "array",
+            "description": "Optional two-letter country codes (AE, SA, QA, GB, US). Only videos TikTok says were posted from these countries are used. Leave empty for all countries.",
+            "editor": "stringList"
+        },
+        "maxVideosPerHashtag": {
+            "title": "Videos to use per hashtag",
+            "type": "integer",
+            "description": "Upper limit of videos used for each hashtag's benchmark (1-200). The number actually found depends on what search returns.",
+            "editor": "number",
+            "default": 50,
+            "minimum": 1,
+            "maximum": 200
+        },
+        "recentDays": {
+            "title": "Only videos from the last (days)",
+            "type": "integer",
+            "description": "Older videos are left out of the benchmark.",
+            "editor": "number",
+            "default": 90,
+            "minimum": 1
+        },
+        "minVideosForBenchmark": {
+            "title": "Videos needed for a full benchmark",
+            "type": "integer",
+            "description": "Below this number the benchmark row says thin_sample, so you know it is only a rough guide.",
+            "editor": "number",
+            "default": 10,
+            "minimum": 1
+        },
+        "maxSearchPages": {
+            "title": "Search result pages per wording",
+            "type": "integer",
+            "description": "How many result pages are read for each way of asking.",
+            "editor": "number",
+            "default": 2,
+            "minimum": 1
+        },
+        "includeVideos": {
+            "title": "Add one row per video",
+            "type": "boolean",
+            "description": "Adds the videos behind the benchmark (recordType video) with views, likes, comments, shares, date and country.",
+            "editor": "checkbox",
+            "default": true
+        },
+        "delayBetweenVideosMs": {
+            "title": "Delay between video reads (ms)",
+            "type": "integer",
+            "description": "Pause after each video page, per worker.",
+            "editor": "number",
+            "default": 600,
+            "minimum": 0
+        },
+        "concurrency": {
+            "title": "Video pages read at the same time",
+            "type": "integer",
+            "description": "1 to 5.",
+            "editor": "number",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 5
+        }
+    },
+    "required": ["hashtags"]
+}

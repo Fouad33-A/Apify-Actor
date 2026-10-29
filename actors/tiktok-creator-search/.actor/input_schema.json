@@ -88,6 +88,67 @@
             "editor": "checkbox",
             "description": "Off returns every creator found with passesFilters true, false or null (null = followers unknown).",
             "default": false
+        },
+        "examPresets": {
+            "title": "Exam presets",
+            "type": "array",
+            "description": "Optional starting keywords and hashtags for common exams, added to your own. Choose any of: igcse, sat, ib, ap, a_level.",
+            "editor": "select",
+            "items": {
+                "type": "string",
+                "enum": ["igcse", "sat", "ib", "ap", "a_level"]
+            }
+        },
+        "regions": {
+            "title": "Preferred countries",
+            "type": "array",
+            "description": "Optional two-letter country codes (AE, SA, QA, GB, US...). Needs 'Add profile data': a creator's country comes from their profile. See 'How to match them' below.",
+            "editor": "stringList"
+        },
+        "languages": {
+            "title": "Preferred languages",
+            "type": "array",
+            "description": "Optional language codes (en, ar...). Needs 'Add profile data'.",
+            "editor": "stringList"
+        },
+        "matchMode": {
+            "title": "How to match them",
+            "type": "string",
+            "description": "prefer: creators from the chosen countries/languages come first and the rest follow. only: creators confirmed to be elsewhere are left out (creators whose country is unknown are kept and marked).",
+            "editor": "select",
+            "default": "prefer",
+            "enum": ["prefer", "only"],
+            "enumTitles": ["Put matching creators first", "Leave confirmed others out"]
+        },
+        "addMedianViews": {
+            "title": "Add median views of recent videos",
+            "type": "boolean",
+            "description": "Runs your profile Actor in full mode to read the creator's recent videos and adds the median views, so you can judge reach. Costs more than profile-only mode.",
+            "editor": "checkbox",
+            "default": false
+        },
+        "videosForMedian": {
+            "title": "Videos for the median",
+            "type": "integer",
+            "description": "How many of the newest videos the median is taken over (1-10; TikTok's public embed shows up to 10).",
+            "editor": "number",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 10
+        },
+        "minMedianViews": {
+            "title": "Minimum median views",
+            "type": "integer",
+            "description": "Optional. Creators whose median views are below this are marked passesFilters false. Turns on the median views lookup.",
+            "editor": "number",
+            "minimum": 0
+        },
+        "maxMedianViews": {
+            "title": "Maximum median views",
+            "type": "integer",
+            "description": "Optional. Creators whose median views are above this are marked passesFilters false. Turns on the median views lookup.",
+            "editor": "number",
+            "minimum": 0
         }
     },
     "required": []
