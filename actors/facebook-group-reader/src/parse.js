@@ -71,11 +71,41 @@ function firstNumber(...values) {
     return null;
 }
 
+function textFromNode(node) {
+    if (typeof node?.message?.text === 'string' && node.message.text.trim()) return node.message.text.trim();
+    if (typeof node?.text === 'string' && node.text.trim() && node?.__typename === 'Message') return node.text.trim();
+
+    // Current logged-out Comet group feed uses a rich_message array rather than message.text.
+    // Keep block order and join only textual composed-message blocks belonging to this story fragment.
+    if (Array.isArray(node?.rich_message)) {
+        const blocks = node.rich_message
+            .map((block) => (typeof block?.text === 'string' ? block.text.trim() : ''))
+            .filter(Boolean);
+        if (blocks.length) return blocks.join('\n');
+    }
+
+    const rich = node?.comet_sections?.content?.story?.comet_sections?.message?.rich_message;
+    if (Array.isArray(rich)) {
+        const blocks = rich
+            .map((block) => (typeof block?.text === 'string' ? block.text.trim() : ''))
+            .filter(Boolean);
+        if (blocks.length) return blocks.join('\n');
+    }
+    return null;
+}
+
 function mergeRecord(target, node) {
-    const message = typeof node?.message?.text === 'string' ? node.message.text.trim() : null;
-    const url = [node?.permalink_url, node?.url, node?.wwwURL].find(validPostUrl) ?? null;
+    const message = textFromNode(node);
+    const url = [
+        node?.permalink_url,
+        node?.url,
+        node?.wwwURL,
+        node?.comet_sections?.content?.story?.comet_sections?.message?.story?.url,
+    ].find(validPostUrl) ?? null;
     const legacyId = String(node?.post_id ?? legacyIdFromUrl(url) ?? '') || null;
-    const storyId = typeof node?.id === 'string' && node.id.startsWith('Uzpf') ? node.id : null;
+    const nestedStoryId = node?.comet_sections?.content?.story?.comet_sections?.message?.story?.id;
+    const storyId = typeof node?.id === 'string' && node.id.startsWith('Uzpf') ? node.id :
+        (typeof nestedStoryId === 'string' && nestedStoryId.startsWith('Uzpf') ? nestedStoryId : null);
     const feedbackId = typeof node?.feedback?.id === 'string' ? node.feedback.id :
         (typeof node?.feedback_id === 'string' ? node.feedback_id : null);
     const createdAt = isoFromUnix(node?.creation_time ?? node?.creationTime ?? node?.created_time);
@@ -83,6 +113,7 @@ function mergeRecord(target, node) {
     const fb = node?.feedback ?? {};
     const reactions = firstNumber(
         fb?.reaction_count?.count,
+        fb?.unified_reactors?.count,
         fb?.reactors?.count,
         fb?.reaction_count_reduced,
         node?.reaction_count?.count,
@@ -90,12 +121,13 @@ function mergeRecord(target, node) {
     const comments = firstNumber(
         fb?.comment_rendering_instance?.comments?.total_count,
         fb?.comments_count_summary_renderer?.feedback?.comment_rendering_instance?.comments?.total_count,
+        fb?.comments_count_summary_renderer?.feedback?.cross_universe_feedback_info?.aggregated_comment_count,
         fb?.comment_count?.total_count,
         node?.comment_rendering_instance?.comments?.total_count,
     );
     const shares = firstNumber(fb?.share_count?.count, node?.share_count?.count);
 
-    if (message && !target.text) target.text = message;
+    if (message && (!target.text || message.length > target.text.length)) target.text = message;
     if (url && !target.url) target.url = url;
     if (legacyId && !target.postId) target.postId = legacyId;
     if (storyId && !target.storyId) target.storyId = storyId;
@@ -109,13 +141,11 @@ function mergeRecord(target, node) {
 }
 
 // Facebook's public group HTML streams a story in several Relay JSON fragments. Message, creation time,
-// permalink and engagement often live in DIFFERENT objects with the same Story id/post_id. The old parser
-// required them to coexist in one object and therefore returned zero posts from valid public responses.
-// This parser joins those public fragments by Story id / legacy post id and intentionally limits itself to
-// scripts belonging to the regular group feed, excluding highlighted/featured units.
+// permalink and engagement can live in different nested objects. We join public fragments by Story id,
+// legacy post id and feedback id, and intentionally ignore Highlight/Featured-only scripts.
 export function parsePosts(html, { includeAuthors = false } = {}) {
     const $ = cheerio.load(String(html ?? ''));
-    const records = new Map();
+    const records = new Set();
     const aliases = new Map();
 
     const getRecord = (keys) => {
@@ -124,24 +154,25 @@ export function parsePosts(html, { includeAuthors = false } = {}) {
             if (existing) return existing;
         }
         const record = { postId: null, storyId: null, feedbackId: null, url: null, text: null, createdAt: null, reactions: null, comments: null, shares: null, author: null, authorId: null };
-        records.set(record, record);
+        records.add(record);
         return record;
     };
 
     $('script[type="application/json"]').each((_, el) => {
         const raw = $(el).contents().text();
-        // Avoid mixing old Highlights/Featured stories into the chronological discussion feed.
         if (!/GroupsCometFeedRegularStories|group_feed/i.test(raw)) return;
         let json;
         try { json = JSON.parse(raw); } catch { return; }
 
         for (const node of walk(json)) {
-            const url = [node?.permalink_url, node?.url, node?.wwwURL].find(validPostUrl) ?? null;
+            const nestedUrl = node?.comet_sections?.content?.story?.comet_sections?.message?.story?.url;
+            const url = [node?.permalink_url, node?.url, node?.wwwURL, nestedUrl].find(validPostUrl) ?? null;
             const postId = node?.post_id != null ? String(node.post_id) : legacyIdFromUrl(url);
-            const storyId = typeof node?.id === 'string' && node.id.startsWith('Uzpf') ? node.id : null;
+            const nestedStoryId = node?.comet_sections?.content?.story?.comet_sections?.message?.story?.id;
+            const storyId = typeof node?.id === 'string' && node.id.startsWith('Uzpf') ? node.id :
+                (typeof nestedStoryId === 'string' && nestedStoryId.startsWith('Uzpf') ? nestedStoryId : null);
             const feedbackId = typeof node?.feedback?.id === 'string' ? node.feedback.id : null;
-            const hasPostSignal = Boolean(postId || storyId || url);
-            if (!hasPostSignal) continue;
+            if (!(postId || storyId || url)) continue;
 
             const keys = [postId && `p:${postId}`, storyId && `s:${storyId}`, feedbackId && `f:${feedbackId}`].filter(Boolean);
             const record = getRecord(keys);
@@ -152,7 +183,7 @@ export function parsePosts(html, { includeAuthors = false } = {}) {
 
     const out = [];
     const dedupe = new Set();
-    for (const record of records.keys()) {
+    for (const record of records) {
         if (!record.text || !record.createdAt || !(record.postId || record.url)) continue;
         const key = record.postId ?? record.url;
         if (dedupe.has(key)) continue;
