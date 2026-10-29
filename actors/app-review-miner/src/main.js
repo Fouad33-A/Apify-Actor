@@ -34,6 +34,10 @@ export function readInput(raw) {
         ),
     ];
     if (!input.countries.length) throw new Error('"countries" needs at least one two-letter country code such as us.');
+    input.searchStores = [...new Set((input.searchStores ?? []).map((s) => String(s).trim().toLowerCase()))];
+    if (input.searchStores.some((s) => !['apple', 'google'].includes(s))) {
+        throw new Error('Input "searchStores" may contain only "apple" and/or "google".');
+    }
     for (const key of ['maxReviewsPerApp', 'maxAppsPerSearch', 'maxReviewRows']) {
         if (!Number.isInteger(input[key]) || input[key] < 1)
             throw new Error(`Input "${key}" must be a whole number of 1 or more.`);
@@ -44,7 +48,6 @@ export function readInput(raw) {
     return { ...input, apps, searchKeywords };
 }
 
-// Builds the filter applied to each review before it is kept.
 export function makeAccept(input, now = Date.now()) {
     const keywords = (input.keywords ?? []).map((k) => String(k).toLowerCase()).filter(Boolean);
     const since = input.recentDays ? now - input.recentDays * 86_400_000 : null;
@@ -84,21 +87,29 @@ export async function run({ input, pushData, apple = {}, play = {}, now = Date.n
     }
 
     for (const term of input.searchKeywords) {
-        try {
-            if (input.searchStores.includes('apple')) {
+        if (input.searchStores.includes('apple')) {
+            try {
                 const { apps } = await a.searchApps(term, input.countries[0], input.maxAppsPerSearch);
-                for (const app of apps) for (const country of input.countries) add('apple', app.appId, country, term);
+                for (const app of apps.slice(0, input.maxAppsPerSearch)) {
+                    for (const country of input.countries) add('apple', app.appId, country, term);
+                }
+            } catch (error) {
+                problems.push({ input: term, store: 'apple', problem: `search failed: ${String(error?.message ?? error)}` });
             }
-            if (input.searchStores.includes('google')) {
+        }
+        if (input.searchStores.includes('google')) {
+            try {
                 const apps = await p.searchPlayApps(term, {
                     country: input.countries[0],
                     lang: input.language,
                     limit: input.maxAppsPerSearch,
                 });
-                for (const app of apps) for (const country of input.countries) add('google', app.appId, country, term);
+                for (const app of apps.slice(0, input.maxAppsPerSearch)) {
+                    for (const country of input.countries) add('google', app.appId, country, term);
+                }
+            } catch (error) {
+                problems.push({ input: term, store: 'google', problem: `search failed: ${String(error?.message ?? error)}` });
             }
-        } catch (error) {
-            problems.push({ input: term, problem: `search failed: ${String(error?.message ?? error)}` });
         }
     }
 
