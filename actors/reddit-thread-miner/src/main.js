@@ -2,6 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 
 import { classifyResponse, parseAtom, searchFeed, subredditFeed, threadFeed } from './feed.js';
+import { discoverRedditThreads } from './search.js';
 import { DEFAULT_COMPETITORS, mergeThemes, tagText } from './themes.js';
 
 const DEFAULTS = {
@@ -14,30 +15,20 @@ const DEFAULTS = {
     delayBetweenRequestsMs: 3000,
 };
 const MAX_PAGES = 10;
-const sleep = (ms) =>
-    new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function readInput(raw) {
     const input = { ...DEFAULTS, ...Object.fromEntries(Object.entries(raw ?? {}).filter(([, v]) => v != null)) };
     const subreddits = [
         ...new Set(
             (input.subreddits ?? [])
-                .map((s) =>
-                    String(s)
-                        .trim()
-                        .replace(/^(https?:\/\/(www\.)?reddit\.com)?\/?r\//i, '')
-                        .replace(/\/.*$/, ''),
-                )
+                .map((s) => String(s).trim().replace(/^(https?:\/\/(www\.)?reddit\.com)?\/?r\//i, '').replace(/\/.*$/, ''))
                 .filter(Boolean),
         ),
     ];
-    if (!subreddits.length)
-        throw new Error('Give at least one subreddit in "subreddits" (for example igcse or r/SAT).');
+    if (!subreddits.length) throw new Error('Give at least one subreddit in "subreddits" (for example igcse or r/SAT).');
     for (const k of ['maxThreadsPerSubreddit', 'maxThreadsWithComments', 'maxCommentsPerThread'])
-        if (!Number.isInteger(input[k]) || input[k] < 0)
-            throw new Error(`Input "${k}" must be a whole number of 0 or more.`);
+        if (!Number.isInteger(input[k]) || input[k] < 0) throw new Error(`Input "${k}" must be a whole number of 0 or more.`);
     const date = (name) => {
         if (!input[name]) return null;
         const t = Date.parse(input[name]);
@@ -45,7 +36,8 @@ export function readInput(raw) {
         return t;
     };
     const dateFrom = date('dateFrom');
-    const dateTo = date('dateTo') == null ? null : date('dateTo') + 86_400_000 - 1; // the whole last day
+    const dateToRaw = date('dateTo');
+    const dateTo = dateToRaw == null ? null : dateToRaw + 86_400_000 - 1;
     if (dateFrom != null && dateTo != null && dateFrom > dateTo) throw new Error('"dateFrom" is after "dateTo".');
     return {
         ...input,
@@ -78,14 +70,14 @@ export async function run({
     input,
     pushData,
     fetch = fetchFeed,
+    discover = discoverRedditThreads,
     shouldStop = () => false,
     now = () => new Date(),
     backoffMs = 30_000,
 }) {
-    const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0 };
+    const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0 };
     const stamp = () => now().toISOString();
 
-    // one request; a "too many requests" answer is waited out twice
     async function ask(url) {
         for (let attempt = 0; ; attempt += 1) {
             await sleep(input.delayBetweenRequestsMs);
@@ -108,18 +100,15 @@ export async function run({
             ? input.keywords.map((k) => ({ keyword: k, url: (after) => searchFeed(sub, k, { after }) }))
             : [{ keyword: null, url: (after) => subredditFeed(sub, { after }) }];
         let halted = null;
+        let sourceMode = 'reddit_rss';
+
         for (const source of sources) {
             let after;
-            for (
-                let page = 0;
-                page < MAX_PAGES && threads.size < input.maxThreadsPerSubreddit && !shouldStop();
-                page += 1
-            ) {
+            for (let page = 0; page < MAX_PAGES && threads.size < input.maxThreadsPerSubreddit && !shouldStop(); page += 1) {
                 const res = await ask(source.url(after));
                 if (res.status !== 'ok') {
-                    problems.push({ keyword: source.keyword, page, status: res.status, detail: res.detail });
-                    if (res.status === 'blocked' || res.status === 'rate_limited' || res.status === 'not_found')
-                        halted = res;
+                    problems.push({ source: 'reddit_rss', keyword: source.keyword, page, status: res.status, detail: res.detail });
+                    if (['blocked', 'rate_limited', 'not_found'].includes(res.status)) halted = res;
                     break;
                 }
                 const posts = parseAtom(res.body).filter((e) => e.kind === 'post');
@@ -133,17 +122,34 @@ export async function run({
                         continue;
                     }
                     const known = threads.get(p.id);
-                    if (known)
-                        known.matchedKeywords = [
-                            ...new Set([...known.matchedKeywords, ...(source.keyword ? [source.keyword] : [])]),
-                        ];
+                    if (known) known.matchedKeywords = [...new Set([...known.matchedKeywords, ...(source.keyword ? [source.keyword] : [])])];
                     else if (threads.size < input.maxThreadsPerSubreddit)
-                        threads.set(p.id, { ...p, matchedKeywords: source.keyword ? [source.keyword] : [] });
+                        threads.set(p.id, { ...p, matchedKeywords: source.keyword ? [source.keyword] : [], discoverySource: 'reddit_rss' });
                 }
                 after = posts.at(-1).id;
                 if (reachedStart || posts.length < 5) break;
             }
             if (halted?.status === 'blocked' || halted?.status === 'not_found') break;
+        }
+
+        if (!threads.size && halted?.status === 'blocked' && !shouldStop()) {
+            sourceMode = 'public_search';
+            totals.searchFallbacks += 1;
+            const fallback = await discover({
+                subreddit: sub,
+                keywords: input.keywords,
+                maxThreads: input.maxThreadsPerSubreddit,
+                maxPages: Math.min(3, Math.max(1, Math.ceil(input.maxThreadsPerSubreddit / 20))),
+                shouldStop,
+                log: (m) => log.info(m),
+            });
+            problems.push(...fallback.attempts.map((a) => ({ source: 'public_search', ...a })));
+            for (const p of fallback.threads) {
+                // Search snippets generally do not expose a reliable post date. Do not pretend date filters were verified.
+                if ((input.dateFromMs != null || input.dateToMs != null) && !p.updated) continue;
+                threads.set(p.id, { ...p, discoverySource: 'public_search' });
+            }
+            if (threads.size) halted = null;
         }
 
         const themeCounts = {};
@@ -152,17 +158,12 @@ export async function run({
         let withComments = 0;
         for (const thread of threads.values()) {
             if (shouldStop()) break;
-            const own = tagText(`${thread.title}\n${thread.text}`, {
-                themes: input.themes,
-                competitors: input.competitors,
-            });
+            const own = tagText(`${thread.title}\n${thread.text}`, { themes: input.themes, competitors: input.competitors });
             let comments = [];
             let commentsStatus = input.includeComments ? 'skipped_limit' : 'not_requested';
-            if (
-                input.includeComments &&
-                withComments < input.maxThreadsWithComments &&
-                input.maxCommentsPerThread > 0
-            ) {
+            if (thread.discoverySource === 'public_search') {
+                commentsStatus = input.includeComments ? 'unavailable_search_only' : 'not_requested';
+            } else if (input.includeComments && withComments < input.maxThreadsWithComments && input.maxCommentsPerThread > 0) {
                 withComments += 1;
                 const res = await ask(threadFeed(thread.url));
                 commentsStatus = res.status;
@@ -185,84 +186,42 @@ export async function run({
             for (const c of new Set([...own.competitorsMentioned, ...comments.flatMap((c) => c.competitorsMentioned)]))
                 competitorCounts[c] = (competitorCounts[c] ?? 0) + 1;
             await pushData({
-                recordType: 'thread',
-                subreddit: sub,
-                threadId: thread.id.replace(/^t3_/, ''),
-                title: thread.title,
-                body: thread.text.slice(0, 5000),
-                author: thread.author,
-                createdAt: thread.updated,
-                url: thread.url,
-                score: null,
-                matchedKeywords: thread.matchedKeywords,
-                themes: own.themes,
-                competitorsMentioned: own.competitorsMentioned,
-                threadThemes: [...all],
-                commentsStatus,
-                comments,
-                status: 'ok',
-                scrapedAt: stamp(),
+                recordType: 'thread', subreddit: sub, threadId: thread.id.replace(/^t3_/, ''), title: thread.title,
+                body: thread.text.slice(0, 5000), author: thread.author, createdAt: thread.updated, url: thread.url, score: null,
+                discoverySource: thread.discoverySource, matchedKeywords: thread.matchedKeywords, themes: own.themes,
+                competitorsMentioned: own.competitorsMentioned, threadThemes: [...all], commentsStatus, comments,
+                status: 'ok', scrapedAt: stamp(),
             });
             totals.threads += 1;
         }
         totals.comments += commentsRead;
         if (halted?.status === 'blocked') totals.blocked += 1;
-        const status =
-            halted?.status === 'blocked'
-                ? 'blocked'
-                : halted?.status === 'not_found'
-                  ? 'not_found'
-                  : halted?.status === 'rate_limited'
-                    ? 'rate_limited'
-                    : threads.size
-                      ? 'ok'
-                      : problems.length
-                        ? 'error'
-                        : 'no_threads';
+        const status = threads.size ? 'ok' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_threads';
         await pushData({
-            recordType: 'subreddit',
-            subreddit: sub,
-            status,
-            statusDetail:
-                status === 'ok' || status === 'no_threads' ? null : (halted?.detail ?? problems[0]?.detail ?? null),
-            threadsRead: threads.size,
-            threadsWithComments: withComments,
-            commentsRead,
-            themeCounts,
-            competitorCounts,
-            problems,
-            scrapedAt: stamp(),
+            recordType: 'subreddit', subreddit: sub, status,
+            statusDetail: status === 'ok' || status === 'no_threads' ? null : (halted?.detail ?? problems[0]?.detail ?? null),
+            sourceMode, threadsRead: threads.size, threadsWithComments: withComments, commentsRead, themeCounts, competitorCounts,
+            problems, scrapedAt: stamp(),
         });
-        log.info(`r/${sub}: ${status}, ${threads.size} thread(s), ${commentsRead} comment(s)`);
+        log.info(`r/${sub}: ${status}, ${threads.size} thread(s), ${commentsRead} comment(s), source ${sourceMode}`);
     }
     return {
         ...totals,
-        note: 'Threads come from the public RSS feeds Reddit publishes for each subreddit (newest first, up to 100 per page) and each thread. RSS carries no score or comment count, so "score" is null. Reddit may refuse feeds to some servers: a subreddit row then says blocked or rate_limited, and nothing is bypassed.',
+        note: 'Reddit RSS is tried first. If Reddit blocks the Apify server, public Brave Search results are used to discover indexed Reddit threads and snippets. Search fallback is incomplete and cannot reliably provide post dates or top comments; those rows say discoverySource=public_search and commentsStatus=unavailable_search_only. Nothing is bypassed.',
     };
 }
 
 async function main() {
     await Actor.init();
     let stop = false;
-    Actor.on('aborting', async () => {
-        stop = true;
-        await sleep(1000);
-        await Actor.exit();
-    });
+    Actor.on('aborting', async () => { stop = true; await sleep(1000); await Actor.exit(); });
     try {
         const input = readInput(await Actor.getInput());
         const proxy = input.proxyConfiguration ? await Actor.createProxyConfiguration(input.proxyConfiguration) : null;
         const proxyUrl = proxy ? await proxy.newUrl() : undefined;
-        const summary = await run({
-            input,
-            pushData: (r) => Actor.pushData(r),
-            fetch: (u) => fetchFeed(u, { proxyUrl }),
-            shouldStop: () => stop,
-        });
+        const summary = await run({ input, pushData: (r) => Actor.pushData(r), fetch: (u) => fetchFeed(u, { proxyUrl }), shouldStop: () => stop });
         await Actor.setValue('OUTPUT', summary);
-        log.info(
-            `Done: ${summary.threads} thread(s), ${summary.comments} comment(s), ${summary.blocked} subreddit(s) blocked.`,
-        );
+        log.info(`Done: ${summary.threads} thread(s), ${summary.comments} comment(s), ${summary.blocked} subreddit(s) blocked, ${summary.searchFallbacks} search fallback(s).`);
     } catch (error) {
         log.error(String(error?.message ?? error));
         await Actor.fail(String(error?.message ?? error));
