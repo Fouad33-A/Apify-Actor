@@ -54,3 +54,12 @@ These are **inputs, not fixed results**: leave them empty and the Actor behaves 
 - Follower figures in search snippets are only used to order the profile lookups; the numbers in the dataset come from the profile Actor.
 - Brave Search limits how fast it can be asked. Requests are spaced about 5 seconds apart and a "too many requests" answer is waited out; if it keeps limiting, Brave is dropped for the run (Google is used instead when the account has the Google SERP proxy) and the report says so. Nothing is solved, rotated or bypassed.
 - The profile step uses your account's Actor and its compute is billed to you.
+
+
+## Runtime safety and partial results
+
+The Actor owns a soft runtime budget (`maxRunSeconds`, default 270 seconds) and reserves `enrichmentReserveSeconds` (default 60 seconds) for profile enrichment and output. If `maxSearchSeconds` would consume that reserve, the effective search budget is shortened automatically. Creator rows are written after each small enrichment batch instead of waiting for the entire run. Every controlled run also writes a `RUN_SUMMARY` dataset record and the same summary to the `OUTPUT` key-value-store record.
+
+When `onlyPassing` is enabled and no creator passes all requested numeric filters, up to five rows are returned as `recordType: "near_miss"`. These rows are explicitly diagnostic and include `nearMissReason`; they are not passing creators.
+
+`estimatedCostUsd` in the run summary is currently `null` because the authoritative Apify billing amount is not available to the Actor while it is running. The summary says this explicitly rather than presenting a guessed amount as an invoice cost.

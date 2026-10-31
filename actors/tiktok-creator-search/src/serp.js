@@ -540,6 +540,7 @@ export async function discoverCreators({
                 return;
             }
             await runKeyword(item);
+            log(`Keyword complete: "${item.keyword}"; ${handlesFor(item.keyword)} unique creator(s) found so far for this keyword`);
         }
     }
     await Promise.all(Array.from({ length: SEARCH_PARALLEL }, () => worker()));

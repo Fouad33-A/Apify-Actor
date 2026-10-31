@@ -5,7 +5,8 @@ import { defaultEngines, discoverCreators, parseFollowerHint } from './serp.js';
 import { fetchVideoPlace } from './video.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const BATCH = 50; // the profile Actor takes 1-50 usernames per run
+const RUNTIME_FIX_VERSION = '2026-10-31-v3';
+const BATCH = 2; // hard safety boundary: never send more than two creators to one child enrichment run
 
 const DEFAULTS = {
     excludeWords: [],
@@ -22,6 +23,8 @@ const DEFAULTS = {
     examPresets: [],
     addMedianViews: false,
     videosForMedian: 10,
+    maxRunSeconds: 270,
+    enrichmentReserveSeconds: 60,
 };
 
 export function readInput(raw) {
@@ -34,10 +37,12 @@ export function readInput(raw) {
         .map((h) => `#${h}`);
     if (!keywords.length && !hashtags.length)
         throw new Error('Give at least one keyword in "keywords" or one hashtag in "hashtags".');
-    for (const key of ['maxSearchPages', 'maxSearchSeconds', 'maxCreators']) {
+    for (const key of ['maxSearchPages', 'maxSearchSeconds', 'maxCreators', 'maxRunSeconds', 'enrichmentReserveSeconds']) {
         if (!Number.isInteger(input[key]) || input[key] < 1)
             throw new Error(`Input "${key}" must be a whole number of 1 or more.`);
     }
+    if (input.enrichmentReserveSeconds >= input.maxRunSeconds)
+        throw new Error('Input "enrichmentReserveSeconds" must be smaller than "maxRunSeconds".');
     if (input.minFollowers != null && input.maxFollowers != null && input.minFollowers > input.maxFollowers) {
         throw new Error('"minFollowers" is larger than "maxFollowers".');
     }
@@ -156,7 +161,7 @@ export function creatorRow(candidate, profile, enrichNote) {
 export async function callProfileActor(
     actorId,
     usernames,
-    { medianViews = false, videosForMedian = 10, needLatestVideo = false } = {},
+    { medianViews = false, videosForMedian = 10, needLatestVideo = false, waitSecs = 45 } = {},
 ) {
     const full = medianViews || needLatestVideo;
     const videos = medianViews ? videosForMedian : 1;
@@ -170,9 +175,14 @@ export async function callProfileActor(
             maxItems: usernames.length * perCreator + 5,
             concurrency: 2,
         },
-        { waitSecs: 900 },
+        { waitSecs },
     );
     if (!run?.defaultDatasetId) throw new Error(`Run of ${actorId} returned no dataset (status ${run?.status})`);
+    const terminal = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT']);
+    if (run.id && !terminal.has(run.status)) {
+        log.warning(`Profile child ${run.id} did not finish within ${waitSecs}s (status ${run.status}); aborting it and using any partial dataset rows.`);
+        await Actor.apifyClient.run(run.id).abort().catch(() => null);
+    }
     const { items } = await Actor.apifyClient
         .dataset(run.defaultDatasetId)
         .listItems({ limit: usernames.length * perCreator + 10 });
@@ -211,129 +221,156 @@ export async function runSearch({
     enrich = callProfileActor,
     readPlace = fetchVideoPlace,
     shouldStop = () => false,
+    now = () => Date.now(),
 }) {
-    const started = new Date().toISOString();
-    const report = { queries: [], blocked: false, stoppedOnTime: false };
+    const startedMs = now();
+    const started = new Date(startedMs).toISOString();
+    const runDeadline = startedMs + input.maxRunSeconds * 1000;
+    const reserveMs = input.enrichProfiles ? input.enrichmentReserveSeconds * 1000 : 5_000;
+    const searchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, Math.floor((runDeadline - startedMs - reserveMs) / 1000)));
+    const outOfTime = (reserve = 0) => shouldStop() || now() >= runDeadline - reserve;
+    const report = { queries: [], blocked: false, stoppedOnTime: false, requestedMaxSearchSeconds: input.maxSearchSeconds, effectiveMaxSearchSeconds: searchSeconds };
+
+    log.info(`[${RUNTIME_FIX_VERSION}] Runtime budget: ${input.maxRunSeconds}s total; search capped at ${searchSeconds}s; ${input.enrichProfiles ? `${input.enrichmentReserveSeconds}s reserved for enrichment/output` : 'enrichment disabled'}.`);
     const { candidates } = await discoverCreators({
         keywords: input.searches,
         excludeWords: input.excludeWords,
         maxPages: input.maxSearchPages,
-        maxSeconds: input.maxSearchSeconds,
+        maxSeconds: searchSeconds,
         modifiers: input.searchModifiers,
         serpProxyUrl,
         serpFetch,
         engines,
         report,
-        shouldContinue: () => !shouldStop(),
+        shouldContinue: () => !outOfTime(reserveMs),
         log: (m) => log.info(m),
     });
 
     const ordered = orderCandidates(candidates, input).slice(0, input.maxCreators);
     const profiles = new Map();
-    let enrichNote = null;
-    if (input.enrichProfiles && ordered.length) {
-        for (let i = 0; i < ordered.length && !shouldStop(); i += BATCH) {
-            const names = ordered.slice(i, i + BATCH).map((c) => c.handle);
-            try {
-                for (const [name, row] of await enrich(input.profileActor, names, {
-                    medianViews: input.wantMedian,
-                    videosForMedian: input.videosForMedian,
-                    needLatestVideo: input.regions.length > 0,
-                }))
-                    profiles.set(name, row);
-            } catch (error) {
-                enrichNote = `Profile enrichment failed: ${String(error?.message ?? error)}`;
-                log.warning(enrichNote);
-                break;
-            }
-        }
-    }
-
-    // A creator's country: the profile's own when it has one, otherwise the country of their latest video (a video page
-    // names the country it was posted from). Only looked up when countries were asked for.
-    const regionSource = new Map();
-    if (input.regions.length) {
-        for (const c of ordered) {
-            if (shouldStop()) break;
-            const profile = profiles.get(c.handle);
-            if (!profile) continue;
-            if (profile.region) {
-                regionSource.set(c.handle, 'profile');
-                continue;
-            }
-            const url = profile.latestVideoUrl ?? c.videoUrls?.[0];
-            if (!url) continue;
-            try {
-                const place = await readPlace(url);
-                if (place?.region) {
-                    profile.region = place.region;
-                    profile.language ??= place.language;
-                    regionSource.set(c.handle, 'latest video');
-                }
-            } catch {
-                // the creator keeps an unknown country
-            }
-            await new Promise((resolve) => {
-                setTimeout(resolve, input.delayBetweenPlaceLookupsMs ?? 600);
-            });
-        }
-    }
-    const counts = {
-        returned: 0,
-        passing: 0,
-        outOfRange: 0,
-        unenriched: 0,
-        profileProblems: 0,
-        locationMatches: 0,
-        locationMismatches: 0,
-    };
+    const emitted = new Set();
     const rows = [];
-    for (const c of ordered) {
-        const profile = profiles.get(c.handle) ?? null;
-        const row = creatorRow(
-            c,
-            profile,
-            profile
-                ? null
-                : (enrichNote ??
-                      (input.enrichProfiles
-                          ? 'the profile Actor returned no row for this handle'
-                          : 'enrichProfiles is off')),
-        );
+    let enrichNote = null;
+    const counts = {
+        returned: 0, passing: 0, outOfRange: 0, unknownFilter: 0, unenriched: 0, profileProblems: 0,
+        locationMatches: 0, locationMismatches: 0, errors: 0,
+    };
+
+    const makeRow = (c, profile, note = null) => {
+        const row = creatorRow(c, profile, profile ? null : (note ?? (input.enrichProfiles ? 'the profile Actor returned no row for this handle' : 'enrichProfiles is off')));
         const { passes, failures } = checkFilters(row, input);
         row.passesFilters = passes;
         row.filterFailures = failures;
         Object.assign(row, matchRegionLanguage(row, input));
-        row.regionSource = row.region ? (regionSource.get(c.handle) ?? 'profile') : null;
+        row.regionSource = row.region ? 'profile' : null;
+        return row;
+    };
+    const countRow = (row, profile) => {
         if (!profile) counts.unenriched += 1;
         else if (row.profileStatus !== 'ok') counts.profileProblems += 1;
-        if (passes === true) counts.passing += 1;
-        if (passes === false) counts.outOfRange += 1;
+        if (row.passesFilters === true) counts.passing += 1;
+        else if (row.passesFilters === false) counts.outOfRange += 1;
+        else counts.unknownFilter += 1;
         if (row.locationMatch === true) counts.locationMatches += 1;
         if (row.locationMatch === false) counts.locationMismatches += 1;
-        rows.push(row);
-    }
-    // "prefer": creators from the wanted countries / languages first, unknown next, confirmed others last. "only": the
-    // confirmed others are left out (a creator whose location is not known is kept and marked locationMatch null).
-    const locationRank = (r) => (r.locationMatch === true ? 0 : r.locationMatch === null ? 1 : 2);
-    if (input.regions.length || input.languages.length) rows.sort((a, b) => locationRank(a) - locationRank(b));
-    for (const row of rows) {
-        if (input.onlyPassing && row.passesFilters !== true) continue;
-        if (input.matchMode === 'only' && row.locationMatch === false) continue;
+    };
+    const emitRow = async (row, force = false) => {
+        if (emitted.has(row.handle)) return false;
+        if (!force && input.onlyPassing && row.passesFilters !== true) return false;
+        if (!force && input.matchMode === 'only' && row.locationMatch === false) return false;
         await pushData(row);
+        emitted.add(row.handle);
         counts.returned += 1;
+        return true;
+    };
+
+    if (input.enrichProfiles && ordered.length) {
+        for (let i = 0; i < ordered.length && !outOfTime(8_000); i += BATCH) {
+            const batch = ordered.slice(i, i + BATCH);
+            const names = batch.map((c) => c.handle);
+            log.info(`[${RUNTIME_FIX_VERSION}] Enrichment child batch ${Math.floor(i / BATCH) + 1}: ${names.length} creator(s) [${names.join(', ')}]; creators ${i + 1}-${Math.min(i + BATCH, ordered.length)} of ${ordered.length}.`);
+            let got = new Map();
+            try {
+                got = await enrich(input.profileActor, names, {
+                    medianViews: input.wantMedian,
+                    videosForMedian: input.videosForMedian,
+                    needLatestVideo: input.regions.length > 0,
+                    waitSecs: Math.max(10, Math.min(45, Math.floor((runDeadline - now() - 8_000) / 1000))),
+                });
+                for (const [name, row] of got) profiles.set(name, row);
+            } catch (error) {
+                enrichNote = `Profile enrichment failed for batch: ${String(error?.message ?? error)}`;
+                counts.errors += 1;
+                log.warning(enrichNote);
+            }
+
+            for (const c of batch) {
+                if (outOfTime(5_000)) break;
+                const profile = profiles.get(c.handle) ?? null;
+                if (profile && input.regions.length && !profile.region) {
+                    const url = profile.latestVideoUrl ?? c.videoUrls?.[0];
+                    if (url) {
+                        try {
+                            const place = await readPlace(url);
+                            if (place?.region) {
+                                profile.region = place.region;
+                                profile.language ??= place.language;
+                                profile.__regionSource = 'latest video';
+                            }
+                        } catch { /* location remains unknown */ }
+                    }
+                }
+                const row = makeRow(c, profile, enrichNote);
+                if (profile?.__regionSource) row.regionSource = profile.__regionSource;
+                rows.push(row);
+                countRow(row, profile);
+                await emitRow(row);
+            }
+        }
+    } else {
+        for (const c of ordered) {
+            if (outOfTime(5_000)) break;
+            const row = makeRow(c, null);
+            rows.push(row);
+            countRow(row, null);
+            await emitRow(row);
+        }
     }
 
-    return {
+    // If onlyPassing produced nothing, return a small, explicitly-labelled diagnostic sample instead of an empty dataset.
+    let nearMissesReturned = 0;
+    if (input.onlyPassing && counts.returned === 0 && rows.length) {
+        const ranked = [...rows].sort((a, b) => (a.filterFailures?.length ?? 99) - (b.filterFailures?.length ?? 99)).slice(0, 5);
+        for (const row of ranked) {
+            const diagnostic = { ...row, recordType: 'near_miss', nearMiss: true, nearMissReason: row.filterFailures?.length ? row.filterFailures.join('; ') : 'required filter value was unavailable' };
+            if (await emitRow(diagnostic, true)) nearMissesReturned += 1;
+        }
+    }
+
+    const searchedKeywords = report.queries.filter((q) => q.attempts?.length).map((q) => q.keyword);
+    const summary = {
+        recordType: 'RUN_SUMMARY',
         startedAt: started,
-        finishedAt: new Date().toISOString(),
+        finishedAt: new Date(now()).toISOString(),
         searches: input.searches,
+        keywordsDone: searchedKeywords,
+        keywordsRequested: input.searches.length,
+        keywordsCompleted: searchedKeywords.length,
         handlesFound: candidates.length,
+        candidatesSelected: ordered.length,
+        creatorsProcessed: rows.length,
         ...counts,
+        nearMissesReturned,
         enrichNote,
+        stoppedEarly: outOfTime(5_000) || report.stoppedOnTime,
         search: report,
-        note: 'Creators come from Brave Search results (Google as a fallback) for the keywords and hashtags, because TikTok search itself is not available logged out. Search results vary from run to run, so a repeat run can find different creators; the search report lists every attempt. Follower figures come from the profile Actor, not from the search snippets.',
+        estimatedCostUsd: null,
+        estimatedCostNote: 'Exact run cost is not available inside the Actor; use the Apify run billing/usage record for the authoritative amount.',
+        note: 'Creators come from public search-engine results for the keywords and hashtags. Follower and median-view filters use the profile Actor, not search snippets.',
     };
+    await pushData(summary);
+    log.info(`[${RUNTIME_FIX_VERSION}] RUN_SUMMARY written to dataset: processed=${summary.creatorsProcessed}, returned=${summary.returned}, stoppedEarly=${summary.stoppedEarly}.`);
+    return summary;
 }
 
 async function main() {
@@ -347,6 +384,7 @@ async function main() {
         await Actor.exit();
     });
     try {
+        log.info(`[${RUNTIME_FIX_VERSION}] TikTok Creator Search runtime-safe build active; child enrichment batch size=${BATCH}.`);
         const input = readInput(await Actor.getInput());
         // Brave Search needs no proxy; the Google SERP proxy, when the account has it, is the fallback engine.
         const serp = await Actor.createProxyConfiguration({ groups: ['GOOGLE_SERP'] }).catch(() => null);
@@ -359,7 +397,7 @@ async function main() {
             shouldStop: () => stop,
         });
         await Actor.setValue('OUTPUT', summary);
-        log.info(`Done: ${summary.handlesFound} creators found, ${summary.returned} returned.`);
+        log.info(`Done: ${summary.handlesFound} creators found, ${summary.returned} creator/near-miss row(s) returned; ${summary.creatorsProcessed} processed.`);
     } catch (error) {
         log.error(String(error?.message ?? error));
         await Actor.fail(String(error?.message ?? error));
