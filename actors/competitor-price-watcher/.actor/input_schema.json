@@ -1,0 +1,56 @@
+{
+    "title": "Competitor Price Watcher Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "pages": {
+            "title": "Pricing pages",
+            "type": "array",
+            "description": "Public pricing or product pages to read. Add a name to an entry to label the competitor, for example {\"url\": \"https://sat.magoosh.com/plans\", \"name\": \"Magoosh\"}. Without a name the site name is used.",
+            "editor": "requestListSources",
+            "default": [{ "url": "https://fiveable.me/pricing", "method": "GET" }],
+            "prefill": [
+                { "url": "https://fiveable.me/pricing", "method": "GET" },
+                { "url": "https://sat.magoosh.com/plans", "method": "GET" }
+            ]
+        },
+        "delayBetweenPagesMs": {
+            "title": "Delay between pages (ms)",
+            "type": "integer",
+            "description": "Pause after each page, so a site is not hit in quick succession.",
+            "editor": "number",
+            "default": 1500,
+            "minimum": 0
+        },
+        "concurrency": {
+            "title": "Pages read at the same time",
+            "type": "integer",
+            "description": "1 to 4. Pages are read one after another per worker.",
+            "editor": "number",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 4
+        },
+        "historyStoreName": {
+            "title": "History store name",
+            "type": "string",
+            "description": "Named key-value store that remembers the prices of the last successful read of each page, so the next run can show the change. Use another name for a separate watch list.",
+            "editor": "textfield",
+            "default": "competitor-price-history"
+        },
+        "updateHistory": {
+            "title": "Save this run as the new baseline",
+            "type": "boolean",
+            "description": "Turn off for a test run that should not replace the saved prices.",
+            "editor": "checkbox",
+            "default": true
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "description": "Optional. Leave empty to read pages directly. A proxy is only for reaching a page from another country; it is not used to get past a bot check.",
+            "editor": "proxy"
+        }
+    },
+    "required": ["pages"]
+}

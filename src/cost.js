@@ -1,0 +1,107 @@
+// Run cost visibility and a hard proxy cap. Residential proxy is billed per GB, so the number that matters
+// most is how many bytes this run moved through the browser; the run's own compute is small by comparison.
+//
+// - counts bytes for every finished request (headers + bodies, as sent over the wire)
+// - optionally blocks images/media/fonts (the parsers read text, JSON and attributes, never pixels), which
+//   cuts proxy traffic a lot
+// - stops the run cleanly (via BudgetTracker.stop) once maxProxyMegabytes is exceeded
+// - report() returns an honest cost summary; the platform's own figure is added by main.js when available
+
+export const BLOCKED_TYPES = new Set(['image', 'media', 'font']);
+
+// The proxy cap in megabytes: the smaller of the megabyte cap and the dollar cap (dollars / price per GB x 1000).
+// null = no cap.
+export function effectiveCapMegabytes({ maxMegabytes = null, maxUsd = null, pricePerGbUsd = 8 } = {}) {
+    const caps = [];
+    if (maxMegabytes) caps.push(maxMegabytes);
+    if (maxUsd != null && pricePerGbUsd > 0) caps.push((maxUsd / pricePerGbUsd) * 1000);
+    return caps.length ? Number(Math.min(...caps).toFixed(2)) : null;
+}
+
+export function computeUnits(memoryMbytes, runtimeSecs) {
+    if (!memoryMbytes || !runtimeSecs) return null;
+    return Number(((memoryMbytes / 1024) * (runtimeSecs / 3600)).toFixed(5));
+}
+
+export class CostTracker {
+    constructor({ budget, maxProxyMegabytes = null, proxyPricePerGbUsd = null, memoryMbytes = null } = {}) {
+        this.budget = budget;
+        this.maxProxyMegabytes = maxProxyMegabytes;
+        this.proxyPricePerGbUsd = proxyPricePerGbUsd;
+        this.memoryMbytes = memoryMbytes;
+        this.bytes = 0;
+        this.requests = 0;
+        this.blockedRequests = 0;
+        this.startedAt = Date.now();
+        this.pending = new Set();
+    }
+
+    // Waits for in-flight size measurements; call before closing the browser and reading report().
+    async settle() {
+        await Promise.allSettled([...this.pending]);
+    }
+
+    addBytes(n) {
+        if (!Number.isFinite(n) || n <= 0) return;
+        this.bytes += n;
+        this.requests += 1;
+        if (this.maxProxyMegabytes && this.bytes / 1e6 > this.maxProxyMegabytes) {
+            this.budget?.stop('max_proxy_megabytes');
+        }
+    }
+
+    // blockTypes: resource types to abort (any of 'image', 'media', 'font'). blockHeavyResources=true means all three.
+    // 'media' (video/audio streams) is what the TikTok creator embed autoplays: unmeasured and expensive.
+    async attach(context, { blockHeavyResources = false, blockTypes = [] } = {}) {
+        const blocked = blockHeavyResources ? BLOCKED_TYPES : new Set(blockTypes.filter((t) => BLOCKED_TYPES.has(t)));
+        if (blocked.size) {
+            await context.route('**/*', (route) => {
+                if (blocked.has(route.request().resourceType())) {
+                    this.blockedRequests += 1;
+                    return route.abort();
+                }
+                return route.continue();
+            });
+        }
+        context.on('requestfinished', (request) => {
+            const measure = (async () => {
+                try {
+                    const s = await request.sizes();
+                    this.addBytes(
+                        (s.requestBodySize || 0) +
+                            (s.requestHeadersSize || 0) +
+                            (s.responseBodySize || 0) +
+                            (s.responseHeadersSize || 0),
+                    );
+                } catch {
+                    // sizes are unavailable for some requests: skip rather than guess
+                }
+            })();
+            this.pending.add(measure);
+            measure.finally(() => this.pending.delete(measure));
+        });
+    }
+
+    report({ platformUsage = null } = {}) {
+        const runtimeSecs = Number(((Date.now() - this.startedAt) / 1000).toFixed(1));
+        const proxyMegabytes = Number((this.bytes / 1e6).toFixed(2));
+        return {
+            runtimeSecs,
+            requests: this.requests,
+            blockedRequests: this.blockedRequests,
+            proxyMegabytes,
+            maxProxyMegabytes: this.maxProxyMegabytes,
+            computeUnitsEstimate: computeUnits(this.memoryMbytes, runtimeSecs),
+            // Only computed when a price was supplied; the per-GB rate depends on your plan.
+            estimatedProxyUsd:
+                this.proxyPricePerGbUsd != null
+                    ? Number(((proxyMegabytes / 1000) * this.proxyPricePerGbUsd).toFixed(4))
+                    : null,
+            // The platform's own usage figure for this run (Apify), when it could be read. It can lag the final charge
+            // (usage is aggregated after the run ends). IMPORTANT: every number in usageUsd is US DOLLARS, including
+            // PROXY_RESIDENTIAL_TRANSFER_GBYTES (the residential proxy charge in dollars, not gigabytes).
+            platformUsage,
+            note: 'proxyMegabytes is measured in the browser (wire bytes) and matches the billed proxy traffic; estimatedProxyUsd = megabytes / 1000 x the proxy price per GB. In platformUsage.usageUsd all numbers are US dollars (PROXY_RESIDENTIAL_TRANSFER_GBYTES is the proxy charge in dollars).',
+        };
+    }
+}

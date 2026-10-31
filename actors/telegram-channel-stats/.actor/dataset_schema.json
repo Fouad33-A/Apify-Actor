@@ -1,0 +1,40 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "channels": {
+            "title": "Channels",
+            "transformation": {
+                "fields": [
+                    "username",
+                    "title",
+                    "status",
+                    "members",
+                    "postsPerWeek",
+                    "medianViews",
+                    "medianViewsPctOfMembers",
+                    "daysSinceLastPost",
+                    "postsSampled",
+                    "discoveredFrom",
+                    "url"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "username": { "label": "Channel", "format": "text" },
+                    "title": { "label": "Title", "format": "text" },
+                    "status": { "label": "Status", "format": "text" },
+                    "members": { "label": "Members", "format": "number" },
+                    "postsPerWeek": { "label": "Posts / week", "format": "number" },
+                    "medianViews": { "label": "Median views", "format": "number" },
+                    "medianViewsPctOfMembers": { "label": "Median views % of members", "format": "number" },
+                    "daysSinceLastPost": { "label": "Days since last post", "format": "number" },
+                    "postsSampled": { "label": "Posts read", "format": "number" },
+                    "discoveredFrom": { "label": "Found via", "format": "text" },
+                    "url": { "label": "Link", "format": "link" }
+                }
+            }
+        }
+    }
+}

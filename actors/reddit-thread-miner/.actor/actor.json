@@ -1,0 +1,15 @@
+{
+    "actorSpecification": 1,
+    "name": "reddit-thread-miner",
+    "title": "Reddit Thread Miner (demand language: price, worth it, free alternatives)",
+    "description": "Reads public Reddit threads and top comments for chosen subreddits and keywords through Reddit's RSS feeds, and tags price, worth-it, free-alternative and competitor language. No login.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024
+}

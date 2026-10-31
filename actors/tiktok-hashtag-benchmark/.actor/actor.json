@@ -1,0 +1,15 @@
+{
+    "actorSpecification": 1,
+    "name": "tiktok-hashtag-benchmark",
+    "title": "TikTok Hashtag Benchmark (median views, quartiles, engagement)",
+    "description": "Finds public TikTok videos for a hashtag through search, reads each video's own numbers and returns view benchmarks (median, quartiles, engagement), optionally for chosen countries. No login.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024
+}

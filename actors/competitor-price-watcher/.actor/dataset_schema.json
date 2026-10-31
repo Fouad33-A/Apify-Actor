@@ -1,0 +1,48 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "prices": {
+            "title": "Prices and changes",
+            "transformation": {
+                "fields": [
+                    "competitor",
+                    "recordType",
+                    "plan",
+                    "price",
+                    "priceMax",
+                    "currency",
+                    "period",
+                    "unit",
+                    "changeStatus",
+                    "previousPrice",
+                    "change",
+                    "changePct",
+                    "status",
+                    "url",
+                    "scrapedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "competitor": { "label": "Competitor", "format": "text" },
+                    "recordType": { "label": "Row", "format": "text" },
+                    "plan": { "label": "Plan", "format": "text" },
+                    "price": { "label": "Price", "format": "number" },
+                    "priceMax": { "label": "Up to", "format": "number" },
+                    "currency": { "label": "Currency", "format": "text" },
+                    "period": { "label": "Period", "format": "text" },
+                    "unit": { "label": "Per", "format": "text" },
+                    "changeStatus": { "label": "Change", "format": "text" },
+                    "previousPrice": { "label": "Previous", "format": "number" },
+                    "change": { "label": "Difference", "format": "number" },
+                    "changePct": { "label": "Difference %", "format": "number" },
+                    "status": { "label": "Status", "format": "text" },
+                    "url": { "label": "Page", "format": "link" },
+                    "scrapedAt": { "label": "Read at", "format": "date" }
+                }
+            }
+        }
+    }
+}

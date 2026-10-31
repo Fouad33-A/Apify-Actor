@@ -1,0 +1,265 @@
+import { describe, expect, it } from 'vitest';
+
+import { keepVideo, readInput, run } from '../src/main.js';
+import { bingUrl, braveUrl, duckDuckGoUrl, findVideoUrls, freshnessFor } from '../src/search.js';
+import { percentile, summariseVideos } from '../src/stats.js';
+import { parseVideoPage, postedAtFromId, videoUrlsIn } from '../src/video.js';
+
+const NOW = Date.parse('2026-10-29T00:00:00Z');
+const page = (item, statusCode = 0) =>
+    `<html><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify({ __DEFAULT_SCOPE__: { 'webapp.video-detail': { statusCode, itemInfo: item ? { itemStruct: item } : undefined } } })}</script></html>`;
+const item = (over = {}) => ({
+    id: '7600000000000000001',
+    desc: 'Algebra tips #igcse #maths',
+    createTime: String(Math.floor(Date.parse('2026-10-01T00:00:00Z') / 1000)),
+    stats: { playCount: 5121, diggCount: 192, commentCount: 6, shareCount: 6, collectCount: '27' },
+    author: { uniqueId: 'tutor1' },
+    locationCreated: 'AE',
+    textLanguage: 'en',
+    textExtra: [{ hashtagName: 'IGCSE' }, { hashtagName: '' }],
+    video: { duration: 31 },
+    ...over,
+});
+
+describe('video page', () => {
+    it('reads the numbers, date, country and lower-cased hashtags', () => {
+        const res = parseVideoPage(page(item()));
+        expect(res.status).toBe('ok');
+        expect(res.video).toMatchObject({
+            videoId: '7600000000000000001',
+            author: 'tutor1',
+            views: 5121,
+            likes: 192,
+            saves: 27,
+            region: 'AE',
+            language: 'en',
+            hashtags: ['igcse'],
+            createdAt: '2026-10-01T00:00:00.000Z',
+        });
+    });
+    it('says what is wrong with a page without video data', () => {
+        expect(parseVideoPage('<html></html>').status).toBe('no_data');
+        expect(parseVideoPage(page(null, 10204)).detail).toMatch(/10204/);
+    });
+    it('finds video addresses in a result page, also percent-encoded', () => {
+        const html =
+            'x https://www.tiktok.com/@Alpha/video/7600000000000000001 y https%3A%2F%2Fwww.tiktok.com%2F%40beta%2Fvideo%2F7600000000000000002?q=1 z https://www.tiktok.com/@alpha';
+        expect(videoUrlsIn(html)).toEqual([
+            'https://www.tiktok.com/@alpha/video/7600000000000000001',
+            'https://www.tiktok.com/@beta/video/7600000000000000002',
+        ]);
+    });
+});
+
+describe('statistics and filters', () => {
+    it('computes percentiles and a summary', () => {
+        expect(percentile([1, 2, 3, 4, 5], 0.5)).toBe(3);
+        const videos = [100, 200, 300, 400, 1000].map((views, i) => ({
+            views,
+            likes: views / 10,
+            comments: 1,
+            shares: 0,
+            region: i < 3 ? 'AE' : 'SA',
+            createdAt: `2026-10-0${i + 1}T00:00:00.000Z`,
+        }));
+        const s = summariseVideos(videos);
+        expect(s).toMatchObject({
+            videosUsed: 5,
+            medianViews: 300,
+            p25Views: 200,
+            p75Views: 400,
+            regions: { AE: 3, SA: 2 },
+            viewTargets: { conservative: 200, typical: 300, ambitious: 400 },
+        });
+        expect(summariseVideos([])).toBeNull();
+    });
+    it('keeps tagged, recent, in-region videos', () => {
+        const v = parseVideoPage(page(item())).video;
+        const opts = { tag: 'igcse', recentDays: 90, regions: ['AE'], now: NOW };
+        expect(keepVideo(v, opts)).toBeNull();
+        expect(keepVideo(v, { ...opts, tag: 'sat' })).toBe('notTagged');
+        expect(keepVideo(v, { ...opts, recentDays: 5 })).toBe('tooOld');
+        expect(keepVideo(v, { ...opts, regions: ['SA'] })).toBe('otherRegion');
+        expect(keepVideo({ ...v, hashtags: [], description: 'tips #igcse' }, opts)).toBeNull();
+    });
+});
+
+describe('search and run', () => {
+    it('abandons a rate-limited source immediately and fails over to the next public source', async () => {
+        const calls = [];
+        const sources = [
+            { name: 'one', url: (q, page) => `one:${page}:${q}` },
+            { name: 'two', url: (q, page) => `two:${page}:${q}` },
+        ];
+        const fetch = async (url, source) => {
+            calls.push({ url, source });
+            if (source === 'one') return { status: 429, body: '' };
+            return {
+                status: 200,
+                body: 'https://www.tiktok.com/@aa/video/7600000000000000001 https://www.tiktok.com/@bb/video/7600000000000000002',
+            };
+        };
+        const res = await findVideoUrls({ tag: 'igcse', want: 2, maxPages: 3, fetch, sources, paceMs: 0 });
+        expect(res.urls).toHaveLength(2);
+        expect(calls.filter((c) => c.source === 'one')).toHaveLength(1);
+        expect(res.discoveryStatus).toBe('ok');
+        expect(res.sourceResults).toEqual([
+            { source: 'one', status: 'blocked' },
+            { source: 'two', status: 'ok' },
+        ]);
+    });
+
+    it('distinguishes total discovery rate limiting from a successful empty search', async () => {
+        const sources = [
+            { name: 'one', url: () => 'one' },
+            { name: 'two', url: () => 'two' },
+        ];
+        const blocked = await findVideoUrls({
+            tag: 'igcse',
+            want: 2,
+            maxPages: 1,
+            sources,
+            fetch: async () => ({ status: 429, body: '' }),
+            paceMs: 0,
+        });
+        expect(blocked.discoveryStatus).toBe('rate_limited');
+        const empty = await findVideoUrls({
+            tag: 'igcse',
+            want: 2,
+            maxPages: 1,
+            sources: [{ name: 'one', url: () => 'one' }],
+            fetch: async () => ({ status: 200, body: '<html>nothing</html>' }),
+            paceMs: 0,
+        });
+        expect(empty.discoveryStatus).toBe('ok');
+        expect(empty.urls).toEqual([]);
+    });
+
+    it('returns video rows and a benchmark row, with a thin-sample warning', async () => {
+        const rows = [];
+        const urls = Array.from({ length: 4 }, (_, i) => `https://www.tiktok.com/@u${i}/video/760000000000000000${i}`);
+        const input = readInput({ hashtags: ['#IGCSE'], regions: ['ae'], delayBetweenVideosMs: 0, concurrency: 1 });
+        await run({
+            input,
+            pushData: async (r) => void rows.push(r),
+            search: async () => ({ urls, attempts: [], rateLimited: false }),
+            fetchVideo: async (url) => ({
+                status: 200,
+                html: page(
+                    item({
+                        id: url.split('/').pop(),
+                        stats: {
+                            playCount: 1000 * (urls.indexOf(url) + 1),
+                            diggCount: 10,
+                            commentCount: 1,
+                            shareCount: 1,
+                        },
+                    }),
+                ),
+            }),
+            now: () => NOW,
+        });
+        expect(rows.filter((r) => r.recordType === 'video')).toHaveLength(4);
+        const b = rows.find((r) => r.recordType === 'benchmark');
+        expect(b).toMatchObject({ hashtag: 'igcse', status: 'thin_sample', videosUsed: 4, medianViews: 2500 });
+        expect(rows.every((r) => r.scrapedAt && r.status)).toBe(true);
+    });
+
+    it('reports no_videos with the reason when search found nothing', async () => {
+        const rows = [];
+        await run({
+            input: readInput({ hashtags: ['x1'] }),
+            pushData: async (r) => void rows.push(r),
+            search: async () => ({ urls: [], attempts: [], rateLimited: true, discoveryStatus: 'rate_limited' }),
+            fetchVideo: async () => ({ status: 404, html: '' }),
+        });
+        expect(rows[0]).toMatchObject({ recordType: 'benchmark', status: 'discovery_rate_limited' });
+        expect(rows[0].statusDetail).toMatch(/blocked|rate-limited/);
+    });
+});
+
+describe('freshness', () => {
+    it("maps the day range to Brave's time filter", () => {
+        expect([5, 20, 90, 365, 700].map(freshnessFor)).toEqual(['pw', 'pm', 'py', 'py', null]);
+        expect(braveUrl('q', 1, 'py')).toMatch(/&tf=py$/);
+        expect(braveUrl('q', 0)).not.toMatch(/tf=/);
+        expect(bingUrl('q', 1)).toContain('first=11');
+        expect(duckDuckGoUrl('q', 1)).toContain('s=30');
+    });
+    it('reads the post time from a video id and skips old videos without fetching them', async () => {
+        const id = (iso) => String((BigInt(Math.floor(Date.parse(iso) / 1000)) << 32n) + 123n);
+        expect(postedAtFromId(id('2026-06-13T00:00:00Z'))).toBe(Date.parse('2026-06-13T00:00:00Z'));
+        expect(postedAtFromId('12345')).toBeNull();
+        const fetched = [];
+        const rows = [];
+        const urls = [
+            `https://www.tiktok.com/@old/video/${id('2022-01-01T00:00:00Z')}`,
+            `https://www.tiktok.com/@newer/video/${id('2026-10-01T00:00:00Z')}`,
+        ];
+        await run({
+            input: readInput({ hashtags: ['igcse'], delayBetweenVideosMs: 0, concurrency: 1 }),
+            pushData: async (r) => void rows.push(r),
+            search: async () => ({ urls, attempts: [], rateLimited: false }),
+            fetchVideo: async (url) => {
+                fetched.push(url);
+                return { status: 200, html: page(item()) };
+            },
+            now: () => NOW,
+        });
+        expect(fetched).toEqual([urls[1]]);
+        expect(rows.find((r) => r.recordType === 'benchmark').dropped.tooOld).toBe(1);
+    });
+});
+
+describe('creator embed', () => {
+    const idAt = (iso) => String((BigInt(Math.floor(Date.parse(iso) / 1000)) << 32n) + 7n);
+    const embedPage = (videos) =>
+        `<html><script id="__FRONTITY_CONNECT_STATE__" type="application/json">${JSON.stringify({ source: { data: { list: videos } } })}</script><script>var x=1</script></html>`;
+    it('reads videos with their id, caption, plays and post time, and keeps tagged recent ones', async () => {
+        const { parseEmbedPage, taggedRecent } = await import('../src/embed.js');
+        const recent = idAt('2026-10-10T00:00:00Z');
+        const old = idAt('2023-01-01T00:00:00Z');
+        const videos = parseEmbedPage(
+            embedPage([
+                { id: recent, desc: 'Tips #IGCSE', playCount: 5000, authorUniqueId: 'tutor' },
+                { id: old, desc: '#igcse', playCount: 1 },
+                { id: idAt('2026-10-11T00:00:00Z'), desc: 'no tag', playCount: 9 },
+            ]),
+        );
+        expect(videos).toHaveLength(3);
+        expect(videos[0]).toMatchObject({ id: recent, views: 5000, author: 'tutor' });
+        expect(taggedRecent(videos, { tag: 'igcse', recentDays: 365, now: NOW }).map((v) => v.id)).toEqual([recent]);
+    });
+    it('adds creator videos to the candidates and reports how many were found', async () => {
+        const rows = [];
+        const recent = idAt('2026-10-10T00:00:00Z');
+        const reads = [];
+        await run({
+            input: readInput({
+                hashtags: ['igcse'],
+                delayBetweenVideosMs: 0,
+                delayBetweenCreatorsMs: 0,
+                concurrency: 1,
+                maxCreatorsToRead: 2,
+            }),
+            pushData: async (r) => void rows.push(r),
+            search: async () => ({ urls: [], handles: ['tutor', 'other', 'third'], attempts: [], rateLimited: false }),
+            readEmbed: async (h) => (
+                reads.push(h),
+                {
+                    status: 200,
+                    html: embedPage(
+                        h === 'tutor'
+                            ? [{ id: recent, desc: 'x #igcse', playCount: 100, authorUniqueId: 'tutor' }]
+                            : [],
+                    ),
+                }
+            ),
+            fetchVideo: async () => ({ status: 200, html: page(item({ id: recent })) }),
+            now: () => NOW,
+        });
+        expect(reads).toEqual(['tutor', 'other']);
+        const b = rows.find((r) => r.recordType === 'benchmark');
+        expect(b).toMatchObject({ creatorsRead: 2, videosFromCreators: 1, videosUsed: 1 });
+    });
+});

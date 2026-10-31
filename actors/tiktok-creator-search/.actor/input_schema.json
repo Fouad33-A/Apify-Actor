@@ -1,0 +1,155 @@
+{
+    "title": "TikTok Creator Search Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "keywords": {
+            "title": "Keywords",
+            "type": "array",
+            "description": "Topics to find creators for, for example 'budgeting for beginners'. Each one is searched on Brave Search (Google as a fallback) restricted to tiktok.com.",
+            "editor": "stringList",
+            "default": ["budgeting for beginners"],
+            "prefill": ["budgeting for beginners", "debt free journey"]
+        },
+        "hashtags": {
+            "title": "Hashtags",
+            "type": "array",
+            "description": "Hashtags to find creators for, with or without the # sign, for example budgeting.",
+            "editor": "stringList"
+        },
+        "excludeWords": {
+            "title": "Leave out results mentioning",
+            "type": "array",
+            "description": "Optional. A search result whose title or snippet contains one of these words is dropped (for example course, coach).",
+            "editor": "stringList"
+        },
+        "searchModifiers": {
+            "title": "Extra search words",
+            "type": "array",
+            "description": "Optional words added to every search query to steer it, for example 'creator'.",
+            "editor": "stringList"
+        },
+        "maxSearchPages": {
+            "title": "Search result pages per query",
+            "type": "integer",
+            "editor": "number",
+            "description": "Pages of search results read for each query wording (a page holds about 10 to 15 TikTok accounts).",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 5
+        },
+        "maxSearchSeconds": {
+            "title": "Search time budget (seconds)",
+            "type": "integer",
+            "editor": "number",
+            "description": "No new search is started after this time. Requests to Brave Search are spaced about 5 seconds apart and a rate-limit answer is waited out, so allow about 30 seconds per keyword.",
+            "default": 300,
+            "minimum": 30
+        },
+        "maxCreators": {
+            "title": "Maximum creators returned",
+            "type": "integer",
+            "editor": "number",
+            "description": "Hard cap on creators per run (and on profiles looked up).",
+            "default": 100,
+            "minimum": 1
+        },
+        "enrichProfiles": {
+            "title": "Add profile data",
+            "type": "boolean",
+            "editor": "checkbox",
+            "description": "Runs your TikTok Profile and Video Stats Actor in profileOnly mode for the creators found and adds followers, likes, bio, bio link and e-mails. Its compute is billed to your account.",
+            "default": true
+        },
+        "profileActor": {
+            "title": "Profile Actor",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Actor used for the profile data: its ID or username/name. It must accept usernames and mode (profileOnly) and return rows with rowType profile.",
+            "default": "fouad_dp/tiktok-profile-video-stats"
+        },
+        "minFollowers": {
+            "title": "Minimum followers",
+            "type": "integer",
+            "editor": "number",
+            "description": "Optional. Needs 'Add profile data'. Creators below this are marked passesFilters false.",
+            "minimum": 0
+        },
+        "maxFollowers": {
+            "title": "Maximum followers",
+            "type": "integer",
+            "editor": "number",
+            "description": "Optional. Needs 'Add profile data'. Creators above this are marked passesFilters false.",
+            "minimum": 0
+        },
+        "onlyPassing": {
+            "title": "Return only creators inside the follower range",
+            "type": "boolean",
+            "editor": "checkbox",
+            "description": "Off returns every creator found with passesFilters true, false or null (null = followers unknown).",
+            "default": false
+        },
+        "examPresets": {
+            "title": "Exam presets",
+            "type": "array",
+            "description": "Optional starting keywords and hashtags for common exams, added to your own. Choose any of: igcse, sat, ib, ap, a_level.",
+            "editor": "select",
+            "items": {
+                "type": "string",
+                "enum": ["igcse", "sat", "ib", "ap", "a_level"]
+            }
+        },
+        "regions": {
+            "title": "Preferred countries",
+            "type": "array",
+            "description": "Optional two-letter country codes (AE, SA, QA, GB, US...). Needs 'Add profile data': a creator's country comes from their profile. See 'How to match them' below.",
+            "editor": "stringList"
+        },
+        "languages": {
+            "title": "Preferred languages",
+            "type": "array",
+            "description": "Optional language codes (en, ar...). Needs 'Add profile data'.",
+            "editor": "stringList"
+        },
+        "matchMode": {
+            "title": "How to match them",
+            "type": "string",
+            "description": "prefer: creators from the chosen countries/languages come first and the rest follow. only: creators confirmed to be elsewhere are left out (creators whose country is unknown are kept and marked).",
+            "editor": "select",
+            "default": "prefer",
+            "enum": ["prefer", "only"],
+            "enumTitles": ["Put matching creators first", "Leave confirmed others out"]
+        },
+        "addMedianViews": {
+            "title": "Add median views of recent videos",
+            "type": "boolean",
+            "description": "Runs your profile Actor in full mode to read the creator's recent videos and adds the median views, so you can judge reach. Costs more than profile-only mode.",
+            "editor": "checkbox",
+            "default": false
+        },
+        "videosForMedian": {
+            "title": "Videos for the median",
+            "type": "integer",
+            "description": "How many of the newest videos the median is taken over (1-10; TikTok's public embed shows up to 10).",
+            "editor": "number",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 10
+        },
+        "minMedianViews": {
+            "title": "Minimum median views",
+            "type": "integer",
+            "description": "Optional. Creators whose median views are below this are marked passesFilters false. Turns on the median views lookup.",
+            "editor": "number",
+            "minimum": 0
+        },
+        "maxMedianViews": {
+            "title": "Maximum median views",
+            "type": "integer",
+            "description": "Optional. Creators whose median views are above this are marked passesFilters false. Turns on the median views lookup.",
+            "editor": "number",
+            "minimum": 0
+        }
+    },
+    "required": []
+}

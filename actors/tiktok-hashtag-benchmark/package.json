@@ -1,0 +1,21 @@
+{
+    "name": "tiktok-hashtag-benchmark",
+    "version": "0.1.0",
+    "description": "View benchmarks for TikTok hashtags (median, quartiles, engagement) from public videos found through search, optionally limited to countries.",
+    "type": "module",
+    "main": "src/main.js",
+    "scripts": {
+        "start": "node src/main.js",
+        "test": "vitest run"
+    },
+    "dependencies": {
+        "apify": "^3.2.0",
+        "got-scraping": "^4.0.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "devDependencies": {
+        "vitest": "^5.0.2"
+    }
+}

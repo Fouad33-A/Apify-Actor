@@ -1,0 +1,50 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "interest": {
+            "title": "Interest by keyword and country",
+            "transformation": {
+                "fields": [
+                    "recordType",
+                    "keyword",
+                    "geo",
+                    "timeRange",
+                    "status",
+                    "average",
+                    "latest",
+                    "peak",
+                    "peakDate",
+                    "trend",
+                    "trendPct",
+                    "date",
+                    "value",
+                    "relatedType",
+                    "query",
+                    "scrapedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "recordType": { "label": "Row", "format": "text" },
+                    "keyword": { "label": "Keyword", "format": "text" },
+                    "geo": { "label": "Country", "format": "text" },
+                    "timeRange": { "label": "Period", "format": "text" },
+                    "status": { "label": "Status", "format": "text" },
+                    "average": { "label": "Average (0-100)", "format": "number" },
+                    "latest": { "label": "Latest", "format": "number" },
+                    "peak": { "label": "Peak", "format": "number" },
+                    "peakDate": { "label": "Peak date", "format": "text" },
+                    "trend": { "label": "Trend", "format": "text" },
+                    "trendPct": { "label": "Trend %", "format": "number" },
+                    "date": { "label": "Date", "format": "text" },
+                    "value": { "label": "Value", "format": "text" },
+                    "relatedType": { "label": "Related", "format": "text" },
+                    "query": { "label": "Related query", "format": "text" },
+                    "scrapedAt": { "label": "Read at", "format": "date" }
+                }
+            }
+        }
+    }
+}

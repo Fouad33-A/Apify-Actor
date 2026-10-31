@@ -1,0 +1,15 @@
+{
+    "actorSpecification": 1,
+    "name": "telegram-channel-stats",
+    "title": "Telegram Channel Stats (members, posting frequency, views per post)",
+    "description": "Reads public Telegram channels through t.me and returns members, posting frequency and views per post, to rank partner channels. Optionally follows channels mentioned in the posts.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024
+}

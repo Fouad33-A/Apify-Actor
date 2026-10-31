@@ -1,0 +1,70 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "apps": {
+            "title": "App summaries",
+            "transformation": {
+                "fields": [
+                    "store",
+                    "name",
+                    "country",
+                    "averageRating",
+                    "ratingCount",
+                    "reviewsRead",
+                    "reviewsKept",
+                    "topThemes",
+                    "status",
+                    "url"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "store": { "label": "Store", "format": "text" },
+                    "name": { "label": "App", "format": "text" },
+                    "country": { "label": "Country", "format": "text" },
+                    "averageRating": { "label": "Avg rating", "format": "number" },
+                    "ratingCount": { "label": "Ratings", "format": "number" },
+                    "reviewsRead": { "label": "Reviews read", "format": "number" },
+                    "reviewsKept": { "label": "Complaints kept", "format": "number" },
+                    "topThemes": { "label": "Top themes", "format": "array" },
+                    "status": { "label": "Status", "format": "text" },
+                    "url": { "label": "Link", "format": "link" }
+                }
+            }
+        },
+        "reviews": {
+            "title": "Reviews",
+            "transformation": {
+                "fields": [
+                    "store",
+                    "appName",
+                    "country",
+                    "rating",
+                    "date",
+                    "title",
+                    "text",
+                    "themes",
+                    "helpfulVotes",
+                    "version"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "store": { "label": "Store", "format": "text" },
+                    "appName": { "label": "App", "format": "text" },
+                    "country": { "label": "Country", "format": "text" },
+                    "rating": { "label": "Stars", "format": "number" },
+                    "date": { "label": "Date", "format": "date" },
+                    "title": { "label": "Title", "format": "text" },
+                    "text": { "label": "Review", "format": "text" },
+                    "themes": { "label": "Themes", "format": "array" },
+                    "helpfulVotes": { "label": "Helpful", "format": "number" },
+                    "version": { "label": "Version", "format": "text" }
+                }
+            }
+        }
+    }
+}
