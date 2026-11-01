@@ -5,7 +5,7 @@ import { defaultEngines, discoverCreators, parseFollowerHint } from './serp.js';
 import { fetchVideoPlace } from './video.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-10-31-v3';
+const RUNTIME_FIX_VERSION = '2026-11-01-v4';
 const BATCH = 2; // hard safety boundary: never send more than two creators to one child enrichment run
 
 const DEFAULTS = {
@@ -21,6 +21,8 @@ const DEFAULTS = {
     languages: [],
     matchMode: 'prefer',
     examPresets: [],
+    seedHandles: [],
+    knownHandles: [],
     addMedianViews: false,
     videosForMedian: 10,
     maxRunSeconds: 270,
@@ -35,8 +37,11 @@ export function readInput(raw) {
         .map((h) => String(h).trim().replace(/^#+/, ''))
         .filter(Boolean)
         .map((h) => `#${h}`);
-    if (!keywords.length && !hashtags.length)
-        throw new Error('Give at least one keyword in "keywords" or one hashtag in "hashtags".');
+    const cleanHandle = (v) => String(v ?? '').trim().replace(/^@+/, '').toLowerCase();
+    const seedHandles = [...new Set((input.seedHandles ?? []).map(cleanHandle).filter(Boolean))];
+    const knownHandles = [...new Set((input.knownHandles ?? []).map(cleanHandle).filter(Boolean))];
+    if (!keywords.length && !hashtags.length && !seedHandles.length)
+        throw new Error('Give at least one keyword in "keywords", one hashtag in "hashtags", or one handle in "seedHandles".');
     for (const key of ['maxSearchPages', 'maxSearchSeconds', 'maxCreators', 'maxRunSeconds', 'enrichmentReserveSeconds']) {
         if (!Number.isInteger(input[key]) || input[key] < 1)
             throw new Error(`Input "${key}" must be a whole number of 1 or more.`);
@@ -61,7 +66,9 @@ export function readInput(raw) {
         regions: upper(input.regions).map((r) => r.toUpperCase()),
         languages: upper(input.languages).map((l) => l.toLowerCase()),
         wantMedian,
-        searches: [...new Set([...keywords, ...hashtags])],
+        seedHandles,
+        knownHandles,
+        searches: [...new Set([...keywords, ...hashtags, ...seedHandles.map((h) => `@${h} similar creators`)])],
     };
 }
 
@@ -145,6 +152,7 @@ export function creatorRow(candidate, profile, enrichNote) {
         verified: p.verified ?? null,
         bio: p.bio ?? null,
         bioLink: p.bioLink ?? null,
+        bioLinkDomain: (() => { try { return p.bioLink ? new URL(/^https?:\/\//i.test(p.bioLink) ? p.bioLink : `https://${p.bioLink}`).hostname.replace(/^www\./, '') : null; } catch { return null; } })(),
         emails: p.emails ?? [],
         region: p.region ?? null,
         language: p.language ?? null,
@@ -228,33 +236,24 @@ export async function runSearch({
     const runDeadline = startedMs + input.maxRunSeconds * 1000;
     const reserveMs = input.enrichProfiles ? input.enrichmentReserveSeconds * 1000 : 5_000;
     const searchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, Math.floor((runDeadline - startedMs - reserveMs) / 1000)));
+    const searchDeadline = startedMs + searchSeconds * 1000;
     const outOfTime = (reserve = 0) => shouldStop() || now() >= runDeadline - reserve;
     const report = { queries: [], blocked: false, stoppedOnTime: false, requestedMaxSearchSeconds: input.maxSearchSeconds, effectiveMaxSearchSeconds: searchSeconds };
-
-    log.info(`[${RUNTIME_FIX_VERSION}] Runtime budget: ${input.maxRunSeconds}s total; search capped at ${searchSeconds}s; ${input.enrichProfiles ? `${input.enrichmentReserveSeconds}s reserved for enrichment/output` : 'enrichment disabled'}.`);
-    const { candidates } = await discoverCreators({
-        keywords: input.searches,
-        excludeWords: input.excludeWords,
-        maxPages: input.maxSearchPages,
-        maxSeconds: searchSeconds,
-        modifiers: input.searchModifiers,
-        serpProxyUrl,
-        serpFetch,
-        engines,
-        report,
-        shouldContinue: () => !outOfTime(reserveMs),
-        log: (m) => log.info(m),
-    });
-
-    const ordered = orderCandidates(candidates, input).slice(0, input.maxCreators);
-    const profiles = new Map();
+    const known = new Set(input.knownHandles ?? []);
+    const seen = new Map();
+    const processed = new Set();
     const emitted = new Set();
     const rows = [];
     let enrichNote = null;
+    let skippedByHint = 0;
+    let skippedKnownHandles = 0;
+    const skippedKnown = new Set();
     const counts = {
         returned: 0, passing: 0, outOfRange: 0, unknownFilter: 0, unenriched: 0, profileProblems: 0,
         locationMatches: 0, locationMismatches: 0, errors: 0,
     };
+
+    log.info(`[${RUNTIME_FIX_VERSION}] Runtime budget: ${input.maxRunSeconds}s total; search capped at ${searchSeconds}s; discovery is processed keyword-by-keyword before more searching; ${input.enrichProfiles ? `${input.enrichmentReserveSeconds}s final reserve retained` : 'enrichment disabled'}.`);
 
     const makeRow = (c, profile, note = null) => {
         const row = creatorRow(c, profile, profile ? null : (note ?? (input.enrichProfiles ? 'the profile Actor returned no row for this handle' : 'enrichProfiles is off')));
@@ -283,12 +282,45 @@ export async function runSearch({
         counts.returned += 1;
         return true;
     };
-
-    if (input.enrichProfiles && ordered.length) {
-        for (let i = 0; i < ordered.length && !outOfTime(8_000); i += BATCH) {
-            const batch = ordered.slice(i, i + BATCH);
-            const names = batch.map((c) => c.handle);
-            log.info(`[${RUNTIME_FIX_VERSION}] Enrichment child batch ${Math.floor(i / BATCH) + 1}: ${names.length} creator(s) [${names.join(', ')}]; creators ${i + 1}-${Math.min(i + BATCH, ordered.length)} of ${ordered.length}.`);
+    const hintFailure = (c) => {
+        const n = parseFollowerHint(c.hint);
+        if (n == null) return null;
+        if (input.minFollowers != null && n < input.minFollowers) return { n, reason: `search follower hint ${n} below ${input.minFollowers}` };
+        if (input.maxFollowers != null && n > input.maxFollowers) return { n, reason: `search follower hint ${n} above ${input.maxFollowers}` };
+        return null;
+    };
+    const processCandidates = async (candidates) => {
+        const fresh = orderCandidates(candidates.filter((c) => !processed.has(c.handle) && !known.has(c.handle)), input)
+            .slice(0, Math.max(0, input.maxCreators - processed.size));
+        for (const c of candidates) if (known.has(c.handle) && !skippedKnown.has(c.handle)) { skippedKnown.add(c.handle); skippedKnownHandles += 1; }
+        for (let i = 0; i < fresh.length && !outOfTime(8_000); i += BATCH) {
+            const rawBatch = fresh.slice(i, i + BATCH);
+            const enrichable = [];
+            for (const c of rawBatch) {
+                processed.add(c.handle);
+                const hf = hintFailure(c);
+                if (hf && input.enrichProfiles) {
+                    skippedByHint += 1;
+                    const row = makeRow(c, null, `profile enrichment skipped because ${hf.reason}`);
+                    row.followers = null;
+                    row.passesFilters = false;
+                    row.filterFailures = [hf.reason];
+                    row.skippedByFollowerHint = true;
+                    rows.push(row);
+                    countRow(row, null);
+                    await emitRow(row);
+                } else enrichable.push(c);
+            }
+            if (!enrichable.length) continue;
+            if (!input.enrichProfiles) {
+                for (const c of enrichable) {
+                    const row = makeRow(c, null);
+                    rows.push(row); countRow(row, null); await emitRow(row);
+                }
+                continue;
+            }
+            const names = enrichable.map((c) => c.handle);
+            log.info(`[${RUNTIME_FIX_VERSION}] Enrichment batch: ${names.length} creator(s) [${names.join(', ')}]; processing discoveries before starting another search.`);
             let got = new Map();
             try {
                 got = await enrich(input.profileActor, names, {
@@ -297,79 +329,106 @@ export async function runSearch({
                     needLatestVideo: input.regions.length > 0,
                     waitSecs: Math.max(10, Math.min(45, Math.floor((runDeadline - now() - 8_000) / 1000))),
                 });
-                for (const [name, row] of got) profiles.set(name, row);
             } catch (error) {
                 enrichNote = `Profile enrichment failed for batch: ${String(error?.message ?? error)}`;
                 counts.errors += 1;
                 log.warning(enrichNote);
             }
-
-            for (const c of batch) {
+            for (const c of enrichable) {
                 if (outOfTime(5_000)) break;
-                const profile = profiles.get(c.handle) ?? null;
+                const profile = got.get(c.handle) ?? null;
                 if (profile && input.regions.length && !profile.region) {
                     const url = profile.latestVideoUrl ?? c.videoUrls?.[0];
-                    if (url) {
-                        try {
-                            const place = await readPlace(url);
-                            if (place?.region) {
-                                profile.region = place.region;
-                                profile.language ??= place.language;
-                                profile.__regionSource = 'latest video';
-                            }
-                        } catch { /* location remains unknown */ }
-                    }
+                    if (url) try {
+                        const place = await readPlace(url);
+                        if (place?.region) { profile.region = place.region; profile.language ??= place.language; profile.__regionSource = 'latest video'; }
+                    } catch { /* unknown remains null */ }
                 }
                 const row = makeRow(c, profile, enrichNote);
                 if (profile?.__regionSource) row.regionSource = profile.__regionSource;
-                rows.push(row);
-                countRow(row, profile);
-                await emitRow(row);
+                rows.push(row); countRow(row, profile); await emitRow(row);
             }
         }
-    } else {
-        for (const c of ordered) {
-            if (outOfTime(5_000)) break;
-            const row = makeRow(c, null);
-            rows.push(row);
-            countRow(row, null);
-            await emitRow(row);
+    };
+
+    for (const keyword of input.searches) {
+        if (outOfTime(reserveMs) || now() >= searchDeadline || processed.size >= input.maxCreators) { report.stoppedOnTime = true; break; }
+        const remainingSearchSeconds = Math.max(1, Math.floor((searchDeadline - now()) / 1000));
+        const localReport = { queries: [], blocked: false, stoppedOnTime: false };
+        const { candidates } = await discoverCreators({
+            keywords: [keyword], excludeWords: input.excludeWords, maxPages: input.maxSearchPages,
+            maxSeconds: remainingSearchSeconds, modifiers: input.searchModifiers, serpProxyUrl, serpFetch, engines,
+            report: localReport, shouldContinue: () => !outOfTime(reserveMs) && now() < searchDeadline,
+            log: (m) => log.info(m),
+        });
+        report.queries.push(...localReport.queries);
+        report.blocked ||= localReport.blocked;
+        report.stoppedOnTime ||= localReport.stoppedOnTime;
+        for (const c of candidates) {
+            const old = seen.get(c.handle);
+            if (!old) seen.set(c.handle, c);
+            else {
+                old.queries = [...new Set([...(old.queries ?? []), ...(c.queries ?? [])])];
+                old.timesSeen = (old.timesSeen ?? 0) + (c.timesSeen ?? 0);
+                old.profileHit ||= c.profileHit;
+                old.hint ??= c.hint;
+                old.snippets = [...new Set([...(old.snippets ?? []), ...(c.snippets ?? [])])].slice(0, 3);
+                old.videoUrls = [...new Set([...(old.videoUrls ?? []), ...(c.videoUrls ?? [])])].slice(0, 5);
+            }
         }
+        const newlyFound = [...seen.values()].filter((c) => c.queries?.includes(keyword) && !processed.has(c.handle));
+        log.info(`[${RUNTIME_FIX_VERSION}] "${keyword}": ${candidates.length} handle(s) found; processing ${newlyFound.length} new handle(s) before the next search.`);
+        await processCandidates(newlyFound);
     }
 
-    // If onlyPassing produced nothing, return a small, explicitly-labelled diagnostic sample instead of an empty dataset.
+    // Rank zero-pass diagnostics by normalized distance to the requested numeric bounds, not by follower size.
     let nearMissesReturned = 0;
     if (input.onlyPassing && counts.returned === 0 && rows.length) {
-        const ranked = [...rows].sort((a, b) => (a.filterFailures?.length ?? 99) - (b.filterFailures?.length ?? 99)).slice(0, 5);
-        for (const row of ranked) {
-            const diagnostic = { ...row, recordType: 'near_miss', nearMiss: true, nearMissReason: row.filterFailures?.length ? row.filterFailures.join('; ') : 'required filter value was unavailable' };
+        const distance = (row) => {
+            const parts = [];
+            const add = (v, min, max, label) => {
+                if (v == null) return;
+                if (min != null && v < min) parts.push({ d: (min - v) / Math.max(min, 1), reason: `${label} ${v} is ${min - v} below minimum ${min}` });
+                if (max != null && v > max) parts.push({ d: (v - max) / Math.max(max, 1), reason: `${label} ${v} is ${v - max} above maximum ${max}` });
+            };
+            add(row.followers, input.minFollowers, input.maxFollowers, 'followers');
+            add(row.medianViews, input.minMedianViews, input.maxMedianViews, 'median views');
+            if (!parts.length && row.skippedByFollowerHint) return { score: 10, reason: row.filterFailures?.[0] ?? 'outside follower range by search hint' };
+            if (!parts.length) return { score: 9, reason: 'required filter value was unavailable' };
+            parts.sort((a, b) => a.d - b.d);
+            return { score: parts.reduce((a, p) => a + p.d, 0), reason: parts.map((p) => p.reason).join('; ') };
+        };
+        const ranked = rows.map((row) => ({ row, ...distance(row) })).sort((a, b) => a.score - b.score).slice(0, 5);
+        for (const { row, reason, score } of ranked) {
+            const diagnostic = { ...row, recordType: 'near_miss', nearMiss: true, nearMissReason: reason, nearMissScore: Number(score.toFixed(4)) };
             if (await emitRow(diagnostic, true)) nearMissesReturned += 1;
         }
     }
 
     const searchedKeywords = report.queries.filter((q) => q.attempts?.length).map((q) => q.keyword);
+    const keywordYield = input.searches.map((keyword) => {
+        const matched = rows.filter((r) => r.queriesMatched?.includes(keyword));
+        return {
+            keyword,
+            handlesFound: [...seen.values()].filter((c) => c.queries?.includes(keyword)).length,
+            processed: matched.length,
+            inRange: matched.filter((r) => r.passesFilters === true).length,
+            passing: matched.filter((r) => r.passesFilters === true && (input.matchMode !== 'only' || r.locationMatch !== false)).length,
+        };
+    });
     const summary = {
-        recordType: 'RUN_SUMMARY',
-        startedAt: started,
-        finishedAt: new Date(now()).toISOString(),
-        searches: input.searches,
-        keywordsDone: searchedKeywords,
-        keywordsRequested: input.searches.length,
-        keywordsCompleted: searchedKeywords.length,
-        handlesFound: candidates.length,
-        candidatesSelected: ordered.length,
-        creatorsProcessed: rows.length,
-        ...counts,
-        nearMissesReturned,
-        enrichNote,
-        stoppedEarly: outOfTime(5_000) || report.stoppedOnTime,
-        search: report,
-        estimatedCostUsd: null,
-        estimatedCostNote: 'Exact run cost is not available inside the Actor; use the Apify run billing/usage record for the authoritative amount.',
-        note: 'Creators come from public search-engine results for the keywords and hashtags. Follower and median-view filters use the profile Actor, not search snippets.',
+        recordType: 'RUN_SUMMARY', version: RUNTIME_FIX_VERSION, startedAt: started, finishedAt: new Date(now()).toISOString(),
+        searches: input.searches, keywordsDone: searchedKeywords, keywordsRequested: input.searches.length, keywordsCompleted: searchedKeywords.length,
+        handlesFound: seen.size, candidatesSelected: processed.size, creatorsProcessed: rows.length, skippedByHint, skippedKnownHandles,
+        knownHandlesSupplied: known.size, seedHandlesSupplied: input.seedHandles.length, keywordYield,
+        ...counts, nearMissesReturned, enrichNote,
+        stoppedEarly: outOfTime(5_000) || report.stoppedOnTime || searchedKeywords.length < input.searches.length,
+        search: report, estimatedCostUsd: null, billedEvents: null,
+        estimatedCostNote: 'Exact run cost and billed events are not available authoritatively inside the Actor; use the Apify run billing/usage record.',
+        note: 'Creators come from public search-engine results. Clearly out-of-range search follower hints are skipped before profile enrichment; all final passing decisions use enriched profile/video data.',
     };
     await pushData(summary);
-    log.info(`[${RUNTIME_FIX_VERSION}] RUN_SUMMARY written to dataset: processed=${summary.creatorsProcessed}, returned=${summary.returned}, stoppedEarly=${summary.stoppedEarly}.`);
+    log.info(`[${RUNTIME_FIX_VERSION}] RUN_SUMMARY written: processed=${summary.creatorsProcessed}, skippedByHint=${skippedByHint}, returned=${summary.returned}, stoppedEarly=${summary.stoppedEarly}.`);
     return summary;
 }
 

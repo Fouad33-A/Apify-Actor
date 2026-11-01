@@ -1,6 +1,6 @@
 ## What does TikTok Creator Search do?
 
-Finds **TikTok creators for keywords and hashtags**. TikTok's own search and hashtag pages do not load for a visitor who is not logged in, so the Actor asks **Brave Search** (plain HTTP, no proxy needed; Google through Apify's Google SERP proxy is the fallback) for `tiktok.com` results and extracts the creator handles from them. Optionally it then adds **followers, likes, bio, bio link and e-mails** by running your _TikTok Profile and Video Stats_ Actor in `profileOnly` mode.
+Finds **TikTok creators for keywords, hashtags, and optional seed handles**. TikTok's own search and hashtag pages do not load for a visitor who is not logged in, so the Actor asks **Brave Search** (plain HTTP, no proxy needed; Google through Apify's Google SERP proxy is the fallback) for `tiktok.com` results and extracts the creator handles from them. Optionally it then adds **followers, likes, bio, bio link and e-mails** by running your _TikTok Profile and Video Stats_ Actor in `profileOnly` mode.
 
 ## Why use it?
 
@@ -63,3 +63,14 @@ The Actor owns a soft runtime budget (`maxRunSeconds`, default 270 seconds) and 
 When `onlyPassing` is enabled and no creator passes all requested numeric filters, up to five rows are returned as `recordType: "near_miss"`. These rows are explicitly diagnostic and include `nearMissReason`; they are not passing creators.
 
 `estimatedCostUsd` in the run summary is currently `null` because the authoritative Apify billing amount is not available to the Actor while it is running. The summary says this explicitly rather than presenting a guessed amount as an invoice cost.
+
+
+## v4 Marketing-agent efficiency changes
+
+- **Follower-hint prefilter:** when a public search snippet exposes a follower count that is clearly below `minFollowers` or above `maxFollowers`, the handle is not sent to the Profile Actor. `RUN_SUMMARY.skippedByHint` counts these saved enrichments. The hint is only used for an obvious prefilter; passing creators still require enriched profile/video data.
+- **Process before more search:** each keyword/hashtag/seed discovery is processed and enriched before the next search begins, so a runtime stop is less likely to leave already-found handles untouched.
+- **`knownHandles`:** already-pitched handles are removed before enrichment and counted in `skippedKnownHandles`.
+- **`seedHandles`:** known-good handles create public web-search discovery queries for related TikTok results. This is search-engine discovery, not TikTok private recommendations, so yield varies.
+- **Near misses:** zero-pass runs rank diagnostics by normalized distance to requested numeric bounds and expose `nearMissReason` plus `nearMissScore`.
+- **Per-keyword yield:** `RUN_SUMMARY.keywordYield` reports handles found, processed, in-range and passing for each search term.
+- Creator rows include `bioLinkDomain` when a bio link is available. `region` remains `null` when TikTok exposes no reliable region; when a requested region is absent from the profile, the Actor can use the latest public video location as the documented fallback.
