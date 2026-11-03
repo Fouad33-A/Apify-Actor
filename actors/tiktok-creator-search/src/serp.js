@@ -470,8 +470,8 @@ export async function discoverCreators({
         for (const engine of engines) {
             // Avoid Brave's rate-limit path when Google already produced verifiable candidates.
             if (entry.keyword === CRITERIA_QUERY && engine.name === 'brave' && handlesFor(entry.keyword) > 0) return;
-            if (handlesFor(entry.keyword) >= PER_KEYWORD_TARGET) return;
-            for (let variant = 0; variant < QUERY_VARIANTS && timeLeft() && !engine.blocked; variant += 1) {
+            if (handlesFor(entry.keyword) >= (entry.keyword === CRITERIA_QUERY ? PER_KEYWORD_TARGET : 30)) return;
+            for (let variant = 0; variant < (entry.keyword === CRITERIA_QUERY ? QUERY_VARIANTS : 3) && timeLeft() && !engine.blocked; variant += 1) {
                 const query = engine.queryFor({ keyword: entry.keyword, variant, modifiers });
                 const startedMs = Date.now();
                 const { got, outcome, detail } = await ask(engine, entry.keyword, query);
@@ -493,7 +493,7 @@ export async function discoverCreators({
                 }
                 if (outcome === 'unavailable') break;
                 if (got) entry.hits += got;
-                if (handlesFor(entry.keyword) >= PER_KEYWORD_TARGET) return;
+                if (handlesFor(entry.keyword) >= (entry.keyword === CRITERIA_QUERY ? PER_KEYWORD_TARGET : 30)) return;
             }
         }
     }
