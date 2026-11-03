@@ -1,0 +1,27 @@
+name: TikTok Creator Search tests
+
+on:
+  push:
+    branches:
+      - fix/tiktok-creator-search-nov3
+  pull_request:
+    paths:
+      - 'actors/tiktok-creator-search/**'
+      - '.github/workflows/tiktok-creator-search-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: actors/tiktok-creator-search
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: actors/tiktok-creator-search/package-lock.json
+      - run: npm ci
+      - run: npm test
