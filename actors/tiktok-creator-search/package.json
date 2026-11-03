@@ -6,7 +6,7 @@
     "main": "src/main.js",
     "scripts": {
         "start": "node src/main.js",
-        "test": "vitest run test"
+        "test": "vitest run test/run.test.js test/serp.test.js test/runtime.test.js"
     },
     "dependencies": {
         "apify": "^3.2.0",
