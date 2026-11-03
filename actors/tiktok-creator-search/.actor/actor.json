@@ -1,8 +1,8 @@
 {
     "actorSpecification": 1,
     "name": "tiktok-creator-search",
-    "title": "TikTok Creator Search (keywords and hashtags)",
-    "description": "Finds TikTok creators for keywords and hashtags through Brave Search results, then adds followers, bio and e-mail from your TikTok profile Actor.",
+    "title": "TikTok Creator Search",
+    "description": "Finds TikTok creators from optional keyword/hashtag seeds or criteria-only discovery, enriches them, and screens followers, median views, activity and verification.",
     "version": "0.1",
     "buildTag": "latest",
     "input": "./input_schema.json",
