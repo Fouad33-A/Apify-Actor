@@ -348,22 +348,46 @@ export async function runSearch({
                 continue;
             }
             const names = enrichable.map((c) => c.handle);
-            log.info(`[${RUNTIME_FIX_VERSION}] Enrichment batch: ${names.length} creator(s) [${names.join(', ')}]; processing discoveries before starting another search.`);
-            let got = new Map();
+            log.info(`[${RUNTIME_FIX_VERSION}] Profile screening batch: ${names.length} creator(s) [${names.join(', ')}].`);
+            let screened = new Map();
             try {
-                got = await enrich(input.profileActor, names, {
-                    medianViews: input.wantMedian,
-                    videosForMedian: input.videosForMedian,
-                    needLatestVideo: input.regions.length > 0,
+                screened = await enrich(input.profileActor, names, {
+                    medianViews: false,
+                    needLatestVideo: false,
                     waitSecs: 115,
                 });
             } catch (error) {
-                enrichNote = `Profile enrichment failed for batch: ${String(error?.message ?? error)}`;
+                enrichNote = `Profile screening failed for batch: ${String(error?.message ?? error)}`;
                 counts.errors += 1;
                 log.warning(enrichNote);
             }
+            const eligible = enrichable.filter((c) => {
+                const p = screened.get(c.handle);
+                if (!p || p.status !== 'ok') return false;
+                if (!Number.isFinite(p.followers)) return false;
+                if (input.minFollowers != null && p.followers < input.minFollowers) return false;
+                if (input.maxFollowers != null && p.followers > input.maxFollowers) return false;
+                if (input.excludeVerified && p.verified === true) return false;
+                return true;
+            });
+            log.info(`[${RUNTIME_FIX_VERSION}] Profile screen: ${eligible.length}/${names.length} eligible for video enrichment; ${names.length - eligible.length} saved video-stage work.`);
+            let full = new Map();
+            if (eligible.length && !outOfTime() && secondsLeft() >= 130) {
+                try {
+                    full = await enrich(input.profileActor, eligible.map((c) => c.handle), {
+                        medianViews: input.wantMedian,
+                        videosForMedian: input.videosForMedian,
+                        needLatestVideo: input.regions.length > 0,
+                        waitSecs: 115,
+                    });
+                } catch (error) {
+                    enrichNote = `Video enrichment failed for batch: ${String(error?.message ?? error)}`;
+                    counts.errors += 1;
+                    log.warning(enrichNote);
+                }
+            }
             for (const c of enrichable) {
-                const profile = got.get(c.handle) ?? null;
+                const profile = full.get(c.handle) ?? screened.get(c.handle) ?? null;
                 if (profile && input.regions.length && !profile.region) {
                     const url = profile.latestVideoUrl ?? c.videoUrls?.[0];
                     if (url) try {
