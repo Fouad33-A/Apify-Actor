@@ -164,17 +164,6 @@ export function classifySearchPage({ title = '', text = '', anchors = [], exclud
         const url = unwrapSearchUrl(a.href);
         if (!url) continue;
         let found = handleFromUrl(url);
-        if (!found) {
-            let host = '';
-            try {
-                host = new URL(url).hostname.replace(/^(www|m|vm)\./, '');
-            } catch {
-                host = '';
-            }
-            const named =
-                host === SITE ? (handleFromTitle(a.text) ?? handleFromSnippet(`${a.text} ${a.container}`)) : null;
-            if (named) found = { handle: named, kind: 'post', videoId: null };
-        }
         if (found) resultLinks += 1;
         if (!found) continue;
         const snippet = String(a.container || a.text || '').slice(0, 300);
@@ -191,26 +180,6 @@ export function classifySearchPage({ title = '', text = '', anchors = [], exclud
                 ? `https://www.tiktok.com/@${found.handle}/video/${found.videoId}`
                 : null;
         hits.push({ ...found, url, videoUrl, snippet, hint: followerHint(a.container) });
-    }
-    const handled = new Set(hits.map((h) => h.handle));
-    for (const account of accountsInText(text)) {
-        // an account already taken from a link is not counted a second time
-        if (handled.has(account.handle) || skipped.has(account.handle)) continue;
-        if (mentionsExcluded(account.snippet, excludeWords)) {
-            excluded += 1;
-            continue;
-        }
-        handled.add(account.handle);
-        resultLinks += 1;
-        hits.push({
-            handle: account.handle,
-            kind: 'post',
-            videoId: null,
-            url: null,
-            videoUrl: null,
-            snippet: account.snippet,
-            hint: followerHint(account.snippet),
-        });
     }
     if (hits.length) return { status: 'ok', hits, excluded };
     if (excluded) return { status: 'all_excluded', hits: [], excluded };
