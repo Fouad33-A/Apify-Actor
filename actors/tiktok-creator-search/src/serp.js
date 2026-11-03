@@ -14,7 +14,8 @@ export const SITE = 'tiktok.com';
 export const CRITERIA_QUERY = '__criteria_only__';
 export const QUERY_VARIANTS = 3;
 const SEARCH_PARALLEL = 3;
-const TT_NAME = /^[A-Za-z0-9._]{2,24}$/;
+const TT_NAME = /^(?=.{2,24}$)(?=.*[A-Za-z0-9])[A-Za-z0-9._]+$/;
+const validHandle = (value) => TT_NAME.test(value) && !value.startsWith('.') && !value.endsWith('.') && !value.includes('..');
 
 export const googleUrl = (q, page) =>
     `http://www.google.com/search?q=${enc(q)}&hl=en${page ? `&start=${page * 10}` : ''}`;
@@ -85,7 +86,7 @@ export function handleFromUrl(raw) {
     } catch {
         return null;
     }
-    if (!TT_NAME.test(name)) return null;
+    if (!validHandle(name)) return null;
     const isVideo = segs[1] === 'video';
     return {
         handle: name.toLowerCase(),
@@ -97,7 +98,7 @@ export function handleFromUrl(raw) {
 // A result whose address has no account name can name it in the title: "Jane (@jane) | TikTok".
 export function handleFromTitle(text) {
     const m = String(text ?? '').match(/\(@([A-Za-z0-9._]{2,24})\)/);
-    return m ? m[1].toLowerCase() : null;
+    return m && validHandle(m[1]) ? m[1].toLowerCase() : null;
 }
 
 // Google prints a TikTok result's account as "TikTok · handle" above the snippet. A handle is lower case and followed by
@@ -115,7 +116,7 @@ export function handleFromSnippet(text) {
     ) {
         return null;
     }
-    return name;
+    return validHandle(name) ? name : null;
 }
 
 export function accountsInText(text) {
