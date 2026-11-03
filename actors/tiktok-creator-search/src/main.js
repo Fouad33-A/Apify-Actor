@@ -1,22 +1,24 @@
 import { Actor, log } from 'apify';
 
 import { presetSearches } from './presets.js';
-import { defaultEngines, discoverCreators, parseFollowerHint } from './serp.js';
+import { defaultEngines, discoverCreators, parseFollowerHint, CRITERIA_QUERY } from './serp.js';
 import { fetchVideoPlace } from './video.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-03-v5';
-const BATCH = 20; // profile Actor is proven in batches; larger batches make criteria-only discovery practical
+const RUNTIME_FIX_VERSION = '2026-11-03-v6';
+const BATCH = 5; // bounded child calls leave room for a clean parent summary
 
 const DEFAULTS = {
     excludeWords: [],
     searchModifiers: [],
     maxSearchPages: 2,
-    maxSearchSeconds: 300,
+    maxSearchSeconds: 60,
+    maxRunSeconds: 300,
+    resumeToken: null,
     maxCreators: 100,
     enrichProfiles: true,
     profileActor: PROFILE_ACTOR,
-    onlyPassing: false,
+    onlyPassing: true,
     regions: [],
     languages: [],
     matchMode: 'prefer',
@@ -40,8 +42,12 @@ export function readInput(raw) {
         .map((h) => `#${h}`);
     const cleanHandle = (v) => String(v ?? '').trim().replace(/^@+/, '').toLowerCase();
     const seedHandles = [...new Set((input.seedHandles ?? []).map(cleanHandle).filter(Boolean))];
-    const knownHandles = [...new Set([...(input.knownHandles ?? []), ...(input.excludeHandles ?? [])].map(cleanHandle).filter(Boolean))];
-    for (const key of ['maxSearchPages', 'maxSearchSeconds', 'maxCreators']) {
+    const token = input.resumeToken ?? {};
+    if (typeof token !== 'object' || Array.isArray(token)) throw new Error('resumeToken must be an object from a prior RUN_SUMMARY.');
+    const resumeIndex = Number.isInteger(token.nextSearchIndex) && token.nextSearchIndex >= 0 ? token.nextSearchIndex : 0;
+    const priorProcessed = Array.isArray(token.processedHandles) ? token.processedHandles : [];
+    const knownHandles = [...new Set([...(input.knownHandles ?? []), ...(input.excludeHandles ?? []), ...priorProcessed].map(cleanHandle).filter(Boolean))];
+    for (const key of ['maxSearchPages', 'maxSearchSeconds', 'maxCreators', 'maxRunSeconds']) {
         if (!Number.isInteger(input[key]) || input[key] < 1)
             throw new Error(`Input "${key}" must be a whole number of 1 or more.`);
     }
@@ -60,7 +66,7 @@ export function readInput(raw) {
     if (!Number.isInteger(input.maxDaysSinceLastPost) || input.maxDaysSinceLastPost < 1) throw new Error('Input "maxDaysSinceLastPost" must be a whole number of 1 or more.');
     const wantMedian = true; // every returned creator is enriched with median views
     const criteriaSearches = (!keywords.length && !hashtags.length && !seedHandles.length)
-        ? ['creator', 'tips', 'how to', 'explained', 'review', 'guide', 'storytime', 'tutorial', 'advice', 'recommendations']
+        ? [CRITERIA_QUERY]
         : [];
     const orderedTopicSearches = input.hashtagsFirst ? [...hashtags, ...keywords] : [...keywords, ...hashtags];
     return {
@@ -70,6 +76,8 @@ export function readInput(raw) {
         wantMedian,
         seedHandles,
         knownHandles,
+        resumeIndex,
+        priorProcessed,
         criteriaOnly: criteriaSearches.length > 0,
         searches: [...new Set([...orderedTopicSearches, ...criteriaSearches, ...seedHandles.map((h) => `@${h} similar creators`)])],
     };
@@ -250,9 +258,13 @@ export async function runSearch({
 }) {
     const startedMs = now();
     const started = new Date(startedMs).toISOString();
-    const outOfTime = () => shouldStop();
+    const elapsed = () => Math.max(0, (now() - startedMs) / 1000);
+    const secondsLeft = () => input.maxRunSeconds - elapsed();
+    const outOfTime = () => shouldStop() || secondsLeft() < 25;
     const report = { queries: [], blocked: false, stoppedOnTime: false, requestedMaxSearchSeconds: input.maxSearchSeconds, effectiveMaxSearchSeconds: input.maxSearchSeconds };
     const known = new Set(input.knownHandles ?? []);
+    const resumeProcessed = new Set(input.priorProcessed ?? []);
+    let nextSearchIndex = input.resumeIndex ?? 0;
     const seen = new Map();
     const processed = new Set();
     const emitted = new Set();
@@ -266,7 +278,7 @@ export async function runSearch({
         locationMatches: 0, locationMismatches: 0, errors: 0,
     };
 
-    log.info(`[${RUNTIME_FIX_VERSION}] No global hard stop. Every keyword/hashtag gets up to ${input.maxSearchSeconds}s; hashtagsFirst=${input.hashtagsFirst}; criteriaOnly=${input.criteriaOnly}.`);
+    log.info(`[${RUNTIME_FIX_VERSION}] Bounded runtime ${input.maxRunSeconds}s, per-query ${input.maxSearchSeconds}s; hashtagsFirst=${input.hashtagsFirst}; criteriaOnly=${input.criteriaOnly}; resume index=${nextSearchIndex}.`);
 
     const makeRow = (c, profile, note = null) => {
         const row = creatorRow(c, profile, profile ? null : (note ?? (input.enrichProfiles ? 'the profile Actor returned no row for this handle' : 'enrichProfiles is off')));
@@ -308,6 +320,7 @@ export async function runSearch({
             .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
         for (const c of candidates) if (known.has(c.handle) && !skippedKnown.has(c.handle)) { skippedKnown.add(c.handle); skippedKnownHandles += 1; }
         for (let i = 0; i < fresh.length && !outOfTime(); i += BATCH) {
+            if (input.enrichProfiles && secondsLeft() < 130) break; // Actor.call may wait up to 120 seconds
             const rawBatch = fresh.slice(i, i + BATCH);
             const enrichable = [];
             for (const c of rawBatch) {
@@ -341,7 +354,7 @@ export async function runSearch({
                     medianViews: input.wantMedian,
                     videosForMedian: input.videosForMedian,
                     needLatestVideo: input.regions.length > 0,
-                    waitSecs: 45,
+                    waitSecs: 115,
                 });
             } catch (error) {
                 enrichNote = `Profile enrichment failed for batch: ${String(error?.message ?? error)}`;
@@ -349,7 +362,6 @@ export async function runSearch({
                 log.warning(enrichNote);
             }
             for (const c of enrichable) {
-                if (outOfTime()) break;
                 const profile = got.get(c.handle) ?? null;
                 if (profile && input.regions.length && !profile.region) {
                     const url = profile.latestVideoUrl ?? c.videoUrls?.[0];
@@ -365,9 +377,10 @@ export async function runSearch({
         }
     };
 
-    for (const keyword of input.searches) {
+    for (let searchIndex = nextSearchIndex; searchIndex < input.searches.length; searchIndex += 1) {
+        const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
-        const remainingSearchSeconds = input.maxSearchSeconds;
+        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, Math.floor(secondsLeft() - 130)));
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
             keywords: [keyword], excludeWords: input.excludeWords, maxPages: input.maxSearchPages,
@@ -393,11 +406,16 @@ export async function runSearch({
         const newlyFound = [...seen.values()].filter((c) => c.queries?.includes(keyword) && !processed.has(c.handle));
         log.info(`[${RUNTIME_FIX_VERSION}] "${keyword}": ${candidates.length} handle(s) found; processing ${newlyFound.length} new handle(s) before the next search.`);
         await processCandidates(newlyFound);
+        // A search is complete only when every new candidate was handled.
+        // If the runtime budget ran out, repeat this search after resuming; already handled candidates are excluded.
+        const allHandled = newlyFound.every((c) => processed.has(c.handle)) && !localReport.stoppedOnTime;
+        if (allHandled) nextSearchIndex = searchIndex + 1;
+        else break;
     }
 
     // Rank zero-pass diagnostics by normalized distance to the requested numeric bounds, not by follower size.
     let nearMissesReturned = 0;
-    if (input.onlyPassing && counts.returned === 0 && rows.length) {
+    if (!input.onlyPassing && counts.returned === 0 && rows.length) {
         const distance = (row) => {
             const parts = [];
             const add = (v, min, max, label) => {
@@ -443,10 +461,13 @@ export async function runSearch({
             verifiedCelebrity: rows.filter((r) => r.filterFailures?.includes('verified/celebrity')).length,
             enrichment: rows.filter((r) => r.enrichStatus === 'failed').length,
         },
-        stoppedEarly: outOfTime() || searchedKeywords.length < input.searches.length,
+        stoppedEarly: outOfTime() || nextSearchIndex < input.searches.length,
+        nextSearchIndex,
+        resumeToken: nextSearchIndex < input.searches.length ? { nextSearchIndex, processedHandles: [...new Set([...(input.priorProcessed ?? []), ...rows.map((r) => r.handle)])] } : null,
+        runtimeBudgetSeconds: input.maxRunSeconds,
         search: report, estimatedCostUsd: null, billedEvents: null,
         estimatedCostNote: 'Exact run cost and billed events are not available authoritatively inside the Actor; use the Apify run billing/usage record.',
-        note: 'Creators come from public search-engine results. Clearly out-of-range search follower hints are skipped before profile enrichment; all final passing decisions use enriched profile/video data.',
+        note: 'Creators come from public search-engine indexing; this is not an exhaustive or statistically unbiased sample of TikTok. The Actor may return fewer than requested if discovery or enrichment is limited.',
     };
     await pushData(summary);
     log.info(`[${RUNTIME_FIX_VERSION}] RUN_SUMMARY written: processed=${summary.creatorsProcessed}, skippedByHint=${skippedByHint}, returned=${summary.returned}, stoppedEarly=${summary.stoppedEarly}.`);
@@ -477,6 +498,7 @@ async function main() {
             shouldStop: () => stop,
         });
         await Actor.setValue('OUTPUT', summary);
+        await Actor.setValue('RESUME_TOKEN', summary.resumeToken);
         log.info(`Done: ${summary.handlesFound} creators found, ${summary.returned} creator/near-miss row(s) returned; ${summary.creatorsProcessed} processed.`);
     } catch (error) {
         log.error(String(error?.message ?? error));
