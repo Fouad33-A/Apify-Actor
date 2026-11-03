@@ -127,6 +127,8 @@ export function checkFilters(row, { minFollowers, maxFollowers, minMedianViews, 
     if (failures.length) return { passes: false, failures };
     if (row.followers == null && row.medianViews == null) return { passes: null, failures };
     if (asked.some((a) => !judged.includes(a))) return { passes: null, failures };
+    if (excludeVerified && row.verified == null) return { passes: null, failures };
+    if (row.profileStatus != null && row.profileStatus !== 'ok') return { passes: null, failures };
     return { passes: true, failures };
 }
 
@@ -157,8 +159,8 @@ export function creatorRow(candidate, profile, enrichNote) {
     return {
         ...base,
         enriched: Boolean(profile),
-        enrichStatus: profile ? 'ok' : 'failed',
-        enrichReason: profile ? null : (enrichNote ?? 'profile data unavailable'),
+        enrichStatus: profile?.status === 'ok' ? 'ok' : 'failed',
+        enrichReason: profile?.status === 'ok' ? null : (enrichNote ?? profile?.statusDetail ?? profile?.status ?? 'profile data unavailable'),
         enrichNote: enrichNote ?? null,
         profileStatus: profile ? (p.status ?? null) : null,
         displayName: p.displayName ?? null,
@@ -263,7 +265,6 @@ export async function runSearch({
     const outOfTime = () => shouldStop() || secondsLeft() < 25;
     const report = { queries: [], blocked: false, stoppedOnTime: false, requestedMaxSearchSeconds: input.maxSearchSeconds, effectiveMaxSearchSeconds: input.maxSearchSeconds };
     const known = new Set(input.knownHandles ?? []);
-    const resumeProcessed = new Set(input.priorProcessed ?? []);
     let nextSearchIndex = input.resumeIndex ?? 0;
     const seen = new Map();
     const processed = new Set();
@@ -291,7 +292,7 @@ export async function runSearch({
         return row;
     };
     const countRow = (row, profile) => {
-        if (!profile) counts.unenriched += 1;
+        if (!profile || row.enrichStatus !== 'ok') counts.unenriched += 1;
         else if (row.profileStatus !== 'ok') counts.profileProblems += 1;
         if (row.passesFilters === true) counts.passing += 1;
         else if (row.passesFilters === false) counts.outOfRange += 1;
@@ -324,7 +325,6 @@ export async function runSearch({
             const rawBatch = fresh.slice(i, i + BATCH);
             const enrichable = [];
             for (const c of rawBatch) {
-                processed.add(c.handle);
                 const hf = hintFailure(c);
                 if (hf && input.enrichProfiles && (input.maxFollowers != null && hf.n > input.maxFollowers)) {
                     skippedByHint += 1;
@@ -336,13 +336,14 @@ export async function runSearch({
                     rows.push(row);
                     countRow(row, null);
                     await emitRow(row);
+                    processed.add(c.handle);
                 } else enrichable.push(c);
             }
             if (!enrichable.length) continue;
             if (!input.enrichProfiles) {
                 for (const c of enrichable) {
                     const row = makeRow(c, null);
-                    rows.push(row); countRow(row, null); await emitRow(row);
+                    rows.push(row); countRow(row, null); await emitRow(row); processed.add(c.handle);
                 }
                 continue;
             }
@@ -372,7 +373,7 @@ export async function runSearch({
                 }
                 const row = makeRow(c, profile, enrichNote);
                 if (profile?.__regionSource) row.regionSource = profile.__regionSource;
-                rows.push(row); countRow(row, profile); await emitRow(row);
+                rows.push(row); countRow(row, profile); await emitRow(row); processed.add(c.handle);
             }
         }
     };
@@ -380,7 +381,8 @@ export async function runSearch({
     for (let searchIndex = nextSearchIndex; searchIndex < input.searches.length; searchIndex += 1) {
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
-        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, Math.floor(secondsLeft() - 130)));
+        if (input.enrichProfiles && secondsLeft() < 130) break;
+        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, Math.floor(secondsLeft() - (input.enrichProfiles ? 130 : 25))));
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
             keywords: [keyword], excludeWords: input.excludeWords, maxPages: input.maxSearchPages,
