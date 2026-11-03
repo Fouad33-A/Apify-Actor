@@ -45,6 +45,11 @@ describe('addresses and names', () => {
         });
         expect(handleFromUrl('https://www.tiktok.com/tag/budgeting')).toBeNull();
         expect(handleFromUrl('https://www.instagram.com/jane')).toBeNull();
+        for (const invalid of ['..........tiktok.com19', '..._______________..._', '.tikk', '._______...____', '...___']) {
+            expect(handleFromUrl(`https://www.tiktok.com/@${invalid}`)).toBeNull();
+            expect(handleFromTitle(`Account (@${invalid}) | TikTok`)).toBeNull();
+        }
+        expect(handleFromUrl('https://www.tiktok.com/@real.creator_19')?.handle).toBe('real.creator_19');
     });
     it('unwraps Google redirects, also with an empty q', () => {
         expect(unwrapSearchUrl('https://www.google.com/url?q=https://www.tiktok.com/@jane&sa=U')).toBe(
@@ -103,6 +108,16 @@ describe('parseSerpHtml + classifySearchPage', () => {
         expect(res.hits[1].videoUrl).toBe('https://www.tiktok.com/@beta/video/7600000000000000002');
         expect(res.excluded).toBe(1);
     });
+    it('rejects snippet-only identities and malformed TikTok URLs', () => {
+        const parsed = parseSerpHtml(page([
+            resultBlock({ href: 'https://www.tiktok.com/tag/example', title: 'Unknown', line: 'TikTok · .tikk 9K followers' }),
+            resultBlock({ href: 'https://www.tiktok.com/@..........tiktok.com19', title: 'Unknown', line: 'TikTok · .... 9K followers' }),
+            resultBlock({ href: 'https://www.tiktok.com/@real_account', title: 'Real', line: 'TikTok · real_account 9K followers' }),
+        ]) + '<p>TikTok · text_only 5K likes</p>');
+        const result = classifySearchPage(parsed);
+        expect(result.hits.map((h) => h.handle)).toEqual(['real_account']);
+    });
+
     it('recognises a bot check, no results, and a page without TikTok results', () => {
         expect(
             classifySearchPage({
@@ -121,7 +136,7 @@ describe('parseSerpHtml + classifySearchPage', () => {
             '<html><head><title>t</title></head><body><script>var u="https:\\/\\/www.tiktok.com\\/@hidden_one";</script><p>TikTok · text_only 5K likes</p></body></html>';
         const parsed = parseSerpHtml(src.replace(/\\\//g, '/'));
         const res = classifySearchPage({ ...parsed });
-        expect(res.hits.map((h) => h.handle).sort()).toEqual(['hidden_one', 'text_only']);
+        expect(res.hits.map((h) => h.handle).sort()).toEqual(['hidden_one']);
     });
 });
 
