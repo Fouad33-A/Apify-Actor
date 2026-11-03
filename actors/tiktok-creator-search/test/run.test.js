@@ -129,6 +129,9 @@ describe('runSearch', () => {
             videosForMedian: 5, onlyPassing: false,
         }, enrich);
         expect(calls[0]).toMatchObject({
+            medianViews: false, needLatestVideo: false,
+        });
+        expect(calls[1]).toMatchObject({
             medianViews: true, videosForMedian: 5, needLatestVideo: true,
         });
         expect(out.at(-1).recordType).toBe('RUN_SUMMARY');
