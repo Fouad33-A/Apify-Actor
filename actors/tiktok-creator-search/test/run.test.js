@@ -106,7 +106,7 @@ describe('runSearch', () => {
         expect(rows.find((row) => row.handle === 'small_one').passesFilters).toBe(false);
         expect(rows.find((row) => row.handle === 'big_one').passesFilters).toBe(false);
         expect(rows.find((row) => row.handle === 'ghost_one').passesFilters).toBeNull();
-        expect(summary.unenriched).toBe(1);
+        expect(summary.unenriched).toBe(2); // out-of-range hint skip plus missing profile
     });
 
     it('records child enrichment errors without inventing profile data', async () => {
@@ -140,6 +140,6 @@ describe('runSearch', () => {
             minFollowers: 10_000,
         });
         expect(summary.skippedKnownHandles).toBeGreaterThan(0);
-        expect(summary.returned).toBe(0);
+        expect(summary.returned).toBe(1); // the previously seen mid_one is excluded; big_one remains eligible
     });
 });
