@@ -9,13 +9,24 @@ describe('criteria-only discovery', () => {
         expect(input.searches).toEqual([CRITERIA_QUERY]);
         expect(input.onlyPassing).toBe(true);
         expect(input.maxRunSeconds).toBe(300);
-        for (let variant = 0; variant < 3; variant++) {
+        for (let variant = 0; variant < 6; variant++) {
             const brave = buildBraveQuery({ keyword: CRITERIA_QUERY, variant });
             const google = buildQuery({ keyword: CRITERIA_QUERY, variant });
             expect(brave).toMatch(/tiktok\.com/);
             expect(google).toMatch(/tiktok\.com/);
             expect(brave).not.toMatch(/creator|tips|tutorial|how to|recommendations/i);
         }
+    });
+
+    it('diversifies follower bands without adding topic seeds', () => {
+        const queries = Array.from({ length: 6 }, (_, variant) => buildQuery({ keyword: CRITERIA_QUERY, variant }));
+        expect(new Set(queries).size).toBe(6);
+        expect(queries).toEqual(expect.arrayContaining([
+            'site:tiktok.com/@ "20K" "followers"',
+            'site:tiktok.com/@ "75K" "followers"',
+            'site:tiktok.com/@ "followers" -verified -official',
+        ]));
+        expect(queries.every((q) => q.includes('site:tiktok.com/@'))).toBe(true);
     });
 
     it('keeps explicit keywords and hashtags with hashtag-first ordering', () => {
