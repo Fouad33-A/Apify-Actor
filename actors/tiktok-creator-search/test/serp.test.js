@@ -273,7 +273,7 @@ describe('Brave Search engine', () => {
         expect(report.queries[0].attempts).toMatchObject([{ engine: 'brave', status: 'ok', results: 32 }]);
     });
 
-    it('waits out a 429 and retries the same page', async () => {
+    it('fails fast on a Brave 429 rather than waiting for retries', async () => {
         let calls = 0;
         const braveFetch = async () => {
             calls += 1;
@@ -285,9 +285,9 @@ describe('Brave Search engine', () => {
             engines: [fast({ braveFetch })],
             maxPages: 1,
         });
-        expect(calls).toBeGreaterThanOrEqual(2);
-        expect(candidates.map((c) => c.handle).sort()).toEqual(['one', 'two']);
-        expect(report.queries[0].attempts[0].status).toBe('ok');
+        expect(calls).toBe(1);
+        expect(candidates).toEqual([]);
+        expect(report.queries[0].attempts[0].status).toBe('rate_limited');
     });
 
     it('drops Brave after repeated limits and falls back to Google', async () => {
@@ -309,10 +309,7 @@ describe('Brave Search engine', () => {
         expect(report.blocked).toBe(false);
         const engineOf = (kw) => report.queries.find((q) => q.keyword === kw).attempts.map((x) => x.engine);
         expect(engineOf('a')).toContain('google');
-        expect(
-            report.queries.flatMap((q) => q.attempts).filter((x) => x.engine === 'brave' && x.status === 'rate_limited')
-                .length,
-        ).toBeGreaterThanOrEqual(2);
+        expect(report.queries.flatMap((q) => q.attempts).filter((x) => x.engine === 'brave' && x.status === 'rate_limited').length).toBeGreaterThanOrEqual(1);
     });
 
     it('reports the run as blocked when every engine is limited', async () => {
@@ -337,6 +334,6 @@ describe('Brave Search engine', () => {
 
     it('uses Google only when a proxy exists', () => {
         expect(defaultEngines({}).map((e) => e.name)).toEqual(['brave']);
-        expect(defaultEngines({ serpProxyUrl: 'http://x' }).map((e) => e.name)).toEqual(['brave', 'google']);
+        expect(defaultEngines({ serpProxyUrl: 'http://x' }).map((e) => e.name)).toEqual(['google', 'brave']);
     });
 });
