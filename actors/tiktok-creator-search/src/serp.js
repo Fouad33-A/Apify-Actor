@@ -11,6 +11,7 @@ import { gotScraping } from 'got-scraping';
 
 const enc = encodeURIComponent;
 export const SITE = 'tiktok.com';
+export const CRITERIA_QUERY = '__criteria_only__';
 export const QUERY_VARIANTS = 3;
 const SEARCH_PARALLEL = 3;
 const TT_NAME = /^[A-Za-z0-9._]{2,24}$/;
@@ -21,6 +22,10 @@ export const googleUrl = (q, page) =>
 // Three ways to ask, since Google sometimes ignores the site: operator.
 export function buildQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
+    if (kw === CRITERIA_QUERY) {
+        // Untargeted public index sampling; no creator-topic words are injected.
+        return ['site:tiktok.com/@', 'site:www.tiktok.com/@', 'inurl:tiktok.com/@'][variant] ?? 'site:tiktok.com/@';
+    }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
         .filter(Boolean)
@@ -303,6 +308,10 @@ export const braveUrl = (q, page) => `https://search.brave.com/search?q=${enc(q)
 
 export function buildBraveQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
+    if (kw === CRITERIA_QUERY) {
+        // No topical seed: a broad public index query, not an unbiased TikTok census.
+        return ['site:tiktok.com/@', 'site:www.tiktok.com/@', 'inurl:tiktok.com/@'][variant] ?? 'site:tiktok.com/@';
+    }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
         .filter(Boolean)
