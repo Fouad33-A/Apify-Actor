@@ -25,7 +25,7 @@ export function buildQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
     if (kw === CRITERIA_QUERY) {
         // Untargeted public index sampling; no creator-topic words are injected.
-        return ['site:tiktok.com/@', 'site:www.tiktok.com/@', 'inurl:tiktok.com/@'][variant] ?? 'site:tiktok.com/@';
+        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "50K" "followers"', 'site:tiktok.com/@ "100K" "followers"'][variant] ?? 'site:tiktok.com/@';
     }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
@@ -280,7 +280,7 @@ export function buildBraveQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
     if (kw === CRITERIA_QUERY) {
         // No topical seed: a broad public index query, not an unbiased TikTok census.
-        return ['site:tiktok.com/@', 'site:www.tiktok.com/@', 'inurl:tiktok.com/@'][variant] ?? 'site:tiktok.com/@';
+        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "50K" "followers"', 'site:tiktok.com/@ "100K" "followers"'][variant] ?? 'site:tiktok.com/@';
     }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
@@ -326,16 +326,7 @@ export function makeGate(paceMs) {
 }
 
 export function defaultEngines({ serpProxyUrl, serpFetch = fetchSerpPage, braveFetch = fetchBravePage } = {}) {
-    const engines = [
-        {
-            name: 'brave',
-            urlFor: braveUrl,
-            queryFor: buildBraveQuery,
-            fetch: ({ url }) => braveFetch({ url }),
-            paceMs: 5000,
-            backoffMs: 20_000,
-        },
-    ];
+    const engines = [];
     if (serpProxyUrl) {
         engines.push({
             name: 'google',
@@ -346,12 +337,20 @@ export function defaultEngines({ serpProxyUrl, serpFetch = fetchSerpPage, braveF
             backoffMs: 0,
         });
     }
+    engines.push({
+        name: 'brave',
+        urlFor: braveUrl,
+        queryFor: buildBraveQuery,
+        fetch: ({ url }) => braveFetch({ url }),
+        paceMs: 5000,
+        backoffMs: 0,
+    });
     return engines;
 }
 
 const PER_KEYWORD_TARGET = 30; // stop asking more wordings for a keyword once it has this many different handles
-const RATE_LIMIT_RETRIES = 2;
-const RATE_LIMITS_BEFORE_DROP = 2;
+const RATE_LIMIT_RETRIES = 0; // avoid paid-runtime waste on an engine returning 429
+const RATE_LIMITS_BEFORE_DROP = 1;
 
 /**
  * Runs every keyword (hashtags are keywords written with a leading #). Returns { candidates, report }.
@@ -469,7 +468,7 @@ export async function discoverCreators({
 
     async function runKeyword(entry) {
         for (const engine of engines) {
-            if (handlesFor(entry.keyword)) return; // an earlier engine found creators for this keyword
+            if (handlesFor(entry.keyword) >= PER_KEYWORD_TARGET) return;
             for (let variant = 0; variant < QUERY_VARIANTS && timeLeft() && !engine.blocked; variant += 1) {
                 const query = engine.queryFor({ keyword: entry.keyword, variant, modifiers });
                 const startedMs = Date.now();
