@@ -1,6 +1,6 @@
 ## What does TikTok Creator Search do?
 
-Finds **TikTok creators for keywords, hashtags, and optional seed handles**. TikTok's own search and hashtag pages do not load for a visitor who is not logged in, so the Actor asks **Brave Search** (plain HTTP, no proxy needed; Google through Apify's Google SERP proxy is the fallback) for `tiktok.com` results and extracts the creator handles from them. Optionally it then adds **followers, likes, bio, bio link and e-mails** by running your _TikTok Profile and Video Stats_ Actor in `profileOnly` mode.
+Finds **TikTok creators from optional keywords/hashtags or from screening criteria only**. TikTok's own search and hashtag pages do not load for a visitor who is not logged in, so the Actor asks **Brave Search** (plain HTTP, no proxy needed; Google through Apify's Google SERP proxy is the fallback) for `tiktok.com` results and extracts the creator handles from them. Optionally it then adds **followers, likes, bio, bio link and e-mails** by running your _TikTok Profile and Video Stats_ Actor in `profileOnly` mode.
 
 ## Why use it?
 
@@ -10,7 +10,7 @@ Finds **TikTok creators for keywords, hashtags, and optional seed handles**. Tik
 
 ## How to use it
 
-1. Enter keywords and/or hashtags in the **Input** tab.
+1. Enter optional keywords/hashtags, or leave both empty for criteria-only discovery.
 2. Optionally set a follower range and leave "Add profile data" on.
 3. Run it and open the **Creators** view.
 

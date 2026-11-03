@@ -5,8 +5,8 @@ import { defaultEngines, discoverCreators, parseFollowerHint } from './serp.js';
 import { fetchVideoPlace } from './video.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-01-v4';
-const BATCH = 2; // hard safety boundary: never send more than two creators to one child enrichment run
+const RUNTIME_FIX_VERSION = '2026-11-03-v5';
+const BATCH = 20; // profile Actor is proven in batches; larger batches make criteria-only discovery practical
 
 const DEFAULTS = {
     excludeWords: [],
@@ -25,8 +25,9 @@ const DEFAULTS = {
     knownHandles: [],
     addMedianViews: false,
     videosForMedian: 10,
-    maxRunSeconds: 270,
-    enrichmentReserveSeconds: 60,
+    hashtagsFirst: true,
+    excludeVerified: true,
+    maxDaysSinceLastPost: 7,
 };
 
 export function readInput(raw) {
@@ -39,15 +40,11 @@ export function readInput(raw) {
         .map((h) => `#${h}`);
     const cleanHandle = (v) => String(v ?? '').trim().replace(/^@+/, '').toLowerCase();
     const seedHandles = [...new Set((input.seedHandles ?? []).map(cleanHandle).filter(Boolean))];
-    const knownHandles = [...new Set((input.knownHandles ?? []).map(cleanHandle).filter(Boolean))];
-    if (!keywords.length && !hashtags.length && !seedHandles.length)
-        throw new Error('Give at least one keyword in "keywords", one hashtag in "hashtags", or one handle in "seedHandles".');
-    for (const key of ['maxSearchPages', 'maxSearchSeconds', 'maxCreators', 'maxRunSeconds', 'enrichmentReserveSeconds']) {
+    const knownHandles = [...new Set([...(input.knownHandles ?? []), ...(input.excludeHandles ?? [])].map(cleanHandle).filter(Boolean))];
+    for (const key of ['maxSearchPages', 'maxSearchSeconds', 'maxCreators']) {
         if (!Number.isInteger(input[key]) || input[key] < 1)
             throw new Error(`Input "${key}" must be a whole number of 1 or more.`);
     }
-    if (input.enrichmentReserveSeconds >= input.maxRunSeconds)
-        throw new Error('Input "enrichmentReserveSeconds" must be smaller than "maxRunSeconds".');
     if (input.minFollowers != null && input.maxFollowers != null && input.minFollowers > input.maxFollowers) {
         throw new Error('"minFollowers" is larger than "maxFollowers".');
     }
@@ -60,7 +57,12 @@ export function readInput(raw) {
         );
     if (!['prefer', 'only'].includes(input.matchMode)) throw new Error('"matchMode" must be "prefer" or "only".');
     const upper = (xs) => [...new Set((xs ?? []).map((x) => String(x).trim()).filter(Boolean))];
-    const wantMedian = input.addMedianViews || input.minMedianViews != null || input.maxMedianViews != null;
+    if (!Number.isInteger(input.maxDaysSinceLastPost) || input.maxDaysSinceLastPost < 1) throw new Error('Input "maxDaysSinceLastPost" must be a whole number of 1 or more.');
+    const wantMedian = true; // every returned creator is enriched with median views
+    const criteriaSearches = (!keywords.length && !hashtags.length && !seedHandles.length)
+        ? ['creator', 'tips', 'how to', 'explained', 'review', 'guide', 'storytime', 'tutorial', 'advice', 'recommendations']
+        : [];
+    const orderedTopicSearches = input.hashtagsFirst ? [...hashtags, ...keywords] : [...keywords, ...hashtags];
     return {
         ...input,
         regions: upper(input.regions).map((r) => r.toUpperCase()),
@@ -68,7 +70,8 @@ export function readInput(raw) {
         wantMedian,
         seedHandles,
         knownHandles,
-        searches: [...new Set([...keywords, ...hashtags, ...seedHandles.map((h) => `@${h} similar creators`)])],
+        criteriaOnly: criteriaSearches.length > 0,
+        searches: [...new Set([...orderedTopicSearches, ...criteriaSearches, ...seedHandles.map((h) => `@${h} similar creators`)])],
     };
 }
 
@@ -89,7 +92,7 @@ export function orderCandidates(candidates, { minFollowers = null, maxFollowers 
     );
 }
 
-export function checkFilters(row, { minFollowers, maxFollowers, minMedianViews, maxMedianViews }) {
+export function checkFilters(row, { minFollowers, maxFollowers, minMedianViews, maxMedianViews, maxDaysSinceLastPost = null, excludeVerified = true }) {
     const failures = [];
     const judged = [];
     if (row.followers != null) {
@@ -106,9 +109,12 @@ export function checkFilters(row, { minFollowers, maxFollowers, minMedianViews, 
         if (maxMedianViews != null && row.medianViews > maxMedianViews)
             failures.push(`median views ${row.medianViews} above ${maxMedianViews}`);
     }
+    if (excludeVerified && row.verified === true) failures.push('verified/celebrity');
+    if (row.daysSinceLastPost != null) judged.push('activity');
+    if (row.daysSinceLastPost != null && maxDaysSinceLastPost != null && row.daysSinceLastPost > maxDaysSinceLastPost) failures.push(`inactive: last post ${row.daysSinceLastPost} days ago, maximum ${maxDaysSinceLastPost}`);
     const asked = (minFollowers != null || maxFollowers != null ? ['followers'] : []).concat(
         minMedianViews != null || maxMedianViews != null ? ['medianViews'] : [],
-    );
+    ).concat(maxDaysSinceLastPost != null ? ['activity'] : []);
     // a creator is judged only when every figure the filters need is known (or a known figure already fails)
     if (failures.length) return { passes: false, failures };
     if (row.followers == null && row.medianViews == null) return { passes: null, failures };
@@ -133,6 +139,7 @@ export function creatorRow(candidate, profile, enrichNote) {
         profileUrl: `https://www.tiktok.com/@${candidate.handle}`,
         foundVia: candidate.profileHit ? 'profile page' : 'video',
         queriesMatched: candidate.queries,
+        matchedQuery: candidate.queries?.[0] ?? 'criteria',
         timesSeen: candidate.timesSeen,
         searchFollowerHint: candidate.hint ?? null,
         searchSnippets: candidate.snippets,
@@ -142,6 +149,8 @@ export function creatorRow(candidate, profile, enrichNote) {
     return {
         ...base,
         enriched: Boolean(profile),
+        enrichStatus: profile ? 'ok' : 'failed',
+        enrichReason: profile ? null : (enrichNote ?? 'profile data unavailable'),
         enrichNote: enrichNote ?? null,
         profileStatus: profile ? (p.status ?? null) : null,
         displayName: p.displayName ?? null,
@@ -150,6 +159,8 @@ export function creatorRow(candidate, profile, enrichNote) {
         likes: p.likes ?? null,
         videos: p.videos ?? null,
         verified: p.verified ?? null,
+        lastPostDate: p.lastPostDate ?? p.latestPostDate ?? p.lastVideoDate ?? p.latestVideoDate ?? null,
+        daysSinceLastPost: p.daysSinceLastPost ?? p.daysSinceLastVideo ?? null,
         bio: p.bio ?? null,
         bioLink: p.bioLink ?? null,
         bioLinkDomain: (() => { try { return p.bioLink ? new URL(/^https?:\/\//i.test(p.bioLink) ? p.bioLink : `https://${p.bioLink}`).hostname.replace(/^www\./, '') : null; } catch { return null; } })(),
@@ -183,7 +194,7 @@ export async function callProfileActor(
             maxItems: usernames.length * perCreator + 5,
             concurrency: 2,
         },
-        { waitSecs },
+        { waitSecs: Math.max(waitSecs, 120) },
     );
     if (!run?.defaultDatasetId) throw new Error(`Run of ${actorId} returned no dataset (status ${run?.status})`);
     const terminal = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT']);
@@ -203,11 +214,17 @@ export async function callProfileActor(
         if (item.rowType === 'profile') byName.set(name, item);
         else if (item.rowType === 'summary') summaries.set(name, item);
         else if (item.rowType === 'video' && item.videoUrl && (item.rankNewest === 1 || !latest.has(name)))
-            latest.set(name, item.videoUrl);
+            latest.set(name, item);
     }
     for (const [name, row] of byName) {
         const s = summaries.get(name);
-        if (latest.has(name)) byName.set(name, { ...byName.get(name), latestVideoUrl: latest.get(name) });
+        if (latest.has(name)) {
+            const v = latest.get(name);
+            const lastPostDate = v.createdAt ?? v.createTimeISO ?? v.postedAt ?? v.date ?? null;
+            let daysSinceLastPost = null;
+            if (lastPostDate) { const ms = Date.parse(lastPostDate); if (Number.isFinite(ms)) daysSinceLastPost = Math.max(0, Math.floor((Date.now() - ms) / 86400000)); }
+            byName.set(name, { ...byName.get(name), latestVideoUrl: v.videoUrl, lastPostDate, daysSinceLastPost });
+        }
         if (s)
             byName.set(name, {
                 ...byName.get(name),
@@ -233,12 +250,8 @@ export async function runSearch({
 }) {
     const startedMs = now();
     const started = new Date(startedMs).toISOString();
-    const runDeadline = startedMs + input.maxRunSeconds * 1000;
-    const reserveMs = input.enrichProfiles ? input.enrichmentReserveSeconds * 1000 : 5_000;
-    const searchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, Math.floor((runDeadline - startedMs - reserveMs) / 1000)));
-    const searchDeadline = startedMs + searchSeconds * 1000;
-    const outOfTime = (reserve = 0) => shouldStop() || now() >= runDeadline - reserve;
-    const report = { queries: [], blocked: false, stoppedOnTime: false, requestedMaxSearchSeconds: input.maxSearchSeconds, effectiveMaxSearchSeconds: searchSeconds };
+    const outOfTime = () => shouldStop();
+    const report = { queries: [], blocked: false, stoppedOnTime: false, requestedMaxSearchSeconds: input.maxSearchSeconds, effectiveMaxSearchSeconds: input.maxSearchSeconds };
     const known = new Set(input.knownHandles ?? []);
     const seen = new Map();
     const processed = new Set();
@@ -253,10 +266,11 @@ export async function runSearch({
         locationMatches: 0, locationMismatches: 0, errors: 0,
     };
 
-    log.info(`[${RUNTIME_FIX_VERSION}] Runtime budget: ${input.maxRunSeconds}s total; search capped at ${searchSeconds}s; discovery is processed keyword-by-keyword before more searching; ${input.enrichProfiles ? `${input.enrichmentReserveSeconds}s final reserve retained` : 'enrichment disabled'}.`);
+    log.info(`[${RUNTIME_FIX_VERSION}] No global hard stop. Every keyword/hashtag gets up to ${input.maxSearchSeconds}s; hashtagsFirst=${input.hashtagsFirst}; criteriaOnly=${input.criteriaOnly}.`);
 
     const makeRow = (c, profile, note = null) => {
         const row = creatorRow(c, profile, profile ? null : (note ?? (input.enrichProfiles ? 'the profile Actor returned no row for this handle' : 'enrichProfiles is off')));
+        if (input.criteriaOnly) row.matchedQuery = 'criteria';
         const { passes, failures } = checkFilters(row, input);
         row.passesFilters = passes;
         row.filterFailures = failures;
@@ -274,7 +288,7 @@ export async function runSearch({
         if (row.locationMatch === false) counts.locationMismatches += 1;
     };
     const emitRow = async (row, force = false) => {
-        if (emitted.has(row.handle)) return false;
+        if (emitted.has(row.handle) || counts.returned >= input.maxCreators) return false;
         if (!force && input.onlyPassing && row.passesFilters !== true) return false;
         if (!force && input.matchMode === 'only' && row.locationMatch === false) return false;
         await pushData(row);
@@ -291,15 +305,15 @@ export async function runSearch({
     };
     const processCandidates = async (candidates) => {
         const fresh = orderCandidates(candidates.filter((c) => !processed.has(c.handle) && !known.has(c.handle)), input)
-            .slice(0, Math.max(0, input.maxCreators - processed.size));
+            .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
         for (const c of candidates) if (known.has(c.handle) && !skippedKnown.has(c.handle)) { skippedKnown.add(c.handle); skippedKnownHandles += 1; }
-        for (let i = 0; i < fresh.length && !outOfTime(8_000); i += BATCH) {
+        for (let i = 0; i < fresh.length && !outOfTime(); i += BATCH) {
             const rawBatch = fresh.slice(i, i + BATCH);
             const enrichable = [];
             for (const c of rawBatch) {
                 processed.add(c.handle);
                 const hf = hintFailure(c);
-                if (hf && input.enrichProfiles) {
+                if (hf && input.enrichProfiles && (input.maxFollowers != null && hf.n > input.maxFollowers)) {
                     skippedByHint += 1;
                     const row = makeRow(c, null, `profile enrichment skipped because ${hf.reason}`);
                     row.followers = null;
@@ -327,7 +341,7 @@ export async function runSearch({
                     medianViews: input.wantMedian,
                     videosForMedian: input.videosForMedian,
                     needLatestVideo: input.regions.length > 0,
-                    waitSecs: Math.max(10, Math.min(45, Math.floor((runDeadline - now() - 8_000) / 1000))),
+                    waitSecs: 45,
                 });
             } catch (error) {
                 enrichNote = `Profile enrichment failed for batch: ${String(error?.message ?? error)}`;
@@ -335,7 +349,7 @@ export async function runSearch({
                 log.warning(enrichNote);
             }
             for (const c of enrichable) {
-                if (outOfTime(5_000)) break;
+                if (outOfTime()) break;
                 const profile = got.get(c.handle) ?? null;
                 if (profile && input.regions.length && !profile.region) {
                     const url = profile.latestVideoUrl ?? c.videoUrls?.[0];
@@ -352,13 +366,13 @@ export async function runSearch({
     };
 
     for (const keyword of input.searches) {
-        if (outOfTime(reserveMs) || now() >= searchDeadline || processed.size >= input.maxCreators) { report.stoppedOnTime = true; break; }
-        const remainingSearchSeconds = Math.max(1, Math.floor((searchDeadline - now()) / 1000));
+        if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
+        const remainingSearchSeconds = input.maxSearchSeconds;
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
             keywords: [keyword], excludeWords: input.excludeWords, maxPages: input.maxSearchPages,
             maxSeconds: remainingSearchSeconds, modifiers: input.searchModifiers, serpProxyUrl, serpFetch, engines,
-            report: localReport, shouldContinue: () => !outOfTime(reserveMs) && now() < searchDeadline,
+            report: localReport, shouldContinue: () => !outOfTime(),
             log: (m) => log.info(m),
         });
         report.queries.push(...localReport.queries);
@@ -422,7 +436,14 @@ export async function runSearch({
         handlesFound: seen.size, candidatesSelected: processed.size, creatorsProcessed: rows.length, skippedByHint, skippedKnownHandles,
         knownHandlesSupplied: known.size, seedHandlesSupplied: input.seedHandles.length, keywordYield,
         ...counts, nearMissesReturned, enrichNote,
-        stoppedEarly: outOfTime(5_000) || report.stoppedOnTime || searchedKeywords.length < input.searches.length,
+        failedByReason: {
+            followers: rows.filter((r) => r.filterFailures?.some((x) => x.startsWith('followers') || x.includes('follower hint'))).length,
+            views: rows.filter((r) => r.filterFailures?.some((x) => x.startsWith('median views'))).length,
+            inactive: rows.filter((r) => r.filterFailures?.some((x) => x.startsWith('inactive'))).length,
+            verifiedCelebrity: rows.filter((r) => r.filterFailures?.includes('verified/celebrity')).length,
+            enrichment: rows.filter((r) => r.enrichStatus === 'failed').length,
+        },
+        stoppedEarly: outOfTime() || searchedKeywords.length < input.searches.length,
         search: report, estimatedCostUsd: null, billedEvents: null,
         estimatedCostNote: 'Exact run cost and billed events are not available authoritatively inside the Actor; use the Apify run billing/usage record.',
         note: 'Creators come from public search-engine results. Clearly out-of-range search follower hints are skipped before profile enrichment; all final passing decisions use enriched profile/video data.',
