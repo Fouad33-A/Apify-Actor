@@ -12,7 +12,7 @@ import { gotScraping } from 'got-scraping';
 const enc = encodeURIComponent;
 export const SITE = 'tiktok.com';
 export const CRITERIA_QUERY = '__criteria_only__';
-export const QUERY_VARIANTS = 3;
+export const QUERY_VARIANTS = 6;
 const SEARCH_PARALLEL = 3;
 const TT_NAME = /^(?=.{2,24}$)(?=.*[A-Za-z0-9])[A-Za-z0-9._]+$/;
 const validHandle = (value) => TT_NAME.test(value) && !value.startsWith('.') && !value.endsWith('.') && !value.includes('..');
@@ -25,7 +25,7 @@ export function buildQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
     if (kw === CRITERIA_QUERY) {
         // Untargeted public index sampling; no creator-topic words are injected.
-        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "50K" "followers"', 'site:tiktok.com/@ "100K" "followers"'][variant] ?? 'site:tiktok.com/@';
+        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "50K" "followers"', 'site:tiktok.com/@ "100K" "followers"', 'site:tiktok.com/@ "20K" "followers"', 'site:tiktok.com/@ "75K" "followers"', 'site:tiktok.com/@ "followers" -verified -official'][variant] ?? 'site:tiktok.com/@';
     }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
@@ -280,7 +280,7 @@ export function buildBraveQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
     if (kw === CRITERIA_QUERY) {
         // No topical seed: a broad public index query, not an unbiased TikTok census.
-        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "50K" "followers"', 'site:tiktok.com/@ "100K" "followers"'][variant] ?? 'site:tiktok.com/@';
+        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "50K" "followers"', 'site:tiktok.com/@ "100K" "followers"', 'site:tiktok.com/@ "20K" "followers"', 'site:tiktok.com/@ "75K" "followers"', 'site:tiktok.com/@ "followers" -verified -official'][variant] ?? 'site:tiktok.com/@';
     }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
@@ -348,7 +348,7 @@ export function defaultEngines({ serpProxyUrl, serpFetch = fetchSerpPage, braveF
     return engines;
 }
 
-const PER_KEYWORD_TARGET = 30; // stop asking more wordings for a keyword once it has this many different handles
+const PER_KEYWORD_TARGET = 60; // stop asking more wordings for a keyword once it has this many different handles
 const RATE_LIMIT_RETRIES = 0; // avoid paid-runtime waste on an engine returning 429
 const RATE_LIMITS_BEFORE_DROP = 1;
 
@@ -432,7 +432,7 @@ export async function discoverCreators({
                 } catch (err) {
                     if (err?.rateLimited) {
                         outcome = 'rate_limited';
-                        detail = `${err.message}; waited ${engine.backoffMs / 1000} s and tried again`;
+                        detail = `${err.message}; retry policy: ${RATE_LIMIT_RETRIES} retry(ies)`;
                         if (attempt < RATE_LIMIT_RETRIES) {
                             await sleep(engine.backoffMs);
                             continue;
