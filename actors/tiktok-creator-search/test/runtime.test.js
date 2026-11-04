@@ -14,11 +14,11 @@ describe('criteria-only discovery', () => {
             const google = buildQuery({ keyword: CRITERIA_QUERY, variant });
             expect(brave).toMatch(/tiktok\.com/);
             expect(google).toMatch(/tiktok\.com/);
-            expect(brave).not.toMatch(/tips|tutorial|how to|recommendations/i);
+            expect(brave).not.toMatch(/budgeting|finance|fitness|beauty|gaming/i);
         }
     });
 
-    it('diversifies follower bands without adding topic seeds', () => {
+    it('diversifies generic content-format queries without a fixed niche', () => {
         const queries = Array.from({ length: 6 }, (_, variant) => buildQuery({ keyword: CRITERIA_QUERY, variant }));
         expect(new Set(queries).size).toBe(6);
         expect(queries).toEqual(expect.arrayContaining([
