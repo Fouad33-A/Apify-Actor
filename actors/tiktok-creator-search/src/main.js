@@ -25,6 +25,7 @@ const DEFAULTS = {
     examPresets: [],
     seedHandles: [],
     knownHandles: [],
+    rememberProcessedHandles: true,
     addMedianViews: false,
     videosForMedian: 10,
     hashtagsFirst: true,
@@ -513,6 +514,20 @@ async function main() {
     try {
         log.info(`[${RUNTIME_FIX_VERSION}] TikTok Creator Search runtime-safe build active; child enrichment batch size=${BATCH}.`);
         const input = readInput(await Actor.getInput());
+        let historyStore = null;
+        let previousHandles = [];
+        if (input.rememberProcessedHandles) {
+            try {
+                historyStore = await Actor.openKeyValueStore('tiktok-creator-search-history');
+                const history = await historyStore.getValue('PROCESSED_HANDLES');
+                previousHandles = Array.isArray(history) ? history.filter((h) => typeof h === 'string') : [];
+                input.knownHandles = [...new Set([...input.knownHandles, ...previousHandles])];
+                log.info('Persistent history loaded: ' + previousHandles.length + ' handles.');
+            } catch (error) {
+                historyStore = null;
+                log.warning('History unavailable: ' + String(error?.message ?? error));
+            }
+        }
         // Brave Search needs no proxy; the Google SERP proxy, when the account has it, is the fallback engine.
         const serp = await Actor.createProxyConfiguration({ groups: ['GOOGLE_SERP'] }).catch(() => null);
         const serpProxyUrl = serp ? await serp.newUrl() : null;
@@ -523,6 +538,17 @@ async function main() {
             engines: defaultEngines({ serpProxyUrl }),
             shouldStop: () => stop,
         });
+        if (historyStore) {
+            try {
+                const { items } = await Actor.apifyClient.dataset().listItems({ limit: 1000 });
+                const confirmed = items.filter((r) => r.recordType === 'creator' && r.enrichStatus === 'ok').map((r) => r.handle);
+                const merged = [...new Set([...previousHandles, ...confirmed])].slice(-5000);
+                await historyStore.setValue('PROCESSED_HANDLES', merged);
+                log.info('Persistent history saved: ' + merged.length + ' handles.');
+            } catch (error) {
+                log.warning('History save failed: ' + String(error?.message ?? error));
+            }
+        }
         await Actor.setValue('OUTPUT', summary);
         await Actor.setValue('RESUME_TOKEN', summary.resumeToken);
         log.info(`Done: ${summary.handlesFound} creators found, ${summary.returned} creator/near-miss row(s) returned; ${summary.creatorsProcessed} processed.`);
