@@ -25,7 +25,7 @@ export function buildQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
     if (kw === CRITERIA_QUERY) {
         // Untargeted public index sampling; no creator-topic words are injected.
-        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "50K" "followers"', 'site:tiktok.com/@ "100K" "followers"', 'site:tiktok.com/@ "20K" "followers"', 'site:tiktok.com/@ "75K" "followers"', 'site:tiktok.com/@ "followers" -verified -official'][variant] ?? 'site:tiktok.com/@';
+        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "followers" -verified -official', 'site:tiktok.com/@ "creator" "followers"', 'site:tiktok.com/@ "20K" "followers"', 'site:tiktok.com/@ "30K" "followers"', 'site:tiktok.com/@ "100K" "followers"'][variant] ?? 'site:tiktok.com/@';
     }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
@@ -280,7 +280,7 @@ export function buildBraveQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
     if (kw === CRITERIA_QUERY) {
         // No topical seed: a broad public index query, not an unbiased TikTok census.
-        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "50K" "followers"', 'site:tiktok.com/@ "100K" "followers"', 'site:tiktok.com/@ "20K" "followers"', 'site:tiktok.com/@ "75K" "followers"', 'site:tiktok.com/@ "followers" -verified -official'][variant] ?? 'site:tiktok.com/@';
+        return ['site:tiktok.com/@ "10K" "followers"', 'site:tiktok.com/@ "followers" -verified -official', 'site:tiktok.com/@ "creator" "followers"', 'site:tiktok.com/@ "20K" "followers"', 'site:tiktok.com/@ "30K" "followers"', 'site:tiktok.com/@ "100K" "followers"'][variant] ?? 'site:tiktok.com/@';
     }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
