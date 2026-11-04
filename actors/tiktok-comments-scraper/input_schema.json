@@ -55,9 +55,7 @@
         },
         "required": [
           "url"
-        ],
-        "title": "Post URL entry",
-        "description": "A TikTok post URL entry."
+        ]
       },
       "description": "Legacy TikTok post URLs to scrape."
     },
