@@ -22,9 +22,9 @@ describe('criteria-only discovery', () => {
         const queries = Array.from({ length: 6 }, (_, variant) => buildQuery({ keyword: CRITERIA_QUERY, variant }));
         expect(new Set(queries).size).toBe(6);
         expect(queries).toEqual(expect.arrayContaining([
-            'site:tiktok.com/@ "20K" "followers"',
-            'site:tiktok.com/@ "30K" "followers"',
-            'site:tiktok.com/@ "followers" -verified -official',
+            'site:tiktok.com/@ "10k followers" "creator"',
+            'site:tiktok.com/@ "small creator" "followers"',
+            'site:tiktok.com/@ "micro influencer" "followers"',
         ]));
         expect(queries.every((q) => q.includes('site:tiktok.com/@'))).toBe(true);
     });
