@@ -37,7 +37,8 @@
       "editor": "stringList",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "Direct TikTok video URLs to scrape."
     },
     "postUrls": {
       "title": "Legacy post URLs",
@@ -57,31 +58,36 @@
         ],
         "title": "Post URL entry",
         "description": "A TikTok post URL entry."
-      }
+      },
+      "description": "Legacy TikTok post URLs to scrape."
     },
     "maxCommentsPerPost": {
       "title": "Comments per video",
       "type": "integer",
       "default": 100,
       "minimum": 1,
-      "maximum": 1000
+      "maximum": 1000,
+      "description": "Maximum top-level comments to collect from each video."
     },
     "includeReplies": {
       "title": "Include replies",
       "type": "boolean",
-      "default": false
+      "default": false,
+      "description": "Whether replies are requested; current public-source scraper does not fetch replies."
     },
     "minAskers": {
       "title": "Minimum distinct askers",
       "type": "integer",
       "default": 3,
-      "minimum": 3
+      "minimum": 3,
+      "description": "Minimum number of distinct commenters asking the same question."
     },
     "minVideos": {
       "title": "Minimum distinct videos",
       "type": "integer",
       "default": 2,
-      "minimum": 2
+      "minimum": 2,
+      "description": "Minimum number of distinct videos by the same creator containing the question."
     },
     "languages": {
       "title": "Allowed language codes (optional)",
@@ -89,7 +95,8 @@
       "editor": "stringList",
       "items": {
         "type": "string"
-      }
+      },
+      "description": "Optional language codes used to filter detected questions."
     }
   }
 }
