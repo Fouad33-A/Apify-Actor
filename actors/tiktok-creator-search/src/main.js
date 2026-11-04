@@ -545,9 +545,9 @@ async function main() {
             try {
                 const { items } = await (await Actor.openDataset()).getData({ limit: 1000 });
                 const confirmed = items.filter((r) => r.recordType === 'creator' && r.enrichStatus === 'ok').map((r) => r.handle);
-                const merged = [...new Set([...previousHandles, ...confirmed])].slice(-5000);
+                const merged = [...new Set([...previousHandles, ...input.knownHandles, ...confirmed])].slice(-5000);
                 await historyStore.setValue('PROCESSED_HANDLES', merged);
-                log.info('Persistent history saved: ' + merged.length + ' handles.');
+                log.info('Persistent history saved: ' + merged.length + ' handles (including supplied exclusions and newly qualified creators).');
             } catch (error) {
                 log.warning('History save failed: ' + String(error?.message ?? error));
             }
