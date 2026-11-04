@@ -41,6 +41,12 @@ describe('readInput and candidate ranking', () => {
         expect(() => readInput({ keywords: ['x'], minFollowers: 10, maxFollowers: 5 })).toThrow(/minFollowers/);
     });
 
+    it('normalizes previously qualified handles supplied for history backfill', () => {
+        const input = readInput({ knownHandles: ['@Suarezz_XO', 'emely_d', '@suarezz_xo'] });
+        expect(input.knownHandles).toEqual(['suarezz_xo', 'emely_d']);
+        expect(input.criteriaOnly).toBe(true);
+    });
+
     it('prioritizes candidates with hints inside the range', () => {
         const candidate = (handle, hint) => ({ handle, hint, profileHit: false, timesSeen: 1 });
         const sorted = orderCandidates([
