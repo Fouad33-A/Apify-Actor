@@ -1,0 +1,27 @@
+name: Free public search discovery diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-free-discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/tiktok-creator-search-nov3
+      - name: Measure free search candidate yield
+        run: node actors/tiktok-creator-search/scripts/check-free-search.mjs
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: free-search-discovery
+          path: diagnostics/free-search-discovery.json
+          retention-days: 7
+          if-no-files-found: warn
