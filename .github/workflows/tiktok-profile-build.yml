@@ -1,0 +1,28 @@
+name: TikTok Profile Actor build
+
+on:
+    workflow_dispatch:
+    push:
+        branches: [fix/tiktok-creator-search-nov3]
+        paths:
+            - 'actors/tiktok-profile-video-stats/**'
+            - '.github/workflows/tiktok-profile-build.yml'
+
+permissions:
+    contents: read
+
+jobs:
+    build:
+        runs-on: ubuntu-24.04
+        defaults:
+            run:
+                working-directory: actors/tiktok-profile-video-stats
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+            - name: Install Actor dependencies
+              run: npm install --include=dev --no-package-lock --audit=false
+            - name: Compile TypeScript
+              run: npm run build
