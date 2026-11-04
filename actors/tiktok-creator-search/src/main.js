@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-04-v12';
+const RUNTIME_FIX_VERSION = '2026-11-04-v13';
 const BATCH = 5;
 const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
 
@@ -349,7 +349,7 @@ export async function runSearch({
         for (let i = 0; i < fresh.length && !outOfTime(); i += BATCH) {
             // Preserve unscreened handles for a later run rather than treating the call cap as a profile failure.
             if (input.enrichProfiles && profileCalls >= MAX_PROFILE_CALLS) break;
-            if (input.enrichProfiles && secondsLeft() < 65) break; // leave time for a short final batch and summary
+            if (input.enrichProfiles && secondsLeft() < 35) break; // leave time to save summary
             const rawBatch = fresh.slice(i, i + BATCH);
             const enrichable = [];
             for (const c of rawBatch) {
@@ -435,9 +435,15 @@ export async function runSearch({
     for (let searchIndex = nextSearchIndex; searchIndex < (explicitCandidateFeed || input.discoverySource === 'creativeCenter' ? 0 : input.searches.length); searchIndex += 1) {
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
-        // Spend at most ~90 seconds discovering; reserve the remainder for screening.
-        if (input.enrichProfiles && secondsLeft() < Math.max(120, input.maxRunSeconds - 90)) break;
-        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.enrichProfiles ? 20 : 45, Math.floor(secondsLeft() - (input.enrichProfiles ? Math.max(120, input.maxRunSeconds - 90) : 25))));
+        // Stop discovery once there is a useful pool; the expensive step is verifying profiles.
+        const waiting = [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle)).length;
+        if (input.enrichProfiles && waiting >= 20) {
+            log.info(`[${RUNTIME_FIX_VERSION}] Discovery pool has ${waiting} unprocessed candidates; switching to profile screening.`);
+            break;
+        }
+        // Spend at most ~60 seconds discovering; reserve the remainder for screening.
+        if (input.enrichProfiles && secondsLeft() < Math.max(120, input.maxRunSeconds - 60)) break;
+        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.enrichProfiles ? 15 : 45, Math.floor(secondsLeft() - (input.enrichProfiles ? Math.max(120, input.maxRunSeconds - 90) : 25))));
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
             keywords: [keyword], excludeWords: input.excludeWords, maxPages: input.maxSearchPages,
