@@ -1,0 +1,96 @@
+{
+  "title": "TikTok Profile & Video Stats",
+  "description": "Screens public TikTok creators using profile data and recent public videos. No login, cookies, CAPTCHA solving, external paid data provider, or TikTok anti-bot signature reproduction.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "usernames": {
+      "title": "TikTok usernames",
+      "type": "array",
+      "description": "1\u2013200 TikTok usernames; large batches can require more runtime.",
+      "editor": "stringList",
+      "minItems": 1,
+      "maxItems": 200,
+      "default": [
+        "allanainaction",
+        "dr.mrs.knits",
+        "adrianmarshofficial",
+        "beautyjuels"
+      ]
+    },
+    "videosPerProfile": {
+      "title": "Videos per profile",
+      "type": "integer",
+      "description": "Number of recent public videos to analyze per creator. TikTok's public creator embed exposes at most 10 recent candidates in this build, so the accepted range is 1\u201310.",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 10
+    },
+    "excludePinned": {
+      "title": "Exclude pinned videos",
+      "type": "boolean",
+      "description": "Exclude videos only when TikTok explicitly identifies them as pinned. Unknown pin status is retained and reported in coverage warnings.",
+      "default": true
+    },
+    "mode": {
+      "title": "Mode",
+      "type": "string",
+      "description": "full returns profile, video, and summary rows. profileOnly stops after profile data.",
+      "editor": "select",
+      "default": "full",
+      "enum": [
+        "full",
+        "profileOnly"
+      ],
+      "enumTitles": [
+        "Full",
+        "Profile only"
+      ]
+    },
+    "minFollowers": {
+      "title": "Minimum followers",
+      "type": "integer",
+      "description": "Optional minimum follower count. Profiles below this are skipped before video loading.",
+      "minimum": 0
+    },
+    "maxFollowers": {
+      "title": "Maximum followers",
+      "type": "integer",
+      "description": "Optional maximum follower count. Profiles above this are skipped before video loading.",
+      "minimum": 0
+    },
+    "maxItems": {
+      "title": "Maximum dataset rows",
+      "type": "integer",
+      "description": "Hard ceiling on dataset rows produced by this Actor.",
+      "minimum": 1,
+      "maximum": 5000,
+      "default": 200
+    },
+    "concurrency": {
+      "title": "Concurrency",
+      "type": "integer",
+      "description": "Maximum creator profiles processed simultaneously. Capped at 2.",
+      "minimum": 1,
+      "maximum": 2,
+      "default": 2
+    },
+    "outputRows": {
+      "title": "Dataset output rows",
+      "type": "string",
+      "editor": "select",
+      "default": "all",
+      "enum": [
+        "all",
+        "summaryOnly"
+      ],
+      "enumTitles": [
+        "All rows",
+        "Summary rows only"
+      ]
+    }
+  },
+  "required": [
+    "usernames"
+  ]
+}
