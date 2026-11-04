@@ -41,6 +41,15 @@ describe('readInput and candidate ranking', () => {
         expect(() => readInput({ keywords: ['x'], minFollowers: 10, maxFollowers: 5 })).toThrow(/minFollowers/);
     });
 
+    it('requires default project filters', () => {
+        const input = readInput({});
+        expect(input.minFollowers).toBe(10000);
+        expect(input.maxFollowers).toBe(150000);
+        expect(input.minMedianViews).toBe(5000);
+        expect(checkFilters({ followers: 808900, medianViews: 606, verified: false, daysSinceLastPost: 1 }, input).passes).toBe(false);
+        expect(() => readInput({ maxFollowers: 1000000 })).toThrow();
+    });
+
     it('normalizes previously qualified handles supplied for history backfill', () => {
         const input = readInput({ knownHandles: ['@Suarezz_XO', 'emely_d', '@suarezz_xo'] });
         expect(input.knownHandles).toEqual(['suarezz_xo', 'emely_d']);
