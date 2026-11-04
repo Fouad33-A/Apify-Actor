@@ -137,6 +137,17 @@ describe('runSearch', () => {
         expect(out.at(-1).recordType).toBe('RUN_SUMMARY');
     });
 
+    it('finishes a search when the only unprocessed handle is in persistent history', async () => {
+        const { summary } = await run({
+            knownHandles: ['mid_one'],
+            minFollowers: 10_000, maxFollowers: 150_000, minMedianViews: 5_000,
+        });
+        expect(summary.skippedKnownHandles).toBe(1);
+        expect(summary.nextSearchIndex).toBe(1);
+        expect(summary.stoppedEarly).toBe(false);
+        expect(summary.resumeToken).toBeNull();
+    });
+
     it('resumes from the supplied index and excludes previously handled names', async () => {
         const { summary } = await run({
             resumeToken: { nextSearchIndex: 0, processedHandles: ['mid_one'] },
