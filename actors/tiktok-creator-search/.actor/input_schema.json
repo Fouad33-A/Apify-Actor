@@ -70,15 +70,17 @@
       "title": "Minimum followers",
       "type": "integer",
       "editor": "number",
-      "description": "Optional. Needs 'Add profile data'. Creators below this are marked passesFilters false.",
-      "minimum": 0
+      "description": "Required project screening threshold; cannot be overridden in this Actor.",
+      "minimum": 0,
+      "default": 10000
     },
     "maxFollowers": {
       "title": "Maximum followers",
       "type": "integer",
       "editor": "number",
-      "description": "Optional. Needs 'Add profile data'. Creators above this are marked passesFilters false.",
-      "minimum": 0
+      "description": "Required project screening threshold; cannot be overridden in this Actor.",
+      "minimum": 0,
+      "default": 150000
     },
     "onlyPassing": {
       "title": "Return only creators inside the follower range",
@@ -149,9 +151,10 @@
     "minMedianViews": {
       "title": "Minimum median views",
       "type": "integer",
-      "description": "Optional. Creators whose median views are below this are marked passesFilters false. Turns on the median views lookup.",
+      "description": "Required project screening threshold; cannot be overridden in this Actor.",
       "editor": "number",
-      "minimum": 0
+      "minimum": 0,
+      "default": 5000
     },
     "maxMedianViews": {
       "title": "Maximum median views",
