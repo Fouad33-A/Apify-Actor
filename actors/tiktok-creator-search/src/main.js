@@ -4,6 +4,7 @@ import { presetSearches } from './presets.js';
 import { defaultEngines, discoverCreators, parseFollowerHint, CRITERIA_QUERY } from './serp.js';
 import { fetchVideoPlace } from './video.js';
 import { fromCandidateFeed } from './candidate-source.js';
+import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
 const RUNTIME_FIX_VERSION = '2026-11-04-v7';
@@ -26,6 +27,7 @@ const DEFAULTS = {
     examPresets: [],
     seedHandles: [],
     candidateFeed: [],
+    discoverySource: 'search',
     knownHandles: [],
     rememberProcessedHandles: true,
     addMedianViews: false,
@@ -53,6 +55,7 @@ export function readInput(raw) {
     const cleanHandle = (v) => String(v ?? '').trim().replace(/^@+/, '').toLowerCase();
     const seedHandles = [...new Set((input.seedHandles ?? []).map(cleanHandle).filter(Boolean))];
     if (!Array.isArray(input.candidateFeed)) throw new Error('candidateFeed must be an array of handles or profile URLs.');
+    if (!['search', 'creativeCenter'].includes(input.discoverySource)) throw new Error('discoverySource must be search or creativeCenter.');
     const token = input.resumeToken ?? {};
     if (typeof token !== 'object' || Array.isArray(token)) throw new Error('resumeToken must be an object from a prior RUN_SUMMARY.');
     const resumeIndex = Number.isInteger(token.nextSearchIndex) && token.nextSearchIndex >= 0 ? token.nextSearchIndex : 0;
@@ -418,7 +421,14 @@ export async function runSearch({
         log.info('Offline candidate feed: ' + suppliedCandidates.length + ' new handles (no search request).');
         await processCandidates(suppliedCandidates);
     }
-    for (let searchIndex = nextSearchIndex; searchIndex < (suppliedCandidates.length ? 0 : input.searches.length); searchIndex += 1) {
+    if (input.discoverySource === 'creativeCenter' && !suppliedCandidates.length) {
+        const free = await discoverFromCreativeCenter({ known: [...known] });
+        report.freeDiscovery = free.diagnostics;
+        for (const candidate of free.candidates) seen.set(candidate.handle, candidate);
+        log.info('Creative Center public pages: ' + free.candidates.length + ' new candidate handles.');
+        await processCandidates(free.candidates);
+    }
+    for (let searchIndex = nextSearchIndex; searchIndex < (suppliedCandidates.length || input.discoverySource === 'creativeCenter' ? 0 : input.searches.length); searchIndex += 1) {
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
         if (input.enrichProfiles && secondsLeft() < 130) break;
