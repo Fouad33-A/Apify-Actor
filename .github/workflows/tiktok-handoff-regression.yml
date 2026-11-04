@@ -1,0 +1,19 @@
+name: TikTok handoff regression
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/tiktok-creator-search-nov3]
+    paths:
+      - 'actors/tiktok-creator-search/scripts/prepare-comments-input.mjs'
+      - 'actors/tiktok-creator-search/scripts/test-handoff.mjs'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tiktok-creator-search-nov3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node actors/tiktok-creator-search/scripts/test-handoff.mjs
