@@ -47,9 +47,10 @@ export function readInput(raw) {
         if (input[key] !== required[key]) throw new Error('Required screening setting invalid: ' + key);
     }
     const presets = presetSearches(input.examPresets);
-    const keywords = [...(input.keywords ?? []), ...presets.keywords].map((k) => String(k).trim()).filter(Boolean);
-    const hashtags = [...(input.hashtags ?? []), ...presets.hashtags]
-        .map((h) => String(h).trim().replace(/^#+/, ''))
+    const splitTerms = (values) => values.flatMap((v) => String(v).split(/[,;\n]+/)).map((v) => v.trim()).filter(Boolean);
+    const keywords = splitTerms([...(input.keywords ?? []), ...presets.keywords]);
+    const hashtags = splitTerms([...(input.hashtags ?? []), ...presets.hashtags])
+        .map((h) => h.replace(/^#+/, ''))
         .filter(Boolean)
         .map((h) => `#${h}`);
     const cleanHandle = (v) => String(v ?? '').trim().replace(/^@+/, '').toLowerCase();
