@@ -7,7 +7,7 @@ const queries = ['site:tiktok.com/@ "followers" "videos"', 'site:tiktok.com/@ "a
 const engines = {
   bing: (q) => 'https://www.bing.com/search?q=' + encodeURIComponent(q),
   brave: (q) => 'https://search.brave.com/search?q=' + encodeURIComponent(q) + '&source=web',
-  duckduckgo: (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q), // Google baseline
+  google: (q) => 'https://www.google.com/search?q=' + encodeURIComponent(q),
 };
 const unique = new Set(), rows = [];
 for (const [engine, makeUrl] of Object.entries(engines)) {
