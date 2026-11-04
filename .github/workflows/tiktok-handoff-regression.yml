@@ -19,3 +19,5 @@ jobs:
       - run: node actors/tiktok-creator-search/scripts/test-handoff.mjs
       - run: node actors/tiktok-comments-scraper/test-repeated-questions.mjs
       - run: node actors/tiktok-comments-scraper/test-creator-handoff.mjs
+      - run: node --check actors/tiktok-comments-scraper/main.js
+      - run: node actors/tiktok-comments-scraper/test-question-clusters.mjs
