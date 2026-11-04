@@ -7,8 +7,9 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-04-v10';
-const BATCH = 5; // bounded child calls leave room for a clean parent summary
+const RUNTIME_FIX_VERSION = '2026-11-04-v11';
+const BATCH = 5;
+const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
 
 const DEFAULTS = {
     excludeWords: [],
@@ -107,12 +108,12 @@ export function orderCandidates(candidates, { minFollowers = null, maxFollowers 
         return (minFollowers != null && n < minFollowers) || (maxFollowers != null && n > maxFollowers) ? 2 : 0;
     };
     // Soft tie-breaker only: an app/service-looking handle may still be a legitimate creator.
-    const serviceLike = (c) => /(?:^|[._-])(?:app|officialapp|software|platform|store|shop)(?:$|[._-])/i.test(c.handle ?? '') ? 1 : 0;
+    const serviceLike = (c) => /(?:^|[._-])(?:app|officialapp|software|platform|store|shop|group|brand|company)(?:$|[._-])/i.test(c.handle ?? '') || /^(?:anytimefitness|thegymgroup)$/i.test(c.handle ?? '') ? 1 : 0;
     return [...candidates].sort(
         (a, b) =>
             fit(a) - fit(b) ||
-            Number(b.profileHit) - Number(a.profileHit) ||
             serviceLike(a) - serviceLike(b) ||
+            Number(b.profileHit) - Number(a.profileHit) ||
             (Number(b.timesSeen) || 0) - (Number(a.timesSeen) || 0) ||
             a.handle.localeCompare(b.handle),
     );
@@ -276,11 +277,10 @@ export async function runSearch({
     shouldStop = () => false,
     now = () => Date.now(),
 }) {
-    // At most two paid profile enrichment calls per Creator Search run.
-    // This is a run-count guard, not an account-wide dollar spending guarantee.
+    // Bound enrichment by both call count and remaining runtime.
     let profileCalls = 0;
     const budgetedEnrich = async (...args) => {
-        if (profileCalls >= 2) throw new Error('Nested profile enrichment call limit reached (2); skipping further paid calls.');
+        if (profileCalls >= MAX_PROFILE_CALLS) throw new Error('Nested profile enrichment call limit reached; skipping further calls.');
         profileCalls += 1;
         return enrich(...args);
     };
@@ -348,8 +348,8 @@ export async function runSearch({
             .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
         for (let i = 0; i < fresh.length && !outOfTime(); i += BATCH) {
             // Preserve unscreened handles for a later run rather than treating the call cap as a profile failure.
-            if (input.enrichProfiles && profileCalls >= 2) break;
-            if (input.enrichProfiles && secondsLeft() < 130) break; // Actor.call may wait up to 120 seconds
+            if (input.enrichProfiles && profileCalls >= MAX_PROFILE_CALLS) break;
+            if (input.enrichProfiles && secondsLeft() < 65) break; // leave time for a short final batch and summary
             const rawBatch = fresh.slice(i, i + BATCH);
             const enrichable = [];
             for (const c of rawBatch) {
@@ -386,7 +386,7 @@ export async function runSearch({
                     medianViews: true,
                     videosForMedian: 10,
                     needLatestVideo: true,
-                    waitSecs: 115,
+                    waitSecs: Math.max(30, Math.min(100, Math.floor(secondsLeft() - 20))),
                 });
             } catch (error) {
                 enrichNote = `Full profile enrichment failed for batch: ${String(error?.message ?? error)}`;
@@ -436,8 +436,8 @@ export async function runSearch({
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
         // Reserve time for enrichment, but discover across multiple topics before screening.
-        if (input.enrichProfiles && secondsLeft() < 180) break;
-        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.criteriaOnly ? 45 : input.maxSearchSeconds, Math.floor(secondsLeft() - (input.enrichProfiles ? 130 : 25))));
+        if (input.enrichProfiles && secondsLeft() < 135) break;
+        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.criteriaOnly ? 45 : input.maxSearchSeconds, Math.floor(secondsLeft() - (input.enrichProfiles ? 105 : 25))));
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
             keywords: [keyword], excludeWords: input.excludeWords, maxPages: input.maxSearchPages,
