@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-04-v7';
+const RUNTIME_FIX_VERSION = '2026-11-04-v8';
 const BATCH = 5; // bounded child calls leave room for a clean parent summary
 
 const DEFAULTS = {
@@ -373,45 +373,25 @@ export async function runSearch({
             }
             const names = enrichable.map((c) => c.handle);
             log.info(`[${RUNTIME_FIX_VERSION}] Profile screening batch: ${names.length} creator(s) [${names.join(', ')}].`);
-            let screened = new Map();
+            // A single full-mode call provides followers, verification, latest activity and
+            // the ten-video median together. Avoid the former profileOnly + full two-call
+            // sequence, which exhausted the call allowance after one batch.
+            let full = new Map();
             try {
-                screened = await budgetedEnrich(input.profileActor, names, {
-                    medianViews: false,
-                    needLatestVideo: false,
+                full = await budgetedEnrich(input.profileActor, names, {
+                    medianViews: true,
+                    videosForMedian: 10,
+                    needLatestVideo: true,
                     waitSecs: 115,
                 });
             } catch (error) {
-                enrichNote = `Profile screening failed for batch: ${String(error?.message ?? error)}`;
+                enrichNote = `Full profile enrichment failed for batch: ${String(error?.message ?? error)}`;
                 counts.errors += 1;
                 log.warning(enrichNote);
             }
-            const eligible = enrichable.filter((c) => {
-                const p = screened.get(c.handle);
-                if (!p || p.status !== 'ok') return false;
-                if (!Number.isFinite(p.followers)) return false;
-                if (input.minFollowers != null && p.followers < input.minFollowers) return false;
-                if (input.maxFollowers != null && p.followers > input.maxFollowers) return false;
-                if (input.excludeVerified && p.verified === true) return false;
-                return true;
-            });
-            log.info(`[${RUNTIME_FIX_VERSION}] Profile screen: ${eligible.length}/${names.length} eligible for video enrichment; ${names.length - eligible.length} saved video-stage work.`);
-            let full = new Map();
-            if (eligible.length && !outOfTime() && secondsLeft() >= 130) {
-                try {
-                    full = await budgetedEnrich(input.profileActor, eligible.map((c) => c.handle), {
-                        medianViews: input.wantMedian,
-                        videosForMedian: input.videosForMedian,
-                        needLatestVideo: input.regions.length > 0,
-                        waitSecs: 115,
-                    });
-                } catch (error) {
-                    enrichNote = `Video enrichment failed for batch: ${String(error?.message ?? error)}`;
-                    counts.errors += 1;
-                    log.warning(enrichNote);
-                }
-            }
+            log.info(`[${RUNTIME_FIX_VERSION}] Full profile batch: ${[...full.values()].filter((p) => p?.status === 'ok').length}/${names.length} profile(s) retrieved; applying all strict filters.`);
             for (const c of enrichable) {
-                const profile = full.get(c.handle) ?? screened.get(c.handle) ?? null;
+                const profile = full.get(c.handle) ?? null;
                 if (profile && input.regions.length && !profile.region) {
                     const url = profile.latestVideoUrl ?? c.videoUrls?.[0];
                     if (url) try {
