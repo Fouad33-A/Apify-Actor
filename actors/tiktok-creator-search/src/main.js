@@ -12,7 +12,7 @@ const DEFAULTS = {
     excludeWords: [],
     searchModifiers: [],
     maxSearchPages: 2,
-    maxSearchSeconds: 60,
+    maxSearchSeconds: 45,
     maxRunSeconds: 300,
     resumeToken: null,
     maxCreators: 100,
@@ -413,7 +413,7 @@ export async function runSearch({
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
         if (input.enrichProfiles && secondsLeft() < 130) break;
-        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, Math.floor(secondsLeft() - (input.enrichProfiles ? 130 : 25))));
+        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.criteriaOnly ? 45 : input.maxSearchSeconds, Math.floor(secondsLeft() - (input.enrichProfiles ? 130 : 25))));
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
             keywords: [keyword], excludeWords: input.excludeWords, maxPages: input.maxSearchPages,
