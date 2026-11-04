@@ -17,6 +17,7 @@ try {
   const maxCreators = Math.max(1, Math.min(100, Math.floor(Number(input.maxCreators) || 5)));
   const maxCommentsPerPost = Math.max(1, Math.min(1000, Math.floor(Number(input.maxCommentsPerPost) || 100)));
   const timeoutSecs = Math.max(60, Math.min(3600, Math.floor(Number(input.childTimeoutSecs) || 900)));
+  const maxVideosPerCreator = Math.max(2, Math.min(10, Math.floor(Number(input.maxVideosPerCreator) || 10)));
   const searchRows = await runChild('creatorSearch', ACTOR_IDS.creatorSearch, {
     ...(input.searchInput ?? {}), ...(Array.isArray(input.keywords) ? {keywords: input.keywords} : {}), ...(Array.isArray(input.hashtags) ? {hashtags: input.hashtags} : {}), maxCreators: Math.max(5, maxCreators), onlyPassing: true, enrichProfiles: true, profileActor: ACTOR_IDS.profileStats,
   }, timeoutSecs);
@@ -25,7 +26,8 @@ try {
   const profileRows = await runChild('profileStats', ACTOR_IDS.profileStats, {
     usernames: creators, mode: 'full', outputRows: 'summaryOnly', videosPerProfile: 10, maxItems: Math.max(200, creators.length * 2),
   }, timeoutSecs);
-  const commentsInput = prepareCommentsInput(profileRows, maxCommentsPerPost);
+  const commentsInput = prepareCommentsInput(profileRows, maxCommentsPerPost, maxVideosPerCreator);
+  log.info('Comments handoff: ' + JSON.stringify({creators: commentsInput.creatorVideos.length, videos: commentsInput.videoUrls.length, maxVideosPerCreator}));
   if (!commentsInput.creatorVideos.length) throw new Error('No creators with two usable videos; stopping before Comments run.');
   const commentRows = await runChild('comments', ACTOR_IDS.comments, { creatorVideos: commentsInput.creatorVideos, maxCommentsPerPost: commentsInput.maxCommentsPerPost, minAskers: 3, minVideos: 2, includeReplies: false }, timeoutSecs);
   const result = summarize({creators, commentsInput, commentRows, childRuns});
