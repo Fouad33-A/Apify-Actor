@@ -204,6 +204,23 @@
       "type": "object",
       "editor": "json",
       "description": "Optional RUN_SUMMARY.resumeToken. Restarts from the unfinished search while skipping handles already processed in the previous run."
+    },
+    "discoverySource": {
+      "title": "Discovery source",
+      "type": "string",
+      "editor": "select",
+      "description": "search uses search engines; creativeCenter uses only free public Creative Center pages and never falls back to paid Google SERP. Profile enrichment may still consume Apify compute.",
+      "default": "search",
+      "enum": [
+        "search",
+        "creativeCenter"
+      ]
+    },
+    "candidateFeed": {
+      "title": "Candidate profile URLs or handles",
+      "type": "array",
+      "editor": "stringList",
+      "description": "Optional public TikTok profile URLs/handles; deduplicated and screened without search requests."
     }
   },
   "required": []
