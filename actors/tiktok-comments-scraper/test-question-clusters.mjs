@@ -13,4 +13,12 @@ assert.equal(context.check(passing,3,2)[0].askerCount,3);
 assert.equal(context.check(passing.map(r=>({...r,videoId:'111'})),3,2).length,0);
 assert.equal(context.check(passing.map(r=>({...r,username:'a'})),3,2).length,0);
 assert.equal(context.check([row('a','111','How does it work?'),row('b','222','Where do I buy it?'),row('c','333','Can it ship?')],3,2).length,0);
-console.log('PASS: distinct askers, distinct videos, no topic-word false positives');
+const reordered=[
+ row('a','111','How to apply for student loans online?'),
+ row('b','222','How can I apply online for student loans?'),
+ row('c','222','How do I apply for online student loans?'),
+];
+assert.equal(context.check(reordered,3,2).length,1, 'reordered equivalent questions should cluster');
+assert.equal(context.check(reordered,3,2)[0].exampleComments.length,3);
+assert.equal(context.check([reordered[0], {...reordered[1],commentText:'Why apply online for student loans?'},reordered[2]],3,2).length,0, 'different intent must not cluster');
+console.log('PASS: exact and conservative token-equivalent questions; strict distinct askers/videos; intent separation');
