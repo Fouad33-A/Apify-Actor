@@ -6,6 +6,7 @@ import {
     buildBraveQuery,
     buildQuery,
     classifySearchPage,
+    CRITERIA_QUERY,
     discoverCreators,
     followerHint,
     handleFromSnippet,
@@ -28,6 +29,21 @@ describe('buildQuery', () => {
         expect(buildQuery({ keyword: 'budgeting', variant: 0 })).toBe('site:tiktok.com budgeting');
         expect(buildQuery({ keyword: '#budgeting', variant: 1 })).toBe('#budgeting tiktok followers');
         expect(buildQuery({ keyword: 'debt', variant: 2, modifiers: ['creator'] })).toBe('debt "tiktok.com" creator');
+    });
+});
+
+describe('criteria-only discovery queries', () => {
+    it('keeps six topic-neutral variants consistent across Google and Brave', () => {
+        const expected = [
+            'site:tiktok.com/@ "10K" "followers"',
+            'site:tiktok.com/@ "followers" -verified -official',
+            'site:tiktok.com/@ "creator" "followers"',
+            'site:tiktok.com/@ "20K" "followers"',
+            'site:tiktok.com/@ "30K" "followers"',
+            'site:tiktok.com/@ "100K" "followers"',
+        ];
+        expect(Array.from({ length: 6 }, (_, variant) => buildQuery({ keyword: CRITERIA_QUERY, variant }))).toEqual(expected);
+        expect(Array.from({ length: 6 }, (_, variant) => buildBraveQuery({ keyword: CRITERIA_QUERY, variant }))).toEqual(expected);
     });
 });
 
