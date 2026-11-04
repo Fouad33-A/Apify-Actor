@@ -1,0 +1,27 @@
+name: Free creator dataset diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sample-public-dataset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check out diagnostic branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/tiktok-creator-search-nov3
+      - name: Sample public dataset without Apify
+        run: node actors/tiktok-creator-search/scripts/check-free-dataset.mjs
+      - name: Upload diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: free-creator-dataset
+          path: diagnostics/free-dataset-discovery.json
+          retention-days: 7
+          if-no-files-found: warn
