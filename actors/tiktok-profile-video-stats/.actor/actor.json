@@ -1,0 +1,78 @@
+{
+  "actorSpecification": 1,
+  "name": "tiktok-profile-video-stats",
+  "title": "TikTok Profile and Video Stats",
+  "version": "0.1",
+  "buildTag": "latest",
+  "minMemoryMbytes": 256,
+  "maxMemoryMbytes": 1024,
+  "dockerfile": "../Dockerfile",
+  "input": "./input_schema.json",
+  "storages": {
+    "dataset": {
+      "actorSpecification": 1,
+      "views": {
+        "videos": {
+          "title": "Videos",
+          "transformation": {
+            "fields": [
+              "type",
+              "name",
+              "id",
+              "text",
+              "playCount",
+              "diggCount",
+              "commentCount",
+              "collectCount",
+              "shareCount",
+              "createTimeISO",
+              "webVideoUrl",
+              "errorCode"
+            ]
+          },
+          "display": {
+            "component": "table",
+            "properties": {
+              "type": {
+                "label": "Type",
+                "format": "text"
+              },
+              "name": {
+                "label": "Creator",
+                "format": "text"
+              },
+              "text": {
+                "label": "Caption",
+                "format": "text"
+              },
+              "playCount": {
+                "label": "Views",
+                "format": "number"
+              },
+              "diggCount": {
+                "label": "Likes",
+                "format": "number"
+              },
+              "commentCount": {
+                "label": "Comments",
+                "format": "number"
+              },
+              "collectCount": {
+                "label": "Saves",
+                "format": "number"
+              },
+              "shareCount": {
+                "label": "Shares",
+                "format": "number"
+              },
+              "webVideoUrl": {
+                "label": "Link",
+                "format": "link"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
