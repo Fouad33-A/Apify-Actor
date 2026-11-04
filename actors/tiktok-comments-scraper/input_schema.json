@@ -19,9 +19,7 @@
           "videoUrls": {
             "type": "array",
             "items": {
-              "type": "string",
-              "title": "Video URL",
-              "description": "A direct TikTok video URL."
+              "type": "string"
             },
             "title": "Creator video URLs",
             "description": "TikTok video URLs belonging to this creator."
@@ -40,9 +38,7 @@
       "type": "array",
       "editor": "stringList",
       "items": {
-        "type": "string",
-        "title": "Video URL",
-        "description": "A direct TikTok video URL."
+        "type": "string"
       }
     },
     "postUrls": {
@@ -94,9 +90,7 @@
       "type": "array",
       "editor": "stringList",
       "items": {
-        "type": "string",
-        "title": "Language code",
-        "description": "Language code to include in question detection."
+        "type": "string"
       }
     }
   }
