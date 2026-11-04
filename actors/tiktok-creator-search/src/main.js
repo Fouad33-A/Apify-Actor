@@ -430,7 +430,7 @@ export async function runSearch({
                 old.videoUrls = [...new Set([...(old.videoUrls ?? []), ...(c.videoUrls ?? [])])].slice(0, 5);
             }
         }
-        const newlyFound = [...seen.values()].filter((c) => c.queries?.includes(keyword) && !processed.has(c.handle));
+        const newlyFound = [...seen.values()].filter((c) => c.queries?.includes(keyword) && !processed.has(c.handle) && !known.has(c.handle));
         log.info(`[${RUNTIME_FIX_VERSION}] "${keyword}": ${candidates.length} handle(s) found; processing ${newlyFound.length} new handle(s) before the next search.`);
         await processCandidates(newlyFound);
         // A search is complete only when every new candidate was handled.
