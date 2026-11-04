@@ -18,10 +18,10 @@ try {
   const maxCommentsPerPost = Math.max(1, Math.min(1000, Math.floor(Number(input.maxCommentsPerPost) || 100)));
   const timeoutSecs = Math.max(60, Math.min(3600, Math.floor(Number(input.childTimeoutSecs) || 900)));
   const searchRows = await runChild('creatorSearch', ACTOR_IDS.creatorSearch, {
-    ...(input.searchInput ?? {}), ...(Array.isArray(input.keywords) ? {keywords: input.keywords} : {}), ...(Array.isArray(input.hashtags) ? {hashtags: input.hashtags} : {}), maxCreators, onlyPassing: true, enrichProfiles: true, profileActor: ACTOR_IDS.profileStats,
+    ...(input.searchInput ?? {}), ...(Array.isArray(input.keywords) ? {keywords: input.keywords} : {}), ...(Array.isArray(input.hashtags) ? {hashtags: input.hashtags} : {}), maxCreators: Math.max(5, maxCreators), onlyPassing: true, enrichProfiles: true, profileActor: ACTOR_IDS.profileStats,
   }, timeoutSecs);
   const creators = selectCreators(searchRows, maxCreators);
-  if (!creators.length) throw new Error('No confirmed qualifying creators; stopping before downstream runs.');
+  if (!creators.length) { const summary = searchRows.find(r => r?.recordType === 'RUN_SUMMARY'); log.warning('Creator Search diagnostic: ' + JSON.stringify({found: summary?.handlesFound, processed: summary?.creatorsProcessed, returned: summary?.returned, failures: summary?.filterFailureCounts ?? summary?.failureCounts, activeFilters: summary?.activeFilters, stoppedEarly: summary?.stoppedEarly})); throw new Error('No confirmed qualifying creators; stopping before downstream runs.'); }
   const profileRows = await runChild('profileStats', ACTOR_IDS.profileStats, {
     usernames: creators, mode: 'full', outputRows: 'summaryOnly', videosPerProfile: 10, maxItems: Math.max(200, creators.length * 2),
   }, timeoutSecs);
