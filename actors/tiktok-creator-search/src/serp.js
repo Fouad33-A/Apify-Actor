@@ -429,10 +429,15 @@ export async function discoverCreators({
                     await engine.gate();
                     const remainingMs = deadline - Date.now();
                     if (remainingMs <= 0) break;
-                    page = await Promise.race([
-                        engine.fetch({ url: engine.urlFor(query, p), timeoutMs: Math.min(12000, remainingMs) }),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('search deadline exceeded')), remainingMs)),
-                    ]);
+                    let deadlineTimer;
+                    try {
+                        page = await Promise.race([
+                            engine.fetch({ url: engine.urlFor(query, p), timeoutMs: Math.min(12000, remainingMs) }),
+                            new Promise((_, reject) => { deadlineTimer = setTimeout(() => reject(new Error('search deadline exceeded')), remainingMs); }),
+                        ]);
+                    } finally {
+                        clearTimeout(deadlineTimer);
+                    }
                     break;
                 } catch (err) {
                     if (err?.rateLimited) {
