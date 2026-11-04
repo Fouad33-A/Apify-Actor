@@ -5,6 +5,9 @@ assert.deepEqual(selectCreators([{username:'Alice',passesFilters:true},{username
 const v = id => ({videoUrl:'https://www.tiktok.com/@alice/video/' + id});
 const handoff = prepareCommentsInput([{rowType:'summary',username:'alice',topVideosByComments:[v(111),v(222),v(222)]}]);
 assert.equal(handoff.videoUrls.length,2);
+const tenVideos = prepareCommentsInput([{rowType:'summary',username:'alice',topVideosByComments:Array.from({length:10},(_,i)=>v(100+i))}]);
+assert.equal(tenVideos.videoUrls.length,10);
+assert.equal(prepareCommentsInput([{rowType:'summary',username:'alice',topVideosByComments:Array.from({length:10},(_,i)=>v(100+i))}],100,5).videoUrls.length,5);
 assert.equal(handoff.minAskers,3);
 assert.equal(handoff.minVideos,2);
 const result = summarize({creators:['alice'],commentsInput:handoff,childRuns:{},commentRows:[{recordType:'REPEATED_QUESTION',askerCount:3,videoCount:2},{recordType:'REPEATED_QUESTION',askerCount:2,videoCount:2}]});
