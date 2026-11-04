@@ -326,23 +326,22 @@ export function makeGate(paceMs) {
 }
 
 export function defaultEngines({ serpProxyUrl, serpFetch = fetchSerpPage, braveFetch = fetchBravePage } = {}) {
-    const engines = [];
-    if (serpProxyUrl) {
-        engines.push({
-            name: 'google',
-            urlFor: googleUrl,
-            queryFor: buildQuery,
-            fetch: ({ url, timeoutMs }) => serpFetch({ url, proxyUrl: serpProxyUrl, timeoutMs }),
-            paceMs: 0,
-            backoffMs: 0,
-        });
-    }
-    engines.push({
+    // Brave has produced the strongest candidate pools; try it before the
+    // frequently empty/slow Google SERP proxy.
+    const engines = [{
         name: 'brave',
         urlFor: braveUrl,
         queryFor: buildBraveQuery,
         fetch: ({ url }) => braveFetch({ url }),
         paceMs: 5000,
+        backoffMs: 0,
+    }];
+    if (serpProxyUrl) engines.push({
+        name: 'google',
+        urlFor: googleUrl,
+        queryFor: buildQuery,
+        fetch: ({ url, timeoutMs }) => serpFetch({ url, proxyUrl: serpProxyUrl, timeoutMs }),
+        paceMs: 0,
         backoffMs: 0,
     });
     return engines;
@@ -480,7 +479,7 @@ export async function discoverCreators({
         for (const engine of engines) {
             // Avoid Brave's rate-limit path when Google already produced verifiable candidates.
             if (entry.keyword === CRITERIA_QUERY && engine.name === 'brave' && handlesFor(entry.keyword) > 0) return;
-            if (handlesFor(entry.keyword) >= (entry.keyword === CRITERIA_QUERY ? PER_KEYWORD_TARGET : 30)) return;
+            if (handlesFor(entry.keyword) >= (entry.keyword === CRITERIA_QUERY ? PER_KEYWORD_TARGET : 15)) return;
             for (let variant = 0; variant < (entry.keyword === CRITERIA_QUERY ? QUERY_VARIANTS : 3) && timeLeft() && !engine.blocked; variant += 1) {
                 const query = engine.queryFor({ keyword: entry.keyword, variant, modifiers });
                 const startedMs = Date.now();
