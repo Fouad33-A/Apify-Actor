@@ -4,7 +4,7 @@ import { CookieJar } from 'tough-cookie';
 
 await Actor.init();
 
-const VERSION = '2026-11-04-v5.1';
+const VERSION = '2026-11-05-v5.2';
 const input = (await Actor.getInput()) ?? {};
 const ALLOWED_KEYS = new Set(['postUrls', 'videoUrls', 'maxCommentsPerPost', 'includeReplies', 'minAskers', 'minVideos', 'languages', 'creatorVideos']);
 const unknownKeys = Object.keys(input).filter((key) => !ALLOWED_KEYS.has(key));
@@ -134,6 +134,7 @@ const TOKEN_ALIASES = new Map([
     ['buying','buy'],['bought','buy'],['buys','buy'],['debts','debt'],['loans','loan'],['weeks','week'],
     ['months','month'],['accounts','account'],['savings','saving'],['saved','save'],['paying','pay'],['paid','pay'],
     ['payments','payment'],['liking','like'],['liked','like'],['works','work'],['working','work'],['hsas','hsa'],
+    ['pulldowns','pulldown'],['pull-downs','pulldown'],['lats','lat'],['activating','activate'],['activation','activate'],['engaging','engage'],
 ]);
 
 function creatorFromVideoUrl(videoUrl) {
@@ -147,6 +148,13 @@ function clusterTokens(text) {
     const tokens = normalized.split(' ')
         .map((token) => TOKEN_ALIASES.get(token) ?? token)
         .filter((token) => token.length > 1 && !CLUSTER_STOPWORDS.has(token));
+    // Narrow semantic equivalence for exercise-muscle activation questions.
+    // Keep other subjects and question intents separate to avoid false positives.
+    const hasPulldown = tokens.includes('pulldown');
+    const activation = tokens.some(t => ['feel', 'activate', 'engage', 'target'].includes(t));
+    if (hasPulldown && activation && tokens.some(t => ['lat', 'back'].includes(t))) {
+        return ['exercise:pulldown', 'muscle:lat', 'intent:activation'];
+    }
     return [...new Set(tokens)].sort();
 }
 
@@ -177,7 +185,8 @@ function questionClusterKey(text) {
     const tokens = clusterTokens(text);
     const topics = tokens.filter(isTopicToken);
     if (tokens.length < 3 || topics.length < 2) return `exact:${normalized}`;
-    return `token:${questionType(text)}:${tokens.join('|')}`;
+    const intent = tokens.includes('intent:activation') ? 'activation' : questionType(text);
+    return `token:${intent}:${tokens.join('|')}`;
 }
 
 function buildRepeatedQuestions(questionRows, minDistinctAskers = 3, minDistinctVideos = 2) {
