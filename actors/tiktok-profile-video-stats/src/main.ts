@@ -190,14 +190,14 @@ const PAGE_MAX_RETRIES = 2;
 const EMBED_MAX_RETRIES = 3;
 
 const EMBED_RETRY_DELAYS_MS = [
-    5_000,
-    10_000,
-    20_000,
+    15_000,
+    30_000,
+    60_000,
 ];
 
 const DEFAULT_RETRY_DELAYS_MS = [
-    5_000,
-    10_000,
+    15_000,
+    30_000,
 ];
 
 const VIDEO_PARSE_ATTEMPTS = 3;
@@ -227,6 +227,10 @@ const HIGHLIGHT_AGE_RATIO = 3;
  * request.
  */
 let globalNextAllowedRequestAt = 0;
+const MIN_REQUEST_SPACING_MS = 1_500;
+let consecutive429 = 0;
+let rateLimitCircuitOpen = false;
+const MAX_CONSECUTIVE_429 = 2;
 
 /*
  * Small promise-chain mutex so two workers cannot simultaneously pass the
@@ -261,6 +265,11 @@ function activateGlobalCooldown(
         );
 
     totalRateLimitResponses += 1;
+    consecutive429 += 1;
+    if (consecutive429 >= MAX_CONSECUTIVE_429) {
+        rateLimitCircuitOpen = true;
+        log.warning('[RATE LIMIT] Circuit opened after repeated 429 responses. Deferring remaining requests until a later run.');
+    }
 
     if (
         globalNextAllowedRequestAt >
@@ -294,7 +303,9 @@ async function waitForGlobalRequestGate(): Promise<void> {
                 globalNextAllowedRequestAt -
                 Date.now();
 
+            if (rateLimitCircuitOpen) return;
             if (waitMs <= 0) {
+                globalNextAllowedRequestAt = Date.now() + MIN_REQUEST_SPACING_MS;
                 return;
             }
 
@@ -641,7 +652,15 @@ async function fetchText(
          * Every TikTok request, regardless of worker, passes through the same
          * shared cooldown gate.
          */
+        if (rateLimitCircuitOpen) {
+            return { ok: false, status: 429, finalUrl: null, text: null,
+                error: `${label}: rate-limited; deferred until a later run` };
+        }
         await waitForGlobalRequestGate();
+        if (rateLimitCircuitOpen) {
+            return { ok: false, status: 429, finalUrl: null, text: null,
+                error: `${label}: rate-limited; deferred until a later run` };
+        }
 
         const controller =
             new AbortController();
@@ -698,41 +717,28 @@ async function fetchText(
              * this worker, because that allowed the second worker to continue
              * hitting TikTok during the cooldown in the previous build.
              */
-            if (
-                response.status === 429
-            ) {
-                if (
-                    attempt <
-                    maxRetries
-                ) {
-                    const delay =
-                        retryDelaysMs[
-                            Math.min(
-                                attempt,
-                                retryDelaysMs.length - 1,
-                            )
-                        ] ??
-                        20_000;
-
-                    activateGlobalCooldown(
-                        delay,
-                        url,
-                    );
-
-                    continue;
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('retry-after');
+                const seconds = retryAfter ? Number(retryAfter) : NaN;
+                const dateDelay = retryAfter && !Number.isFinite(seconds)
+                    ? Date.parse(retryAfter) - Date.now() : NaN;
+                const serverDelay = Number.isFinite(seconds) ? seconds * 1000 : dateDelay;
+                const fallbackDelay = retryDelaysMs[
+                    Math.min(attempt, retryDelaysMs.length - 1)
+                ] ?? 30_000;
+                const delay = Number.isFinite(serverDelay) && serverDelay > 0
+                    ? Math.min(Math.max(serverDelay, fallbackDelay), 120_000)
+                    : fallbackDelay;
+                activateGlobalCooldown(delay, url);
+                if (rateLimitCircuitOpen || attempt >= maxRetries) {
+                    return {
+                        ok: false, status: 429, finalUrl: response.url, text,
+                        error: `${label}: rate-limited; retry in a later run`,
+                    };
                 }
-
-                return {
-                    ok: false,
-                    status:
-                        response.status,
-                    finalUrl:
-                        response.url,
-                    text,
-                    error:
-                        `${label}: TikTok returned 429 after ${attempt + 1} attempt(s)`,
-                };
+                continue;
             }
+            consecutive429 = 0;
 
             /*
              * 5xx retries are local transport/server retries. We don't trigger
@@ -2039,6 +2045,7 @@ async function fetchAndParseVideo(
                 `HTTP ${response.status ?? 'unknown'}`;
         }
 
+        if (response.status === 429 || rateLimitCircuitOpen) break;
         if (
             parseAttempt <
             VIDEO_PARSE_ATTEMPTS
@@ -3456,6 +3463,7 @@ async function processHandle(
             );
         }
 
+        if (rateLimitCircuitOpen) break;
         await sleep(100);
     }
 
@@ -3750,9 +3758,9 @@ try {
     const concurrency =
         clampInt(
             input.concurrency,
-            2,
             1,
-            2,
+            1,
+            1,
         );
 
     const rawRunMaxChargeUsd =
@@ -3797,11 +3805,9 @@ try {
                     sharedRateLimitCooldown:
                         true,
 
-                    embedRetryScheduleSeconds: [
-                        5,
-                        10,
-                        20,
-                    ],
+                    embedRetryScheduleSeconds: [15, 30, 60],
+                    minRequestSpacingMs: MIN_REQUEST_SPACING_MS,
+                    maxConsecutive429: MAX_CONSECUTIVE_429,
 
                     externalPaidServices:
                         false,
@@ -4014,6 +4020,8 @@ try {
 
         globalCooldownsActivated:
             totalGlobalCooldowns,
+        rateLimitCircuitOpen,
+        deferredDueToRateLimit: rateLimitCircuitOpen,
 
         externalPaidServicesUsed:
             false,
