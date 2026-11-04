@@ -13,22 +13,26 @@
         "properties": {
           "creator": {
             "type": "string",
-            "title": "Creator username"
+            "title": "Creator username",
+            "description": "TikTok username without the @ prefix."
           },
           "videoUrls": {
             "type": "array",
             "items": {
               "type": "string",
-              "title": "Video URL"
+              "title": "Video URL",
+              "description": "A direct TikTok video URL."
             },
-            "title": "Creator video URLs"
+            "title": "Creator video URLs",
+            "description": "TikTok video URLs belonging to this creator."
           }
         },
         "required": [
           "creator",
           "videoUrls"
         ],
-        "title": "Creator video group"
+        "title": "Creator video group",
+        "description": "One creator and the TikTok videos to analyze for that creator."
       }
     },
     "videoUrls": {
@@ -37,7 +41,8 @@
       "editor": "stringList",
       "items": {
         "type": "string",
-        "title": "Video URL"
+        "title": "Video URL",
+        "description": "A direct TikTok video URL."
       }
     },
     "postUrls": {
@@ -49,13 +54,15 @@
         "properties": {
           "url": {
             "type": "string",
-            "title": "Post URL"
+            "title": "Post URL",
+            "description": "Direct URL of a TikTok post."
           }
         },
         "required": [
           "url"
         ],
-        "title": "Post URL entry"
+        "title": "Post URL entry",
+        "description": "A TikTok post URL entry."
       }
     },
     "maxCommentsPerPost": {
@@ -88,7 +95,8 @@
       "editor": "stringList",
       "items": {
         "type": "string",
-        "title": "Language code"
+        "title": "Language code",
+        "description": "Language code to include in question detection."
       }
     }
   }
