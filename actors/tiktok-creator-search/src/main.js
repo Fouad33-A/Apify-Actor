@@ -343,6 +343,8 @@ export async function runSearch({
         const fresh = orderCandidates(candidates.filter((c) => !processed.has(c.handle) && !known.has(c.handle)), input)
             .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
         for (let i = 0; i < fresh.length && !outOfTime(); i += BATCH) {
+            // Preserve unscreened handles for a later run rather than treating the call cap as a profile failure.
+            if (input.enrichProfiles && profileCalls >= 2) break;
             if (input.enrichProfiles && secondsLeft() < 130) break; // Actor.call may wait up to 120 seconds
             const rawBatch = fresh.slice(i, i + BATCH);
             const enrichable = [];
@@ -441,7 +443,7 @@ export async function runSearch({
     for (let searchIndex = nextSearchIndex; searchIndex < (explicitCandidateFeed || input.discoverySource === 'creativeCenter' ? 0 : input.searches.length); searchIndex += 1) {
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
-        if (input.enrichProfiles && secondsLeft() < 130) break;
+        if (input.enrichProfiles && (profileCalls >= 2 || secondsLeft() < 130)) break;
         const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.criteriaOnly ? 45 : input.maxSearchSeconds, Math.floor(secondsLeft() - (input.enrichProfiles ? 130 : 25))));
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
