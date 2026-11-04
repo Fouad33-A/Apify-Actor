@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-04-v8';
+const RUNTIME_FIX_VERSION = '2026-11-04-v9';
 const BATCH = 5; // bounded child calls leave room for a clean parent summary
 
 const DEFAULTS = {
@@ -98,19 +98,22 @@ export function readInput(raw) {
     };
 }
 
-// Candidates in the order they are enriched: a search-snippet follower figure inside the wanted range first, unknown
-// next, clearly outside last (only a hint: nothing is dropped because of it), then profile-page hits, then how often seen.
+// Prioritize promising individual creators without excluding any candidate based on its name.
+// Follower hints are unverified search evidence; final acceptance always uses Profile Stats.
 export function orderCandidates(candidates, { minFollowers = null, maxFollowers = null } = {}) {
     const fit = (c) => {
         const n = parseFollowerHint(c.hint);
         if (n == null || (minFollowers == null && maxFollowers == null)) return 1;
         return (minFollowers != null && n < minFollowers) || (maxFollowers != null && n > maxFollowers) ? 2 : 0;
     };
+    // Soft tie-breaker only: an app/service-looking handle may still be a legitimate creator.
+    const serviceLike = (c) => /(?:^|[._-])(?:app|officialapp|software|platform|store|shop)(?:$|[._-])/i.test(c.handle ?? '') ? 1 : 0;
     return [...candidates].sort(
         (a, b) =>
             fit(a) - fit(b) ||
             Number(b.profileHit) - Number(a.profileHit) ||
-            b.timesSeen - a.timesSeen ||
+            serviceLike(a) - serviceLike(b) ||
+            (Number(b.timesSeen) || 0) - (Number(a.timesSeen) || 0) ||
             a.handle.localeCompare(b.handle),
     );
 }
@@ -294,6 +297,7 @@ export async function runSearch({
     const emitted = new Set();
     const rows = [];
     let enrichNote = null;
+    let rateLimitedOrUnavailable = 0;
     let skippedByHint = 0;
     let skippedKnownHandles = 0;
     const skippedKnown = new Set();
@@ -400,6 +404,14 @@ export async function runSearch({
                     } catch { /* unknown remains null */ }
                 }
                 const row = makeRow(c, profile, enrichNote);
+                if (profile?.status !== 'ok' || profile?.medianPlays == null || profile?.daysSinceLastPost == null) {
+                    row.dataAvailability = 'incomplete';
+                    row.dataAvailabilityReason = !profile ? 'profile not retrieved' : profile.status !== 'ok' ? 'profile retrieval failed' : 'video metrics or latest-post date unavailable';
+                    rateLimitedOrUnavailable += 1;
+                } else {
+                    row.dataAvailability = 'complete';
+                    row.dataAvailabilityReason = null;
+                }
                 if (profile?.__regionSource) row.regionSource = profile.__regionSource;
                 rows.push(row); countRow(row, profile); await emitRow(row); processed.add(c.handle);
             }
@@ -494,7 +506,8 @@ export async function runSearch({
         };
     });
     const summary = {
-        screeningDecisions: rows.map((r) => ({ handle: r.handle, passesFilters: r.passesFilters, enrichStatus: r.enrichStatus, filterFailures: r.filterFailures })),
+        screeningDecisions: rows.map((r) => ({ handle: r.handle, passesFilters: r.passesFilters, enrichStatus: r.enrichStatus, filterFailures: r.filterFailures, dataAvailability: r.dataAvailability ?? 'unknown', dataAvailabilityReason: r.dataAvailabilityReason ?? null })),
+        incompleteDataProfiles: rateLimitedOrUnavailable,
         activeFilters: { minFollowers: input.minFollowers, maxFollowers: input.maxFollowers, minMedianViews: input.minMedianViews, maxDaysSinceLastPost: input.maxDaysSinceLastPost, excludeVerified: input.excludeVerified },
         recordType: 'RUN_SUMMARY', version: RUNTIME_FIX_VERSION, startedAt: started, finishedAt: new Date(now()).toISOString(),
         searches: input.searches, keywordsDone: searchedKeywords, keywordsRequested: input.searches.length, keywordsCompleted: searchedKeywords.length,
