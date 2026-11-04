@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-04-v9';
+const RUNTIME_FIX_VERSION = '2026-11-04-v10';
 const BATCH = 5; // bounded child calls leave room for a clean parent summary
 
 const DEFAULTS = {
@@ -435,7 +435,8 @@ export async function runSearch({
     for (let searchIndex = nextSearchIndex; searchIndex < (explicitCandidateFeed || input.discoverySource === 'creativeCenter' ? 0 : input.searches.length); searchIndex += 1) {
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
-        if (input.enrichProfiles && (profileCalls >= 2 || secondsLeft() < 130)) break;
+        // Reserve time for enrichment, but discover across multiple topics before screening.
+        if (input.enrichProfiles && secondsLeft() < 180) break;
         const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.criteriaOnly ? 45 : input.maxSearchSeconds, Math.floor(secondsLeft() - (input.enrichProfiles ? 130 : 25))));
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
@@ -461,13 +462,18 @@ export async function runSearch({
             }
         }
         const newlyFound = [...seen.values()].filter((c) => c.queries?.includes(keyword) && !processed.has(c.handle) && !known.has(c.handle));
-        log.info(`[${RUNTIME_FIX_VERSION}] "${keyword}": ${candidates.length} handle(s) found; processing ${newlyFound.length} new handle(s) before the next search.`);
-        await processCandidates(newlyFound);
-        // A search is complete only when every new candidate was handled.
-        // If the runtime budget ran out, repeat this search after resuming; already handled candidates are excluded.
-        const allHandled = newlyFound.every((c) => processed.has(c.handle)) && !localReport.stoppedOnTime;
-        if (allHandled) nextSearchIndex = searchIndex + 1;
+        log.info(`[${RUNTIME_FIX_VERSION}] "${keyword}": ${candidates.length} handle(s) found; queued ${newlyFound.length} candidate(s) for cross-query ranking.`);
+        // Search completion means discovery completed, not that every candidate was enriched.
+        if (!localReport.stoppedOnTime) nextSearchIndex = searchIndex + 1;
         else break;
+    }
+
+    // Rank all discovered candidates together; otherwise the first hashtag consumes
+    // every enrichment slot and later keywords never get a fair opportunity.
+    if (!explicitCandidateFeed && input.discoverySource !== 'creativeCenter' && !outOfTime()) {
+        const pool = [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle));
+        log.info(`[${RUNTIME_FIX_VERSION}] Cross-query candidate pool: ${pool.length} handles from ${report.queries.length} search attempts; enriching best-ranked candidates.`);
+        await processCandidates(pool);
     }
 
     // Rank zero-pass diagnostics by normalized distance to the requested numeric bounds, not by follower size.
