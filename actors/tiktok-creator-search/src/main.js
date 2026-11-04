@@ -219,7 +219,7 @@ export async function callProfileActor(
             maxItems: usernames.length * perCreator + 5,
             concurrency: 2,
         },
-        { waitSecs: Math.max(waitSecs, 120) },
+        { waitSecs: Math.max(waitSecs, 120), maxTotalChargeUsd: 0.20, restartOnError: false },
     );
     if (!run?.defaultDatasetId) throw new Error(`Run of ${actorId} returned no dataset (status ${run?.status})`);
     const terminal = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT']);
