@@ -6,7 +6,7 @@ const childRuns = {};
 let exitCode = 0;
 async function runChild(name, actorId, childInput, timeoutSecs) {
   log.info('Starting ' + name + ' (' + actorId + ')');
-  const run = await Actor.call(actorId, childInput, { waitSecs: timeoutSecs });
+  const run = await Actor.call(actorId, childInput, { waitSecs: timeoutSecs, timeout: timeoutSecs, maxTotalChargeUsd: 1, restartOnError: false });
   if (run?.status !== 'SUCCEEDED' || !run.defaultDatasetId) throw new Error(name + ' failed: ' + (run?.status ?? 'unknown') + ' (run ' + (run?.id ?? 'unknown') + ')');
   childRuns[name] = {actorId, runId: run.id, datasetId: run.defaultDatasetId, status: run.status};
   const data = await Actor.apifyClient.dataset(run.defaultDatasetId).listItems({limit: 5000});
