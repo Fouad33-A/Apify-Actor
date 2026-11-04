@@ -24,9 +24,11 @@
 // text is exactly that one comment's block (username, time-ago, body,
 // like count, Reply/See translation controls).
 
-import { Actor, log } from "apify";
-import { makeProfileRow, makePostRow, makeCommentRow } from "../schema.js";
-import { checkPageForRateLimit } from "../errors.js";
+import { Actor, log } from 'apify';
+
+import { saveDiagnostics } from '../diagnostics.js';
+import { assertNotRateLimited } from '../errors.js';
+import { makeCommentRow, makePostRow, makeProfileRow, parseAbbrevCount } from '../schema.js';
 
 // TEMP DIAGNOSTIC (2026-09-28): the live-DOM extraction below was verified
 // by hand in a real logged-in Chrome session, but the first Apify test run
@@ -38,66 +40,67 @@ import { checkPageForRateLimit } from "../errors.js";
 // actor's key-value store on that failure path so it can be inspected
 // without guessing. Safe to remove once the real cause is confirmed.
 async function saveDebugArtifact(page, html, tag, meta) {
-  try {
-    await Actor.setValue(`DEBUG_HTML_${tag}`, html, { contentType: "text/html; charset=utf-8" });
-  } catch (err) {
-    log.warning(`Failed to save DEBUG_HTML_${tag}: ${err?.message}`);
-  }
-  try {
-    // Actor.setValue only auto-serializes to JSON when no explicit
-    // contentType is given; with one set (as here, so the KV store item
-    // shows as JSON rather than octet-stream), it requires a
-    // String/Buffer/Stream - passing the raw object throws. Stringify it
-    // ourselves. (Bug found 2026-09-28: every prior run logged "Failed to
-    // save DEBUG_META_*" for exactly this reason - harmless, since
-    // log.info right after always carried the same data, but worth fixing
-    // since the file dump is more convenient to browse in the KV store UI.)
-    await Actor.setValue(`DEBUG_META_${tag}`, JSON.stringify(meta, null, 2), {
-      contentType: "application/json; charset=utf-8",
-    });
-    log.info(`DEBUG_META_${tag}: ${JSON.stringify(meta)}`);
-  } catch (err) {
-    log.warning(`Failed to save DEBUG_META_${tag}: ${err?.message}`);
-  }
-  try {
-    // Bounded timeout + no waitForFonts stall: screenshot is best-effort only,
-    // must never eat the run's time/cost budget the way an unbounded default
-    // (which waits on document.fonts.ready) can on a stuck/never-idle page.
-    const shot = await page.screenshot({ fullPage: false, timeout: 8_000 });
-    await Actor.setValue(`DEBUG_SHOT_${tag}`, shot, { contentType: "image/png" });
-    log.info(`Saved DEBUG_SHOT_${tag} to the key-value store`);
-  } catch (err) {
-    log.warning(`Failed to save DEBUG_SHOT_${tag}: ${err?.message}`);
-  }
+    await saveDiagnostics(page, html, tag, meta);
+    try {
+        await Actor.setValue(`DEBUG_HTML_${tag}`, html, { contentType: 'text/html; charset=utf-8' });
+    } catch (err) {
+        log.warning(`Failed to save DEBUG_HTML_${tag}: ${err?.message}`);
+    }
+    try {
+        // Actor.setValue only auto-serializes to JSON when no explicit
+        // contentType is given; with one set (as here, so the KV store item
+        // shows as JSON rather than octet-stream), it requires a
+        // String/Buffer/Stream - passing the raw object throws. Stringify it
+        // ourselves. (Bug found 2026-09-28: every prior run logged "Failed to
+        // save DEBUG_META_*" for exactly this reason - harmless, since
+        // log.info right after always carried the same data, but worth fixing
+        // since the file dump is more convenient to browse in the KV store UI.)
+        await Actor.setValue(`DEBUG_META_${tag}`, JSON.stringify(meta, null, 2), {
+            contentType: 'application/json; charset=utf-8',
+        });
+        log.info(`DEBUG_META_${tag}: ${JSON.stringify(meta)}`);
+    } catch (err) {
+        log.warning(`Failed to save DEBUG_META_${tag}: ${err?.message}`);
+    }
+    try {
+        // Bounded timeout + no waitForFonts stall: screenshot is best-effort only,
+        // must never eat the run's time/cost budget the way an unbounded default
+        // (which waits on document.fonts.ready) can on a stuck/never-idle page.
+        const shot = await page.screenshot({ fullPage: false, timeout: 8_000 });
+        await Actor.setValue(`DEBUG_SHOT_${tag}`, shot, { contentType: 'image/png' });
+        log.info(`Saved DEBUG_SHOT_${tag} to the key-value store`);
+    } catch (err) {
+        log.warning(`Failed to save DEBUG_SHOT_${tag}: ${err?.message}`);
+    }
 }
 
-const DOMAIN = "www.instagram.com";
+const DOMAIN = 'www.instagram.com';
 
 // ---- legacy JSON-blob extraction (kept as a harmless fallback in case
 // Instagram brings the old shape back for some accounts/builds) ----
-function extractProfileJson(html) {
-  const scriptRe = /<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/g;
-  let match;
-  while ((match = scriptRe.exec(html)) !== null) {
-    const chunk = match[1];
-    if (chunk.includes("edge_followed_by") || chunk.includes("edge_owner_to_timeline_media")) {
-      try {
-        return JSON.parse(chunk);
-      } catch {
-        // not valid standalone JSON (some blocks are wrapped) - fall through
-      }
+export function extractProfileJson(html) {
+    const scriptRe = /<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/g;
+    let match;
+    while ((match = scriptRe.exec(html)) !== null) {
+        const chunk = match[1];
+        if (chunk.includes('edge_followed_by') || chunk.includes('edge_owner_to_timeline_media')) {
+            try {
+                return JSON.parse(chunk);
+            } catch {
+                // not valid standalone JSON (some blocks are wrapped) - fall through
+            }
+        }
     }
-  }
-  return null;
+    return null;
 }
 
-function findUserNode(json) {
-  if (!json) return null;
-  const candidates = [json?.graphql?.user, json?.data?.user, json?.user];
-  for (const c of candidates) {
-    if (c && (c.edge_followed_by || c.username)) return c;
-  }
-  return null;
+export function findUserNode(json) {
+    if (!json) return null;
+    const candidates = [json?.graphql?.user, json?.data?.user, json?.user];
+    for (const c of candidates) {
+        if (c && (c.edge_followed_by || c.username)) return c;
+    }
+    return null;
 }
 
 // ---- live-DOM extraction (primary path) ----
@@ -107,397 +110,714 @@ function findUserNode(json) {
 // external link(s) / verified badge - in that order, but located by regex
 // on each line rather than fixed indices, so a missing full name or an
 // extra line doesn't shift everything else out of place.
-function domExtractProfile() {
-  const header = document.querySelector("header");
-  if (!header) return null;
-
-  const rawLines = header.innerText.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (rawLines.length < 2) return null;
-
-  const statRe = /^([\d.,]+[KMB]?)\s*(posts|followers|following)$/i;
-  const statIdxs = [];
-  rawLines.forEach((l, i) => {
-    if (statRe.test(l)) statIdxs.push(i);
-  });
-  if (statIdxs.length === 0) return null; // not a real profile header - bail to caller's fallback logic
-
-  const firstStat = Math.min(...statIdxs);
-  const lastStat = Math.max(...statIdxs);
-
-  const usernameLine = rawLines[0];
-  const fullName = firstStat > 1 ? rawLines.slice(1, firstStat).join(" ").trim() || null : null;
-
-  const statValues = {};
-  for (const i of statIdxs) {
-    const m = rawLines[i].match(statRe);
-    statValues[m[2].toLowerCase()] = m[1];
-  }
-
-  function parseAbbrev(text) {
-    if (text == null) return null;
-    const t = String(text).replace(/,/g, "");
-    const m = t.match(/^([\d.]+)([KMB])?$/i);
-    if (!m) return null;
-    let n = parseFloat(m[1]);
-    const suf = (m[2] || "").toUpperCase();
-    if (suf === "K") n *= 1e3;
-    else if (suf === "M") n *= 1e6;
-    else if (suf === "B") n *= 1e9;
-    return Math.round(n);
-  }
-
-  // Prefer the exact figure from a title="12,345,678" attribute on the
-  // abbreviated span (Instagram puts the precise count there as a tooltip);
-  // fall back to parsing the visible abbreviated text.
-  function exactCount(displayText) {
-    if (displayText == null) return null;
-    const titled = [...header.querySelectorAll("[title]")];
-    for (const el of titled) {
-      const t = el.getAttribute("title");
-      if (t && /^[\d,]+$/.test(t) && el.textContent.trim() === displayText) {
-        return parseInt(t.replace(/,/g, ""), 10);
-      }
+// Runs in the page. Instagram cuts a long bio with "... more"; clicking it shows the rest (an e-mail is often at
+// the end). Returns true when something was clicked.
+export function domExpandBio() {
+    const header = document.querySelector('header');
+    if (!header) return false;
+    const isMore = (el) => /^(…|\.\.\.)?\s*more$/i.test((el.textContent || '').trim());
+    const leaf = [...header.querySelectorAll('span, div, button, a')].find(
+        (el) => el.children.length === 0 && isMore(el),
+    );
+    if (leaf) {
+        leaf.click();
+        return true;
     }
-    return parseAbbrev(displayText);
-  }
-
-  const postCount = exactCount(statValues["posts"]);
-  const followerCount = exactCount(statValues["followers"]);
-  const followingCount = exactCount(statValues["following"]);
-
-  // Bio: everything between the last stat line and either the external-link
-  // line ("...and N more") or a known button/control word.
-  const controlWords = new Set([
-    "follow",
-    "following",
-    "message",
-    "edit profile",
-    "contact",
-    "call",
-    "email",
-    "directions",
-    "view shop",
-  ]);
-  const bioLines = [];
-  for (let i = lastStat + 1; i < rawLines.length; i++) {
-    const l = rawLines[i];
-    if (/\sand\s\d+\smore$/i.test(l)) break;
-    if (controlWords.has(l.toLowerCase())) break;
-    if (l === usernameLine) break; // story-highlight owner tag repeats the username
-    bioLines.push(l);
-  }
-  const bio = bioLines.length ? bioLines.join("\n") : null;
-
-  // External link(s): real anchors first (excluding Instagram/Threads' own
-  // domains), falling back to the visible "domain.com and N more" text.
-  const extAnchors = [...header.querySelectorAll("a")].filter((a) => {
-    try {
-      const h = new URL(a.href);
-      return h.hostname && !/instagram\.com$/i.test(h.hostname) && !/threads\.(com|net)$/i.test(h.hostname);
-    } catch {
-      return false;
+    const button = [...header.querySelectorAll('[role="button"]')].find((el) =>
+        /(…|\.\.\.)\s*more$/i.test((el.innerText || '').trim().replace(/\s+/g, ' ')),
+    );
+    if (button) {
+        button.click();
+        return true;
     }
-  });
-  const externalLinks = [...new Set(extAnchors.map((a) => a.href))];
-  if (externalLinks.length === 0) {
-    const moreLine = rawLines.find((l) => /\sand\s\d+\smore$/i.test(l));
-    if (moreLine) {
-      const domainMatch = moreLine.match(/^(\S+)/);
-      if (domainMatch) externalLinks.push(domainMatch[1]);
-    }
-  }
+    return false;
+}
 
-  const verified = !!header.querySelector('svg[aria-label="Verified"]');
+export function domExtractProfile() {
+    const header = document.querySelector('header');
+    if (!header) return null;
 
-  // Post grid: URL + caption (from image alt text - Instagram's own
-  // accessibility description, which is the post caption verbatim on
-  // photo posts). No like/comment counts are exposed in the grid itself
-  // (only on hover, which isn't reflected in the static DOM) - those are
-  // fetched per-post by the caller when maxRecentPosts > 0.
-  const postAnchors = [...document.querySelectorAll('main a[href*="/p/"]')];
-  const seenHref = new Set();
-  const posts = [];
-  for (const a of postAnchors) {
-    const href = a.getAttribute("href");
-    if (!href || seenHref.has(href)) continue;
-    seenHref.add(href);
-    const img = a.querySelector("img");
-    posts.push({
-      href,
-      caption: img ? img.getAttribute("alt") : null,
-      isVideoOrCarousel: !!a.querySelector('svg[aria-label="Carousel"], svg[aria-label="Clip"], svg[aria-label="Reel"]'),
+    const rawLines = header.innerText
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    if (rawLines.length < 2) return null;
+
+    const statRe = /^([\d.,]+[KMB]?)\s*(posts|followers|following)$/i;
+    const statIdxs = [];
+    rawLines.forEach((l, i) => {
+        if (statRe.test(l)) statIdxs.push(i);
     });
-  }
+    if (statIdxs.length === 0) return null; // not a real profile header - bail to caller's fallback logic
 
-  return {
-    username: usernameLine,
-    fullName,
-    bio,
-    externalLinks,
-    followerCount,
-    followingCount,
-    postCount,
-    verified,
-    posts,
-  };
+    const firstStat = Math.min(...statIdxs);
+    const lastStat = Math.max(...statIdxs);
+
+    const usernameLine = rawLines[0];
+    let fullName = firstStat > 1 ? rawLines.slice(1, firstStat).join(' ').trim() || null : null;
+
+    const statValues = {};
+    for (const i of statIdxs) {
+        const m = rawLines[i].match(statRe);
+        statValues[m[2].toLowerCase()] = m[1];
+    }
+
+    function parseAbbrev(text) {
+        if (text == null) return null;
+        const t = String(text).replace(/,/g, '');
+        const m = t.match(/^([\d.]+)([KMB])?$/i);
+        if (!m) return null;
+        let n = parseFloat(m[1]);
+        const suf = (m[2] || '').toUpperCase();
+        if (suf === 'K') n *= 1e3;
+        else if (suf === 'M') n *= 1e6;
+        else if (suf === 'B') n *= 1e9;
+        return Math.round(n);
+    }
+
+    // Prefer the exact figure from a title="12,345,678" attribute on the
+    // abbreviated span (Instagram puts the precise count there as a tooltip);
+    // fall back to parsing the visible abbreviated text.
+    function exactCount(displayText) {
+        if (displayText == null) return null;
+        const titled = [...header.querySelectorAll('[title]')];
+        for (const el of titled) {
+            const t = el.getAttribute('title');
+            if (t && /^[\d,]+$/.test(t) && el.textContent.trim() === displayText) {
+                return parseInt(t.replace(/,/g, ''), 10);
+            }
+        }
+        return parseAbbrev(displayText);
+    }
+
+    // The header carries no posts stat on the current layout; the page metadata does ("4,937 Posts").
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    const ogPosts = ogDesc ? (ogDesc.content.match(/([\d,]+)\s+Posts/i) || [])[1] : null;
+    const postCount = exactCount(statValues.posts) ?? (ogPosts ? parseInt(ogPosts.replace(/,/g, ''), 10) : null);
+    const followerCount = exactCount(statValues.followers);
+    const followingCount = exactCount(statValues.following);
+
+    // Current layout (seen live 2026-09-29): AFTER the stats come the display name, a Threads link that
+    // repeats the username, the bio, then a link line ("www.nasa.gov and 4 more"); the story highlights
+    // (a role=menu block) follow. Older layouts put the display name BEFORE the stats. Parsed from the
+    // visible lines so tag nesting does not matter.
+    const menu = header.querySelector('[role="menu"]');
+    const menuLines = menu
+        ? menu.innerText
+              .split('\n')
+              .map((l) => l.trim())
+              .filter(Boolean)
+        : [];
+    let cutAt = rawLines.length;
+    if (menuLines.length) {
+        const j = rawLines.findIndex((l, i) => i > lastStat && l === menuLines[0]);
+        if (j !== -1) cutAt = j;
+    }
+    const after = rawLines.slice(lastStat + 1, cutAt);
+    const isLinkLine = (l) => /\sand\s\d+\smore$/i.test(l) || /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(l);
+    const controlWords = new Set([
+        'follow',
+        'following',
+        'message',
+        'edit profile',
+        'contact',
+        'call',
+        'email',
+        'directions',
+        'view shop',
+    ]);
+
+    let rest = after;
+    if (fullName === null) {
+        // display name comes right after the stats; skip the repeated username line
+        fullName = rest[0] ?? null;
+        rest = rest.slice(1);
+        if (rest[0] === usernameLine) rest = rest.slice(1);
+    }
+    const linkLine = rest.length && isLinkLine(rest[rest.length - 1]) ? rest[rest.length - 1] : null;
+    const bioCandidates = (linkLine ? rest.slice(0, -1) : rest).filter(
+        (l) => l !== usernameLine && !controlWords.has(l.toLowerCase()),
+    );
+    // A long bio is cut off with "..." and a separate "more" line; the "more"/"less" control is not bio text.
+    const bioTruncated = bioCandidates.some((l) => /^(…|\.\.\.)?\s*more$/i.test(l));
+    const bioLines = bioCandidates.filter((l) => !/^(…|\.\.\.)?\s*(more|less)$/i.test(l));
+    const bio = bioLines.length ? bioLines.join('\n') : null;
+
+    // External link(s): real anchors first (excluding Instagram/Threads' own
+    // domains), falling back to the visible "domain.com and N more" text.
+    const extAnchors = [...header.querySelectorAll('a')].filter((a) => {
+        try {
+            const h = new URL(a.href);
+            return h.hostname && !/instagram\.com$/i.test(h.hostname) && !/threads\.(com|net)$/i.test(h.hostname);
+        } catch {
+            return false;
+        }
+    });
+    const externalLinks = [...new Set(extAnchors.map((a) => a.href))];
+    if (externalLinks.length === 0) {
+        const moreLine = rawLines.find((l) => /\sand\s\d+\smore$/i.test(l));
+        if (moreLine) {
+            const domainMatch = moreLine.match(/^(\S+)/);
+            if (domainMatch) externalLinks.push(domainMatch[1]);
+        }
+    }
+    if (externalLinks.length === 0 && linkLine) {
+        const m = linkLine.match(/^(\S+?)(?:\s+and\s+\d+\s+more)?$/);
+        if (m && m[1].includes('.')) externalLinks.push(m[1]);
+    }
+
+    const verified = !!header.querySelector('svg[aria-label="Verified"]');
+
+    // Post grid: URL + caption (from image alt text - Instagram's own
+    // accessibility description, which is the post caption verbatim on
+    // photo posts). No like/comment counts are exposed in the grid itself
+    // (only on hover, which isn't reflected in the static DOM) - those are
+    // fetched per-post by the caller when maxRecentPosts > 0.
+    // Photo/carousel posts live under /p/, reels under /reel/: a reel-heavy profile's grid has no /p/ links at all.
+    const postAnchors = [...document.querySelectorAll('main a[href*="/p/"], main a[href*="/reel/"]')];
+    const seenHref = new Set();
+    const posts = [];
+    for (const a of postAnchors) {
+        const href = a.getAttribute('href');
+        if (!href || seenHref.has(href)) continue;
+        seenHref.add(href);
+        const img = a.querySelector('img');
+        posts.push({
+            href,
+            caption: img ? img.getAttribute('alt') : null,
+            isVideoOrCarousel: !!a.querySelector(
+                'svg[aria-label="Carousel"], svg[aria-label="Clip"], svg[aria-label="Reel"]',
+            ),
+        });
+    }
+
+    return {
+        username: usernameLine,
+        fullName,
+        bio,
+        bioTruncated,
+        externalLinks,
+        followerCount,
+        followingCount,
+        postCount,
+        verified,
+        posts,
+    };
+}
+
+// Post pages describe themselves in og:description, e.g.
+//   '1,234 likes, 56 comments - nasa on September 10, 2026: "The caption."'
+// Anything that cannot be read stays null (some posts hide likes; the format can change).
+// Chooses the post's like count from the two places it can be read:
+//  - og:description ("117K likes, 829 comments - ..."): the post's own number, but rounded for big counts;
+//  - the first "N likes" line in the page: exact when it IS the post's count, but when the creator hides the
+//    post's likes that first line belongs to a COMMENT (seen live: "2 likes" on a 127K-follower account).
+// So the page number is used only when it agrees with the og number (within rounding), and is never used when
+// the og description was present but carried no likes (hidden likes: unknown, not a guess).
+export function pickLikeCount({ domLikes, ogLikes, ogPresent }) {
+    if (ogLikes != null) {
+        if (domLikes != null && Math.abs(domLikes - ogLikes) <= Math.max(ogLikes * 0.06, 1)) return domLikes;
+        return ogLikes;
+    }
+    return ogPresent ? null : (domLikes ?? null);
+}
+
+function postNote(described, metrics) {
+    if (described.rounded) return 'likeCount/commentCount are rounded as displayed (e.g. "117K")';
+    if (metrics.ogDescription && described.likeCount == null) {
+        return 'like count is hidden by the creator (Instagram shows only the comment count): likeCount is null, not a guess';
+    }
+    return null;
+}
+
+export function parsePostDescription(text) {
+    if (!text) return { likeCount: null, commentCount: null, caption: null, rounded: false };
+    const likes = text.match(/([\d.,]+\s*[KMB]?)\s+likes?\b/i)?.[1] ?? null;
+    const comments = text.match(/([\d.,]+\s*[KMB]?)\s+comments?\b/i)?.[1] ?? null;
+    const caption = text.match(/\son\s[^:"]+:\s*"([\s\S]*)"\.?\s*$/)?.[1] ?? null;
+    return {
+        likeCount: parseAbbrevCount(likes),
+        commentCount: parseAbbrevCount(comments),
+        caption: caption && caption.trim() ? caption.trim() : null,
+        rounded: /[KMB]/i.test(`${likes ?? ''}${comments ?? ''}`),
+    };
 }
 
 // Runs inside a single post's page. Pulls publish date (exact, from the
 // <time> element), like count if shown (some accounts hide it - that's a
 // real null, not a failure), and a best-effort view count for video posts.
-function domExtractPostMetrics() {
-  const times = [...document.querySelectorAll("time")];
-  const publishTime = times[0] || null;
-
-  let likeCount = null;
-  const likeCandidates = [...document.querySelectorAll("section, div, a, span")].filter(
-    (el) => el.children.length === 0 && /^[\d,.]+[KMB]?\s*likes?$/i.test(el.textContent.trim())
-  );
-  // The overall post like count (as opposed to a per-comment like count)
-  // sits directly under the action-button row, before any comment text
-  // exists in the DOM order - the first match in document order is it.
-  if (likeCandidates.length) {
-    const raw = likeCandidates[0].textContent.trim().replace(/likes?$/i, "").trim();
-    const m = raw.replace(/,/g, "").match(/^([\d.]+)([KMB])?$/i);
-    if (m) {
-      let n = parseFloat(m[1]);
-      const suf = (m[2] || "").toUpperCase();
-      if (suf === "K") n *= 1e3;
-      else if (suf === "M") n *= 1e6;
-      else if (suf === "B") n *= 1e9;
-      likeCount = Math.round(n);
-    }
-  }
-
-  let viewCount = null;
-  const viewCandidates = [...document.querySelectorAll("section, div, a, span")].filter(
-    (el) => el.children.length === 0 && /^[\d,.]+[KMB]?\s*views?$/i.test(el.textContent.trim())
-  );
-  if (viewCandidates.length) {
-    const raw = viewCandidates[0].textContent.trim().replace(/views?$/i, "").trim();
-    const m = raw.replace(/,/g, "").match(/^([\d.]+)([KMB])?$/i);
-    if (m) {
-      let n = parseFloat(m[1]);
-      const suf = (m[2] || "").toUpperCase();
-      if (suf === "K") n *= 1e3;
-      else if (suf === "M") n *= 1e6;
-      else if (suf === "B") n *= 1e9;
-      viewCount = Math.round(n);
-    }
-  }
-
-  return {
-    publishDate: publishTime ? publishTime.getAttribute("datetime") : null,
-    likeCount,
-    viewCount,
-  };
-}
-
-// Runs inside a single post's page. Each comment's shared container is
-// found by walking up 6 levels from its <time> element - verified live to
-// be the exact single-comment text boundary (see file header note). The
-// very first <time> on the page is the post's own publish time, not a
-// comment, and is skipped.
-function domExtractComments(maxComments) {
-  const times = [...document.querySelectorAll("time")];
-  if (times.length < 2) return [];
-  const controlRe = /^(reply|see translation|hide|pin(ned)?|unpin|\d+[\d,]*\s*likes?|like)$/i;
-  const seen = new Set();
-  const rows = [];
-  for (const t of times.slice(1)) {
-    let node = t;
-    for (let i = 0; i < 6 && node; i++) node = node.parentElement;
-    if (!node || seen.has(node)) continue;
-    seen.add(node);
-
-    const lines = node.innerText.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (lines.length < 3) continue; // need at least username, time-ago, body
-
-    const username = lines[0];
-    let end = lines.length;
-    while (end > 2 && controlRe.test(lines[end - 1])) end--;
+export function domExtractPostMetrics() {
+    const times = [...document.querySelectorAll('time')];
+    const publishTime = times[0] || null;
 
     let likeCount = null;
-    for (let i = end; i < lines.length; i++) {
-      const m = lines[i].match(/^([\d,]+)\s*likes?$/i);
-      if (m) {
-        likeCount = parseInt(m[1].replace(/,/g, ""), 10);
-        break;
-      }
+    const likeCandidates = [...document.querySelectorAll('section, div, a, span')].filter(
+        (el) => el.children.length === 0 && /^[\d,.]+[KMB]?\s*likes?$/i.test(el.textContent.trim()),
+    );
+    // The overall post like count (as opposed to a per-comment like count)
+    // sits directly under the action-button row, before any comment text
+    // exists in the DOM order - the first match in document order is it.
+    if (likeCandidates.length) {
+        const raw = likeCandidates[0].textContent
+            .trim()
+            .replace(/likes?$/i, '')
+            .trim();
+        const m = raw.replace(/,/g, '').match(/^([\d.]+)([KMB])?$/i);
+        if (m) {
+            let n = parseFloat(m[1]);
+            const suf = (m[2] || '').toUpperCase();
+            if (suf === 'K') n *= 1e3;
+            else if (suf === 'M') n *= 1e6;
+            else if (suf === 'B') n *= 1e9;
+            likeCount = Math.round(n);
+        }
     }
 
-    const commentText = lines.slice(2, end).join("\n").trim() || null;
-    rows.push({
-      username,
-      text: commentText,
-      likeCount,
-      datetime: t.getAttribute("datetime") || null,
-    });
-    if (rows.length >= maxComments) break;
-  }
-  return rows;
+    let viewCount = null;
+    const viewCandidates = [...document.querySelectorAll('section, div, a, span')].filter(
+        (el) => el.children.length === 0 && /^[\d,.]+[KMB]?\s*views?$/i.test(el.textContent.trim()),
+    );
+    if (viewCandidates.length) {
+        const raw = viewCandidates[0].textContent
+            .trim()
+            .replace(/views?$/i, '')
+            .trim();
+        const m = raw.replace(/,/g, '').match(/^([\d.]+)([KMB])?$/i);
+        if (m) {
+            let n = parseFloat(m[1]);
+            const suf = (m[2] || '').toUpperCase();
+            if (suf === 'K') n *= 1e3;
+            else if (suf === 'M') n *= 1e6;
+            else if (suf === 'B') n *= 1e9;
+            viewCount = Math.round(n);
+        }
+    }
+
+    return {
+        publishDate: publishTime ? publishTime.getAttribute('datetime') : null,
+        likeCount,
+        viewCount,
+        // Instagram labels branded-content posts "Paid partnership with <brand>" on the post page.
+        paidPartnership: /paid partnership with/i.test(document.body ? document.body.innerText : ''),
+        ogDescription: (document.querySelector('meta[property="og:description"]') || {}).content ?? null,
+    };
 }
 
-export async function lookupProfile({ page, username, sourceInput, maxRecentPosts }) {
-  const url = `https://${DOMAIN}/${encodeURIComponent(username)}/`;
-  const response = await page.goto(url, { waitUntil: "networkidle", timeout: 60_000 });
-  // The profile header/stats hydrate client-side just after networkidle;
-  // give the SPA a short beat to finish before reading the DOM.
-  await page.waitForTimeout(1500);
-  const html = await page.content();
+// Runs inside a single post's page. Each comment's container is the highest
+// ancestor of its <time> element that still holds exactly one <time>: on the
+// real page (seen live 2026-09-29, logged out) the comments sit in one list
+// container, so a fixed climb (the old 6 levels) would swallow the whole list.
+// The very first <time> on the page is the post's own publish time, not a
+// comment, and is skipped.
+export function domExtractComments(maxComments) {
+    const times = [...document.querySelectorAll('time')];
+    if (times.length < 2) return [];
+    const controlRe = /^(reply|see translation|hide|pin(ned)?|unpin|\d+[\d,]*\s*likes?|like)$/i;
+    const seen = new Set();
+    const rows = [];
+    for (const t of times.slice(1)) {
+        let node = t;
+        for (let i = 0; i < 12; i++) {
+            const parent = node.parentElement;
+            if (!parent || parent.querySelectorAll('time').length !== 1) break;
+            node = parent;
+        }
+        if (seen.has(node)) continue;
+        seen.add(node);
 
-  // TEMP DIAGNOSTIC: the two prior live tests (datacenter proxy, then
-  // residential proxy) both came back with an identical 183-byte "html" -
-  // just a <script> tag that nulls out document.cookie/cookieStore, no
-  // <html>/<head>/<body> at all. Being byte-identical across two different
-  // proxy pools rules out a per-request Instagram anti-bot challenge page
-  // (those carry session-specific tokens/nonces, not fixed bytes) - this
-  // looks like it's coming from something in the navigation/proxy path
-  // itself, not from instagram.com's actual response. Logging the resolved
-  // URL, HTTP status and response headers on every run (not just the
-  // not_found path) to see whether page.goto() is even reaching Instagram.
-  let responseHeaders = {};
-  try {
-    responseHeaders = response ? await response.allHeaders() : {};
-  } catch {
-    // headers unavailable (e.g. response object stale) - proceed without them
-  }
-  const navMeta = {
-    requestedUrl: url,
-    finalUrl: page.url(),
-    httpStatus: response?.status() ?? null,
-    httpStatusText: response?.statusText() ?? null,
-    responseOk: response?.ok() ?? null,
-    contentType: responseHeaders["content-type"] ?? null,
-    contentLength: responseHeaders["content-length"] ?? null,
-    server: responseHeaders["server"] ?? null,
-    viaHeader: responseHeaders["via"] ?? null,
-    htmlByteLength: new TextEncoder().encode(html).length,
-  };
-  log.info(`Nav diagnostics for ${username}: ${JSON.stringify(navMeta)}`);
+        const lines = node.innerText
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean);
+        if (lines.length < 3) continue; // need at least username, time-ago, body
 
-  checkPageForRateLimit("instagram", "profile", html);
+        const username = lines[0];
+        // A like/comment count (129, 2.4k) or other text in the name position is not a commenter.
+        if (!/^[A-Za-z0-9._]{1,30}$/.test(username) || /^\d[\d.,]*[kKmM]?$/.test(username)) continue;
+        let end = lines.length;
+        while (end > 2 && controlRe.test(lines[end - 1])) end--;
 
-  const status = response?.status();
-  const lowerHtml = html.toLowerCase();
+        let likeCount = null;
+        for (let i = end; i < lines.length; i++) {
+            const m = lines[i].match(/^([\d,]+)\s*likes?$/i);
+            if (m) {
+                likeCount = parseInt(m[1].replace(/,/g, ''), 10);
+                break;
+            }
+        }
 
-  if (status === 404 || lowerHtml.includes("sorry, this page isn&#x27;t available") || lowerHtml.includes("sorry, this page isn't available")) {
-    return {
-      profile: makeProfileRow({
-        platform: "instagram", sourceInput, username,
-        status: "not_found", statusDetail: `HTTP ${status ?? "unknown"}`,
-      }),
-      posts: [],
+        const commentText = lines.slice(2, end).join('\n').trim() || null;
+        rows.push({
+            username,
+            text: commentText,
+            likeCount,
+            datetime: t.getAttribute('datetime') || null,
+        });
+        if (rows.length >= maxComments) break;
+    }
+    return rows;
+}
+
+// The header element appears before the page has finished hydrating: its follower/following counts (and the "... more"
+// control, which does nothing before the page's scripts are attached) arrive a little later. Wait for the counts, not
+// for a fixed pause (a fixed 1.5 s was too short on slower residential connections and lost the profile or its bio).
+async function waitForProfileStats(page) {
+    // A header, or a page that already says why there is none (unavailable, private, login, rate limit).
+    const settled = await page
+        .waitForFunction(
+            () =>
+                Boolean(document.querySelector('header')) ||
+                /isn't available|account is private|log in|wait a few minutes|try again later/i.test(
+                    document.body?.innerText ?? '',
+                ),
+            undefined,
+            { timeout: 12_000 },
+        )
+        .then(() => true)
+        .catch(() => false); // nothing recognisable: the checks after this report what the page shows
+    if (!settled || !(await page.$('header'))) return;
+    await page
+        .waitForFunction(
+            () => {
+                const header = document.querySelector('header');
+                return Boolean(header && /[\d.,]+[KMB]?\s*followers/i.test(header.innerText));
+            },
+            undefined,
+            { timeout: 15_000 },
+        )
+        .catch(() => {
+            // not a normal profile header (private, unavailable): handled by the checks after this
+        });
+    await page.waitForTimeout(700);
+}
+
+// Reads the header, opening a "... more" bio first. The click is repeated (with a pause) because one made before the
+// page is interactive has no effect; the bio counts as unexpanded only if it still ends in "more" after all tries.
+async function readProfileDom(page) {
+    let dom = await page.evaluate(domExtractProfile);
+    for (let attempt = 0; attempt < 4 && dom?.bioTruncated; attempt += 1) {
+        try {
+            const clicked = await page.evaluate(domExpandBio);
+            if (!clicked) {
+                // not found by the in-page finder: a real pointer click on the visible "more" text
+                await page
+                    .locator('header')
+                    .getByText(/^(…|\.\.\.)?\s*more$/i)
+                    .first()
+                    .click({ timeout: 2000 });
+            }
+        } catch {
+            // the control is not there (yet) or the page moved on: look again after the pause
+        }
+        await page.waitForTimeout(700);
+        dom = (await page.evaluate(domExtractProfile)) ?? dom;
+    }
+    return dom;
+}
+
+// The grid shows only its first rows until the page is scrolled. When more posts are wanted than are listed, scroll
+// a few times and read the list again (stops as soon as there are enough, or when scrolling adds nothing).
+async function loadMoreGridPosts(page, dom, want) {
+    let current = dom;
+    for (let i = 0; i < 3 && current && current.posts.length < want; i += 1) {
+        const before = current.posts.length;
+        try {
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+            await page.waitForTimeout(1000);
+            current = (await page.evaluate(domExtractProfile)) ?? current;
+        } catch {
+            break;
+        }
+        if (current.posts.length <= before) break;
+    }
+    return current;
+}
+
+// Instagram sometimes serves a profile whose header renders only after a second try; one fresh load before giving up.
+const UNRECOGNISED_LAYOUT = 'Page loaded but neither the current DOM layout';
+export async function lookupProfile(args) {
+    const first = await lookupProfileOnce(args);
+    if (first.profile.status === 'not_found' && first.profile.statusDetail?.startsWith(UNRECOGNISED_LAYOUT)) {
+        await args.page.waitForTimeout(2000);
+        const second = await lookupProfileOnce(args);
+        if (second.profile.status !== 'not_found') return second;
+    }
+    return first;
+}
+
+async function lookupProfileOnce({ page, username, sourceInput, maxRecentPosts }) {
+    const url = `https://${DOMAIN}/${encodeURIComponent(username)}/`;
+    // "networkidle" waited for every blocked/lingering request and cost 30-60 s per profile; the profile data is in
+    // the page as soon as the document and its header are there, so wait for those and give the SPA a short beat.
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await waitForProfileStats(page);
+    const html = await page.content();
+
+    // TEMP DIAGNOSTIC: the two prior live tests (datacenter proxy, then
+    // residential proxy) both came back with an identical 183-byte "html" -
+    // just a <script> tag that nulls out document.cookie/cookieStore, no
+    // <html>/<head>/<body> at all. Being byte-identical across two different
+    // proxy pools rules out a per-request Instagram anti-bot challenge page
+    // (those carry session-specific tokens/nonces, not fixed bytes) - this
+    // looks like it's coming from something in the navigation/proxy path
+    // itself, not from instagram.com's actual response. Logging the resolved
+    // URL, HTTP status and response headers on every run (not just the
+    // not_found path) to see whether page.goto() is even reaching Instagram.
+    let responseHeaders = {};
+    try {
+        responseHeaders = response ? await response.allHeaders() : {};
+    } catch {
+        // headers unavailable (e.g. response object stale) - proceed without them
+    }
+    const navMeta = {
+        requestedUrl: url,
+        finalUrl: page.url(),
+        httpStatus: response?.status() ?? null,
+        httpStatusText: response?.statusText() ?? null,
+        responseOk: response?.ok() ?? null,
+        contentType: responseHeaders['content-type'] ?? null,
+        contentLength: responseHeaders['content-length'] ?? null,
+        server: responseHeaders.server ?? null,
+        viaHeader: responseHeaders.via ?? null,
+        htmlByteLength: new TextEncoder().encode(html).length,
     };
-  }
+    log.info(`Nav diagnostics for ${username}: ${JSON.stringify(navMeta)}`);
 
-  if (lowerHtml.includes("this account is private")) {
-    return {
-      profile: makeProfileRow({
-        platform: "instagram", sourceInput, username,
-        status: "private", statusDetail: "Private account banner present",
-      }),
-      posts: [],
-    };
-  }
+    await assertNotRateLimited(page, 'instagram', 'profile');
+    // Visible text only: raw HTML carries strings like "Sorry, this page isn't available" in script bundles.
+    const visibleLower = (await page.evaluate(() => (document.body ? document.body.innerText : ''))).toLowerCase();
 
-  const dom = await page.evaluate(domExtractProfile);
+    const status = response?.status();
+    const lowerHtml = html.toLowerCase();
 
-  if (dom) {
-    const profile = makeProfileRow({
-      platform: "instagram",
-      sourceInput,
-      username: dom.username || username,
-      displayName: dom.fullName,
-      bio: dom.bio,
-      externalLinks: dom.externalLinks,
-      followerCount: dom.followerCount,
-      followingCount: dom.followingCount,
-      postCount: dom.postCount,
-      totalLikes: null, // Instagram does not expose an all-time like total
-      verified: dom.verified,
-      accountCreatedDate: null, // not exposed publicly
-      status: "found",
-    });
-
-    const gridPosts = dom.posts.slice(0, maxRecentPosts);
-    const posts = [];
-    for (const gp of gridPosts) {
-      const postUrl = new URL(gp.href, `https://${DOMAIN}`).toString();
-      let metrics = { publishDate: null, likeCount: null, viewCount: null };
-      try {
-        await page.goto(postUrl, { waitUntil: "networkidle", timeout: 30_000 });
-        await page.waitForTimeout(800);
-        const postHtml = await page.content();
-        checkPageForRateLimit("instagram", "post", postHtml);
-        metrics = await page.evaluate(domExtractPostMetrics);
-      } catch (err) {
-        if (err?.name === "RateLimitError") throw err;
-        // a single post failing to load shouldn't drop the whole profile -
-        // report this post with nulls rather than aborting the run.
-      }
-      posts.push(
-        makePostRow({
-          platform: "instagram",
-          sourceInput,
-          username: dom.username || username,
-          displayName: dom.fullName,
-          bio: dom.bio,
-          externalLinks: dom.externalLinks,
-          followerCount: dom.followerCount,
-          followingCount: dom.followingCount,
-          verified: dom.verified,
-          postUrl,
-          caption: gp.caption,
-          publishDate: metrics.publishDate,
-          likeCount: metrics.likeCount,
-          commentCount: null, // Instagram's web UI doesn't expose an exact total without paging all comments
-          shareCount: null, // Instagram does not expose share counts
-          viewCount: metrics.viewCount,
-          isSponsored: null, // not reliably exposed in the current DOM; left honest-null rather than guessed
-        })
-      );
+    if (
+        status === 404 ||
+        visibleLower.includes("sorry, this page isn't available") ||
+        visibleLower.includes("profile isn't available")
+    ) {
+        return {
+            profile: makeProfileRow({
+                platform: 'instagram',
+                sourceInput,
+                username,
+                status: 'not_found',
+                statusDetail: `HTTP ${status ?? 'unknown'}`,
+            }),
+            posts: [],
+        };
     }
 
-    return { profile, posts };
-  }
+    if (visibleLower.includes('this account is private')) {
+        return {
+            profile: makeProfileRow({
+                platform: 'instagram',
+                sourceInput,
+                username,
+                status: 'private',
+                statusDetail: 'Private account banner present',
+            }),
+            posts: [],
+        };
+    }
 
-  // DOM extraction found no header - fall back to the legacy JSON-blob
-  // shape in case Instagram serves it for some accounts/builds.
-  const json = extractProfileJson(html);
-  const user = findUserNode(json);
+    let dom = await readProfileDom(page);
+    dom = await loadMoreGridPosts(page, dom, maxRecentPosts);
 
-  if (user) {
-    const profile = makeProfileRow({
-      platform: "instagram",
-      sourceInput,
-      username: user.username ?? username,
-      displayName: user.full_name ?? null,
-      bio: user.biography ?? null,
-      externalLinks: [user.external_url, ...(user.bio_links?.map((l) => l.url) || [])].filter(Boolean),
-      followerCount: user.edge_followed_by?.count ?? null,
-      followingCount: user.edge_follow?.count ?? null,
-      postCount: user.edge_owner_to_timeline_media?.count ?? null,
-      totalLikes: null,
-      verified: user.is_verified ?? null,
-      accountCreatedDate: null,
-      status: "found",
-    });
-    const edges = user.edge_owner_to_timeline_media?.edges || [];
-    const posts = edges.slice(0, maxRecentPosts).map((edge) => {
-      const node = edge.node;
-      const postUrl = `https://${DOMAIN}/p/${node.shortcode}/`;
-      return makePostRow({
-        platform: "instagram",
-        sourceInput,
-        username: user.username ?? username,
-        displayName: user.full_name ?? null,
-        bio: user.biography ?? null,
-        externalLinks: [user.external_url].filter(Boolean),
-        followerCount: user.edge_followed_by?.count ?? null,
-        followingCount: user.edge_follow?.count ?? null,
-        verified: user.is_verified ?? null,
-        postUrl,
+    if (dom) {
+        const profile = makeProfileRow({
+            platform: 'instagram',
+            sourceInput,
+            username: dom.username || username,
+            displayName: dom.fullName,
+            bio: dom.bio,
+            externalLinks: dom.externalLinks,
+            followerCount: dom.followerCount,
+            followingCount: dom.followingCount,
+            postCount: dom.postCount,
+            totalLikes: null, // Instagram does not expose an all-time like total
+            verified: dom.verified,
+            accountCreatedDate: null, // not exposed publicly
+            status: 'found',
+            screeningWarnings: dom.bioTruncated
+                ? [
+                      'bio is cut off ("... more") and could not be expanded: an e-mail or link further down is not visible',
+                  ]
+                : [],
+        });
+
+        const gridPosts = dom.posts.slice(0, maxRecentPosts);
+        const posts = [];
+        for (const gp of gridPosts) {
+            const postUrl = new URL(gp.href, `https://${DOMAIN}`).toString();
+            let metrics = {
+                publishDate: null,
+                likeCount: null,
+                viewCount: null,
+                paidPartnership: false,
+                ogDescription: null,
+            };
+            let loadFailed = false;
+            // One more try for a post page that did not load (a timeout is usually transient); reach needs these counts.
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                try {
+                    // The counts are in the page's meta tags as soon as the document is there: do not wait for
+                    // "networkidle" (it timed out after 30 s with the page already loaded, and the numbers were lost).
+                    await page.goto(postUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+                    await page.waitForTimeout(800);
+                    await assertNotRateLimited(page, 'instagram', 'post');
+                    metrics = await page.evaluate(domExtractPostMetrics);
+                    loadFailed = false;
+                    break;
+                } catch (err) {
+                    if (err?.name === 'RateLimitError') throw err;
+                    // a single post failing to load shouldn't drop the whole profile -
+                    // report this post with nulls rather than aborting the run.
+                    loadFailed = true;
+                }
+            }
+            const described = parsePostDescription(metrics.ogDescription);
+            posts.push(
+                makePostRow({
+                    platform: 'instagram',
+                    sourceInput,
+                    username: dom.username || username,
+                    displayName: dom.fullName,
+                    bio: dom.bio,
+                    externalLinks: dom.externalLinks,
+                    followerCount: dom.followerCount,
+                    followingCount: dom.followingCount,
+                    verified: dom.verified,
+                    postUrl,
+                    // The grid image alt text is Instagram's auto-generated image description ("Photo by X on ..."), not the caption.
+                    caption: described.caption,
+                    publishDate: metrics.publishDate,
+                    likeCount: pickLikeCount({
+                        domLikes: metrics.likeCount,
+                        ogLikes: described.likeCount,
+                        ogPresent: Boolean(metrics.ogDescription),
+                    }),
+                    commentCount: described.commentCount,
+                    statusDetail: loadFailed
+                        ? 'post page could not be loaded (timeout or block): its counts are unavailable'
+                        : postNote(described, metrics),
+                    shareCount: null, // Instagram does not expose share counts
+                    viewCount: metrics.viewCount,
+                    // true only when the post page carries the "Paid partnership" label; otherwise unknown (the caption is checked for #ad later)
+                    isSponsored: metrics.paidPartnership ? true : null,
+                }),
+            );
+        }
+
+        return { profile, posts };
+    }
+
+    // DOM extraction found no header - fall back to the legacy JSON-blob
+    // shape in case Instagram serves it for some accounts/builds.
+    const json = extractProfileJson(html);
+    const user = findUserNode(json);
+
+    if (user) {
+        const profile = makeProfileRow({
+            platform: 'instagram',
+            sourceInput,
+            username: user.username ?? username,
+            displayName: user.full_name ?? null,
+            bio: user.biography ?? null,
+            externalLinks: [user.external_url, ...(user.bio_links?.map((l) => l.url) || [])].filter(Boolean),
+            followerCount: user.edge_followed_by?.count ?? null,
+            followingCount: user.edge_follow?.count ?? null,
+            postCount: user.edge_owner_to_timeline_media?.count ?? null,
+            totalLikes: null,
+            verified: user.is_verified ?? null,
+            accountCreatedDate: null,
+            status: 'found',
+        });
+        const edges = user.edge_owner_to_timeline_media?.edges || [];
+        const author = {
+            sourceInput,
+            username: user.username ?? username,
+            displayName: user.full_name ?? null,
+            bio: user.biography ?? null,
+            externalLinks: [user.external_url].filter(Boolean),
+            followerCount: user.edge_followed_by?.count ?? null,
+            followingCount: user.edge_follow?.count ?? null,
+            verified: user.is_verified ?? null,
+        };
+        const posts = edges.slice(0, maxRecentPosts).map((edge) => mediaNodeToPostRow(edge.node, author));
+        return { profile, posts };
+    }
+
+    // Neither the live DOM nor the legacy JSON shape matched. Distinguish a
+    // login wall (no header, page is dominated by a login form) from a
+    // genuinely unrecognised layout, so the two show up differently in the
+    // dataset rather than both being an opaque "not_found".
+    const looksLikeLoginWall =
+        lowerHtml.includes('name="password"') &&
+        (lowerHtml.includes('log in') || lowerHtml.includes('log into instagram'));
+
+    await saveDebugArtifact(page, html, `profile_${username}`, navMeta);
+
+    const redirectedToLogin = /\/accounts\/login/.test(page.url());
+    if (looksLikeLoginWall || redirectedToLogin) {
+        const limited = await lookupViaEmbed({ page, username, sourceInput, maxRecentPosts });
+        if (limited) return limited;
+        return {
+            profile: makeProfileRow({
+                platform: 'instagram',
+                sourceInput,
+                username,
+                status: 'blocked',
+                statusDetail:
+                    'Instagram redirected to its login page and its public embed page returned no profile data (no session cookie provided, or this IP/session was challenged)',
+            }),
+            posts: [],
+        };
+    }
+
+    return {
+        profile: makeProfileRow({
+            platform: 'instagram',
+            sourceInput,
+            username,
+            status: 'not_found',
+            statusDetail: `${UNRECOGNISED_LAYOUT} nor the legacy JSON shape matched - Instagram may have changed its page structure again (needs a live re-check)`,
+        }),
+        posts: [],
+    };
+}
+
+// Parses the text of Instagram's public embed page: "<username> / <name> / 104M followers / • / 4,937 posts".
+export function parseEmbedText(text) {
+    const lines = String(text)
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    const followers = text.match(/([\d.,]+\s*[KMB]?)\s+followers/i)?.[1] ?? null;
+    const posts = text.match(/([\d.,]+\s*[KMB]?)\s+posts/i)?.[1] ?? null;
+    if (!followers && !posts) return null;
+    const isStat = (l) => /followers|posts|^[•·]$/i.test(l);
+    const username = lines[0] && !isStat(lines[0]) ? lines[0] : null;
+    const fullName = lines[1] && !isStat(lines[1]) ? lines[1] : null;
+    return { username, fullName, followers, posts };
+}
+
+// One Instagram media node (legacy JSON or embed "shortcode_media") -> a post row. Anything the node
+// does not carry stays null; nothing is inferred.
+// Accounts tagged in the post, plus collaboration co-authors (when the embed data carries them).
+export function taggedAccounts(node, ownUsername = null) {
+    const names = [
+        ...(node?.edge_media_to_tagged_user?.edges ?? []).map((e) => e?.node?.user?.username),
+        ...(node?.coauthor_producers ?? []).map((u) => u?.username),
+    ];
+    const own = String(ownUsername ?? '').toLowerCase();
+    return [...new Set(names.filter(Boolean).map((n) => String(n).toLowerCase()))].filter((n) => n !== own);
+}
+
+export function mediaNodeToPostRow(node, author) {
+    return makePostRow({
+        platform: 'instagram',
+        ...author,
+        postUrl: node.shortcode ? `https://${DOMAIN}/p/${node.shortcode}/` : null,
         caption: node.edge_media_to_caption?.edges?.[0]?.node?.text ?? null,
         publishDate: node.taken_at_timestamp ? new Date(node.taken_at_timestamp * 1000).toISOString() : null,
         likeCount: node.edge_liked_by?.count ?? node.edge_media_preview_like?.count ?? null,
@@ -505,117 +825,190 @@ export async function lookupProfile({ page, username, sourceInput, maxRecentPost
         shareCount: null,
         viewCount: node.video_view_count ?? null,
         isSponsored: node.is_ad ?? null,
-      });
+        mentionedAccounts: taggedAccounts(node, author?.username),
     });
-    return { profile, posts };
-  }
+}
 
-  // Neither the live DOM nor the legacy JSON shape matched. Distinguish a
-  // login wall (no header, page is dominated by a login form) from a
-  // genuinely unrecognised layout, so the two show up differently in the
-  // dataset rather than both being an opaque "not_found".
-  const looksLikeLoginWall =
-    lowerHtml.includes('name="password"') &&
-    (lowerHtml.includes("log in") || lowerHtml.includes("log into instagram"));
+// The embed page carries the profile as a JSON string argument: ..."contextJSON":"{\"context\":{...}}"...
+// Returns the parsed inner object, or null when it is absent or malformed.
+export function extractEmbedContext(html) {
+    const marker = '"contextJSON":"';
+    const start = html.indexOf(marker);
+    if (start === -1) return null;
+    let i = start + marker.length;
+    let raw = '';
+    while (i < html.length) {
+        const c = html[i];
+        if (c === '\\') {
+            raw += c + (html[i + 1] ?? '');
+            i += 2;
+        } else if (c === '"') {
+            break;
+        } else {
+            raw += c;
+            i += 1;
+        }
+    }
+    try {
+        const inner = JSON.parse(JSON.parse(`"${raw}"`));
+        return inner?.context ?? null;
+    } catch {
+        return null;
+    }
+}
 
-  await saveDebugArtifact(page, html, `profile_${username}`, navMeta);
+// The profile page needs a login, but Instagram's public embed page (served to anonymous visitors for
+// third-party sites) carries exact counts, the verified/private flags and the latest posts as JSON.
+// It has no bio, following count or links.
+async function lookupViaEmbed({ page, username, sourceInput, maxRecentPosts = 0 }) {
+    try {
+        await page.goto(`https://${DOMAIN}/${encodeURIComponent(username)}/embed/`, {
+            waitUntil: 'domcontentloaded',
+            timeout: 45_000,
+        });
+        await page.waitForTimeout(1500);
+        await assertNotRateLimited(page, 'instagram', 'embed');
 
-  return {
-    profile: makeProfileRow({
-      platform: "instagram", sourceInput, username,
-      status: "not_found",
-      statusDetail: looksLikeLoginWall
-        ? "Instagram served a login wall instead of the profile page (no session cookie provided, or this IP/session was challenged)"
-        : "Page loaded but neither the current DOM layout nor the legacy JSON shape matched - Instagram may have changed its page structure again (needs a live re-check)",
-    }),
-    posts: [],
-  };
+        const ctx = extractEmbedContext(await page.content());
+        if (ctx?.username) {
+            const isPrivate = ctx.is_private === true;
+            const verified = typeof ctx.is_verified === 'boolean' ? ctx.is_verified : null;
+            const profile = makeProfileRow({
+                platform: 'instagram',
+                sourceInput,
+                username: ctx.username,
+                displayName: ctx.full_name || null,
+                followerCount: ctx.followers_count ?? null,
+                postCount: ctx.posts_count ?? null,
+                verified,
+                status: isPrivate ? 'private' : 'found',
+                statusDetail:
+                    'Data from the public embed page (the profile page requires login): exact counts, but no bio, following count or links',
+            });
+            const author = {
+                sourceInput,
+                username: ctx.username,
+                displayName: ctx.full_name || null,
+                followerCount: ctx.followers_count ?? null,
+                verified,
+            };
+            const posts = isPrivate
+                ? []
+                : (ctx.graphql_media ?? [])
+                      .map((m) => m.shortcode_media)
+                      .filter(Boolean)
+                      .slice(0, maxRecentPosts)
+                      .map((node) => mediaNodeToPostRow(node, author));
+            return { profile, posts };
+        }
+
+        const text = await page.evaluate(() => (document.body ? document.body.innerText : ''));
+        const parsed = parseEmbedText(text);
+        if (!parsed) return null;
+        return {
+            profile: makeProfileRow({
+                platform: 'instagram',
+                sourceInput,
+                username: parsed.username ?? username,
+                displayName: parsed.fullName,
+                followerCount: parseAbbrevCount(parsed.followers),
+                postCount: parseAbbrevCount(parsed.posts),
+                status: 'found',
+                statusDetail:
+                    'Limited data from the public embed page (the profile page requires login): counts are rounded as displayed; no bio, following count, links, verified flag or recent posts',
+            }),
+            posts: [],
+        };
+    } catch (err) {
+        if (err?.name === 'RateLimitError') throw err;
+        return null;
+    }
 }
 
 export async function fetchComments({ page, postUrl, sourceInput, maxComments, topLevelOnly }) {
-  await page.goto(postUrl, { waitUntil: "networkidle", timeout: 60_000 });
-  await page.waitForTimeout(1200);
-  const html = await page.content();
-  checkPageForRateLimit("instagram", "comments", html);
+    await page.goto(postUrl, { waitUntil: 'networkidle', timeout: 60_000 });
+    await page.waitForTimeout(1200);
+    const html = await page.content();
+    await assertNotRateLimited(page, 'instagram', 'comments');
 
-  if (!topLevelOnly) {
-    // Best-effort: replies are collapsed behind "View replies" by default
-    // and not present in the DOM until expanded. Click a bounded number of
-    // them before collecting, rather than leaving repliesincluded silently
-    // unfulfilled.
-    try {
-      const replyButtons = await page.locator('text=/View replies|View \\d+ replies/i').all();
-      for (const btn of replyButtons.slice(0, 15)) {
-        try {
-          await btn.click({ timeout: 1500 });
-          await page.waitForTimeout(250);
-        } catch {
-          // a single stuck expand button shouldn't stop the rest
-        }
-      }
-    } catch {
-      // no reply buttons found/clickable - proceed with whatever is already loaded
-    }
-  }
-
-  const domComments = await page.evaluate(domExtractComments, maxComments);
-  if (domComments.length) {
-    return domComments.map((c) =>
-      makeCommentRow({
-        platform: "instagram",
-        sourceInput,
-        postUrl,
-        commenterUsername: c.username ?? null,
-        commentText: c.text ?? null,
-        likeCount: c.likeCount ?? null,
-        commentDate: c.datetime ?? null,
-        isReply: false, // reply nesting isn't reliably distinguishable in the current DOM - see fetchComments notes
-      })
-    );
-  }
-
-  // Fall back to the legacy JSON shape in case it's still served for some builds.
-  const json = extractProfileJson(html);
-  const edges =
-    json?.shortcode_media?.edge_media_to_parent_comment?.edges ||
-    json?.data?.shortcode_media?.edge_media_to_parent_comment?.edges ||
-    [];
-
-  const rows = [];
-  for (const edge of edges.slice(0, maxComments)) {
-    const node = edge.node;
-    rows.push(
-      makeCommentRow({
-        platform: "instagram",
-        sourceInput,
-        postUrl,
-        commenterUsername: node.owner?.username ?? null,
-        commentText: node.text ?? null,
-        likeCount: node.edge_liked_by?.count ?? null,
-        commentDate: node.created_at ? new Date(node.created_at * 1000).toISOString() : null,
-        isReply: false,
-      })
-    );
     if (!topLevelOnly) {
-      const replies = node.edge_threaded_comments?.edges || [];
-      for (const r of replies) {
-        if (rows.length >= maxComments) break;
-        rows.push(
-          makeCommentRow({
-            platform: "instagram",
-            sourceInput,
-            postUrl,
-            commenterUsername: r.node.owner?.username ?? null,
-            commentText: r.node.text ?? null,
-            likeCount: r.node.edge_liked_by?.count ?? null,
-            commentDate: r.node.created_at ? new Date(r.node.created_at * 1000).toISOString() : null,
-            isReply: true,
-          })
-        );
-      }
+        // Best-effort: replies are collapsed behind "View replies" by default
+        // and not present in the DOM until expanded. Click a bounded number of
+        // them before collecting, rather than leaving repliesincluded silently
+        // unfulfilled.
+        try {
+            const replyButtons = await page.locator('text=/View replies|View \\d+ replies/i').all();
+            for (const btn of replyButtons.slice(0, 15)) {
+                try {
+                    await btn.click({ timeout: 1500 });
+                    await page.waitForTimeout(250);
+                } catch {
+                    // a single stuck expand button shouldn't stop the rest
+                }
+            }
+        } catch {
+            // no reply buttons found/clickable - proceed with whatever is already loaded
+        }
     }
-  }
-  return rows;
+
+    const domComments = await page.evaluate(domExtractComments, maxComments);
+    if (domComments.length) {
+        return domComments.map((c) =>
+            makeCommentRow({
+                platform: 'instagram',
+                sourceInput,
+                postUrl,
+                commenterUsername: c.username ?? null,
+                commentText: c.text ?? null,
+                likeCount: c.likeCount ?? null,
+                commentDate: c.datetime ?? null,
+                isReply: false, // reply nesting isn't reliably distinguishable in the current DOM - see fetchComments notes
+            }),
+        );
+    }
+
+    // Fall back to the legacy JSON shape in case it's still served for some builds.
+    const json = extractProfileJson(html);
+    const edges =
+        json?.shortcode_media?.edge_media_to_parent_comment?.edges ||
+        json?.data?.shortcode_media?.edge_media_to_parent_comment?.edges ||
+        [];
+
+    const rows = [];
+    for (const edge of edges.slice(0, maxComments)) {
+        const { node } = edge;
+        rows.push(
+            makeCommentRow({
+                platform: 'instagram',
+                sourceInput,
+                postUrl,
+                commenterUsername: node.owner?.username ?? null,
+                commentText: node.text ?? null,
+                likeCount: node.edge_liked_by?.count ?? null,
+                commentDate: node.created_at ? new Date(node.created_at * 1000).toISOString() : null,
+                isReply: false,
+            }),
+        );
+        if (!topLevelOnly) {
+            const replies = node.edge_threaded_comments?.edges || [];
+            for (const r of replies) {
+                if (rows.length >= maxComments) break;
+                rows.push(
+                    makeCommentRow({
+                        platform: 'instagram',
+                        sourceInput,
+                        postUrl,
+                        commenterUsername: r.node.owner?.username ?? null,
+                        commentText: r.node.text ?? null,
+                        likeCount: r.node.edge_liked_by?.count ?? null,
+                        commentDate: r.node.created_at ? new Date(r.node.created_at * 1000).toISOString() : null,
+                        isReply: true,
+                    }),
+                );
+            }
+        }
+    }
+    return rows;
 }
 
 // Mode B (keyword search) is NOT implemented yet. Instagram's public web UI
@@ -624,5 +1017,14 @@ export async function fetchComments({ page, postUrl, sourceInput, maxComments, t
 // than the profile page) - needs its own investigation before building,
 // flagged in README as pending rather than guessed at.
 export async function searchPosts() {
-  throw new Error("Instagram Mode B (search) not yet implemented - see README pending list");
+    throw new Error(
+        'Instagram keyword/hashtag search needs a logged-in session (logged-out probe 2026-09-29: HTTP 429 and a redirect to the login page); this Actor does not log in. Use mode=profile with usernames instead',
+    );
+}
+
+// Cheap look at an account through the public embed page only (no bio/links): used to skip full lookups of
+// accounts whose follower count is already outside the requested range. Returns a profile row or null.
+export async function quickProfile({ page, username, sourceInput }) {
+    const result = await lookupViaEmbed({ page, username, sourceInput, maxRecentPosts: 0 });
+    return result ? result.profile : null;
 }

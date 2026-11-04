@@ -1,0 +1,15 @@
+{
+    "actorSpecification": 1,
+    "name": "competitor-price-watcher",
+    "title": "Competitor Price Watcher (plans, prices, change since last run)",
+    "description": "Reads public pricing pages and returns each plan with its price, billing period and the change since the last run. Built for a weekly schedule. No login.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024
+}

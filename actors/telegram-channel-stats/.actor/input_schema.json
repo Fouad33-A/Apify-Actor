@@ -1,0 +1,97 @@
+{
+    "title": "Telegram Channel Stats Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "channels": {
+            "title": "Telegram channels",
+            "type": "array",
+            "description": "Public channels to read: a name (examplechannel), @examplechannel or a link such as https://t.me/examplechannel. Private invite links (t.me/+...) cannot be read.",
+            "editor": "stringList",
+            "default": ["telegram"],
+            "prefill": ["telegram"]
+        },
+        "maxPostsPerChannel": {
+            "title": "Posts to read per channel",
+            "type": "integer",
+            "description": "Most recent posts read for each channel (1-1000). Posting frequency and views are computed from these posts.",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 1000
+        },
+        "windowDays": {
+            "title": "Posting-frequency window (days)",
+            "type": "integer",
+            "description": "Posts per week is counted over this many recent days. If the post limit is reached before the window starts, the span of the posts actually read is used and the row says so.",
+            "default": 30,
+            "minimum": 1
+        },
+        "freshHours": {
+            "title": "Ignore views of posts younger than (hours)",
+            "type": "integer",
+            "description": "Views keep growing after posting, so very new posts understate reach. Posts younger than this are left out of the view statistics.",
+            "default": 24,
+            "minimum": 0
+        },
+        "minMembers": {
+            "title": "Minimum members",
+            "type": "integer",
+            "description": "Optional. Channels with fewer members are skipped before their posts are read (the row is returned with status filtered).",
+            "minimum": 0
+        },
+        "maxMembers": {
+            "title": "Maximum members",
+            "type": "integer",
+            "description": "Optional. Channels with more members are skipped before their posts are read (the row is returned with status filtered).",
+            "minimum": 0
+        },
+        "includePosts": {
+            "title": "Also return one row per post",
+            "type": "boolean",
+            "description": "Adds rows with recordType post (date, views, reactions, text, mentioned channels) after each channel row.",
+            "default": false
+        },
+        "followMentionedChannels": {
+            "title": "Also read channels mentioned in the posts",
+            "type": "boolean",
+            "description": "Finds partner candidates: channels that the input channels mention (t.me links or @names) at least 'Minimum mentions' times are read too, one step only. They are marked in discoveredFrom.",
+            "default": false
+        },
+        "minMentions": {
+            "title": "Minimum mentions to follow",
+            "type": "integer",
+            "description": "A mentioned channel is followed only if this many different posts mention it.",
+            "default": 2,
+            "minimum": 1
+        },
+        "maxChannels": {
+            "title": "Maximum channels per run",
+            "type": "integer",
+            "description": "Hard cap on channels read in one run, including channels found through mentions.",
+            "default": 50,
+            "minimum": 1
+        },
+        "delayBetweenRequestsMs": {
+            "title": "Delay between page requests (ms)",
+            "type": "integer",
+            "description": "Pause before each additional page of one channel, to stay polite to Telegram.",
+            "default": 600,
+            "minimum": 0
+        },
+        "concurrency": {
+            "title": "Channels read at the same time",
+            "type": "integer",
+            "description": "1-4. Telegram's public pages need no proxy; keep this low.",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 4
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "description": "Optional. Not needed normally; use it only if Telegram starts answering with HTTP 429.",
+            "editor": "proxy"
+        }
+    },
+    "required": ["channels"]
+}

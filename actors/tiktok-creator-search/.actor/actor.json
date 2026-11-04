@@ -1,0 +1,15 @@
+{
+    "actorSpecification": 1,
+    "name": "tiktok-creator-search",
+    "title": "TikTok Creator Search",
+    "description": "Finds TikTok creators from optional keyword/hashtag seeds or criteria-only discovery, enriches them, and screens followers, median views, activity and verification.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024
+}

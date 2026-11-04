@@ -1,0 +1,42 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "threads": {
+            "title": "Threads",
+            "transformation": {
+                "fields": [
+                    "recordType",
+                    "subreddit",
+                    "title",
+                    "status",
+                    "createdAt",
+                    "threadThemes",
+                    "competitorsMentioned",
+                    "matchedKeywords",
+                    "commentsStatus",
+                    "author",
+                    "url",
+                    "scrapedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "recordType": { "label": "Row", "format": "text" },
+                    "subreddit": { "label": "Subreddit", "format": "text" },
+                    "title": { "label": "Title", "format": "text" },
+                    "status": { "label": "Status", "format": "text" },
+                    "createdAt": { "label": "Date", "format": "date" },
+                    "threadThemes": { "label": "Themes", "format": "array" },
+                    "competitorsMentioned": { "label": "Competitors", "format": "array" },
+                    "matchedKeywords": { "label": "Keywords", "format": "array" },
+                    "commentsStatus": { "label": "Comments", "format": "text" },
+                    "author": { "label": "Author", "format": "text" },
+                    "url": { "label": "Link", "format": "link" },
+                    "scrapedAt": { "label": "Read at", "format": "date" }
+                }
+            }
+        }
+    }
+}

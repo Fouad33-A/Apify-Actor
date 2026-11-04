@@ -1,0 +1,115 @@
+{
+    "title": "Reddit Thread Miner Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "subreddits": {
+            "title": "Subreddits",
+            "type": "array",
+            "description": "Subreddit names, for example igcse, SAT, APStudents, IBO, alevel. A leading r/ is fine.",
+            "editor": "stringList",
+            "default": ["igcse"],
+            "prefill": ["igcse", "SAT"]
+        },
+        "keywords": {
+            "title": "Keywords",
+            "type": "array",
+            "description": "Optional. Only threads matching one of these words inside each subreddit are read (Reddit's own subreddit search). Leave empty to read the newest threads.",
+            "editor": "stringList",
+            "prefill": ["worth it", "free", "expensive"]
+        },
+        "dateFrom": {
+            "title": "From date",
+            "type": "string",
+            "description": "Optional. Threads older than this date (YYYY-MM-DD) are left out.",
+            "editor": "textfield"
+        },
+        "dateTo": {
+            "title": "To date",
+            "type": "string",
+            "description": "Optional. Threads newer than this date (YYYY-MM-DD) are left out.",
+            "editor": "textfield"
+        },
+        "maxThreadsPerSubreddit": {
+            "title": "Threads per subreddit",
+            "type": "integer",
+            "description": "Upper limit of threads kept for each subreddit (up to 1000; Reddit's feeds reach back a limited way).",
+            "editor": "number",
+            "default": 100,
+            "minimum": 0,
+            "maximum": 1000
+        },
+        "includeComments": {
+            "title": "Read comments",
+            "type": "boolean",
+            "description": "Adds the top comments of each thread, each tagged for the same themes.",
+            "editor": "checkbox",
+            "default": true
+        },
+        "maxThreadsWithComments": {
+            "title": "Threads whose comments are read",
+            "type": "integer",
+            "description": "Comments cost one request per thread, so only this many threads per subreddit get their comments read.",
+            "editor": "number",
+            "default": 30,
+            "minimum": 0
+        },
+        "maxCommentsPerThread": {
+            "title": "Comments per thread",
+            "type": "integer",
+            "description": "Top comments kept for each thread (up to 100).",
+            "editor": "number",
+            "default": 20,
+            "minimum": 0,
+            "maximum": 100
+        },
+        "competitors": {
+            "title": "Competitor names to tag",
+            "type": "array",
+            "description": "Names looked for in threads and comments. The default list covers common exam-prep brands; replace it with your own.",
+            "editor": "stringList",
+            "default": [
+                "magoosh",
+                "uworld",
+                "save my exams",
+                "savemyexams",
+                "fiveable",
+                "albert",
+                "revision village",
+                "revisionvillage",
+                "princeton review",
+                "kaplan",
+                "prepscholar",
+                "khan academy",
+                "bluebook",
+                "ibdocs",
+                "seneca",
+                "physics and maths tutor",
+                "gcse pod",
+                "tutorful"
+            ]
+        },
+        "customThemes": {
+            "title": "Your own themes",
+            "type": "object",
+            "description": "Optional extra themes as JSON: {\"theme name\": [\"phrase\", \"another phrase\"]}. They are added to the built-in price, worth_it and free_alternative themes (a theme with the same name replaces it).",
+            "editor": "json",
+            "prefill": {}
+        },
+        "delayBetweenRequestsMs": {
+            "title": "Delay between requests (ms)",
+            "type": "integer",
+            "description": "Pause before every request. Reddit limits how fast feeds can be read; a rate-limit answer is waited out.",
+            "editor": "number",
+            "default": 3000,
+            "minimum": 0
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "description": "Optional. Reddit sometimes refuses feeds to servers in data centres. If you have a proxy plan you may select it here; the Actor does not try to get around a refusal otherwise.",
+            "editor": "proxy"
+        }
+    },
+    "required": ["subreddits"]
+}

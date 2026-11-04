@@ -1,0 +1,15 @@
+{
+    "actorSpecification": 1,
+    "name": "facebook-group-reader",
+    "title": "Facebook Public Group Reader (logged out)",
+    "description": "Reads what a public Facebook group shows to a logged-out visitor: name, member count and visible posts with reaction and comment counts. Never logs in; reports login_wall when Facebook asks for a login.",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024
+}

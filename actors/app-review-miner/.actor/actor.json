@@ -1,0 +1,15 @@
+{
+    "actorSpecification": 1,
+    "name": "app-review-miner",
+    "title": "App Review Miner (competitor complaints from App Store and Google Play)",
+    "description": "Reads recent low-rated reviews of competitor apps from the Apple App Store and Google Play and groups the complaints by theme (crashes, billing, ads, support, missing features and more).",
+    "version": "0.1",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "minMemoryMbytes": 256,
+    "maxMemoryMbytes": 1024
+}

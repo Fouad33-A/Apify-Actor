@@ -1,118 +1,445 @@
 {
-  "title": "Verity Social Actor Input",
-  "type": "object",
-  "schemaVersion": 1,
-  "properties": {
-    "mode": {
-      "title": "Mode",
-      "type": "string",
-      "editor": "select",
-      "enum": [
-        "profile",
-        "search",
-        "comments"
-      ],
-      "enumTitles": [
-        "A - Profile lookup",
-        "B - Keyword/search discovery",
-        "C - Comment retrieval"
-      ],
-      "description": "A: look up known usernames. B: discover posts/creators by keyword. C: pull comments for known post URLs. To get comments alongside A or B in one run, use that mode and set fetchComments=true instead of running C separately.",
-      "default": "profile"
+    "title": "Verity Social Actor Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "mode": {
+            "title": "Mode",
+            "type": "string",
+            "editor": "select",
+            "enum": ["profile", "search", "posts", "expand", "comments", "probe", "discover"],
+            "enumTitles": [
+                "A - Profile lookup",
+                "B - Keyword/search discovery",
+                "Posts by URL (metrics for known post/video URLs)",
+                "Discover from known creators (expand)",
+                "C - Comment retrieval",
+                "Diagnostic probe (fetch a few public URLs and report)",
+                "Discover by web search (keywords -> accounts -> screening and score)"
+            ],
+            "description": "A: look up known usernames. B: discover posts/creators by keyword. Posts: read metrics of known post/video URLs (TikTok). C: pull comments for known post URLs. To get comments alongside A, B or Posts in one run, use that mode and set fetchComments=true instead of running C separately. Expand: give known-good creators as usernames; the Actor reads their recent posts and comments, collects the accounts they mention and who interacts with them, then looks up and (optionally) screens those candidates. Discover: give topic keywords (searchKeywords); the Actor searches the public web for Instagram, Facebook and TikTok accounts on those topics, opens every account found and applies the screening and score settings. The platform field is ignored in this mode.",
+            "default": "profile"
+        },
+        "platform": {
+            "title": "Platform",
+            "type": "string",
+            "editor": "select",
+            "enum": ["tiktok", "instagram", "facebook"],
+            "default": "instagram",
+            "description": "Which social platform to scrape: TikTok, Instagram or Facebook."
+        },
+        "usernames": {
+            "title": "Usernames (Mode A)",
+            "type": "array",
+            "editor": "stringList",
+            "description": "Handles/usernames to look up, without @ or full URL (e.g. \"nasa\").",
+            "default": [],
+            "prefill": ["nasa"]
+        },
+        "searchQueries": {
+            "title": "Search queries (Mode B)",
+            "type": "array",
+            "editor": "json",
+            "description": "Array of {\"query\": \"etf investing\", \"sortOrder\": \"relevance|recent|liked\", \"maxResults\": 25, \"dateFrom\": \"2026-01-01\", \"dateTo\": null}.",
+            "default": []
+        },
+        "postUrls": {
+            "title": "Post URLs (Mode C, or attached to A/B results)",
+            "type": "array",
+            "editor": "stringList",
+            "description": "Direct post/video URLs to pull comments for. Only used directly in Mode C - in Mode A/B, use fetchComments instead.",
+            "default": []
+        },
+        "maxResultsPerQuery": {
+            "title": "Max results per search query (Mode B default)",
+            "type": "integer",
+            "default": 25,
+            "minimum": 1,
+            "description": "Maximum number of results to return per search query (Mode B)."
+        },
+        "maxRecentPosts": {
+            "title": "Max recent posts per profile (Mode A)",
+            "type": "integer",
+            "default": 25,
+            "minimum": 0,
+            "description": "Maximum number of recent posts to fetch per profile (Mode A).",
+            "prefill": 3
+        },
+        "fetchComments": {
+            "title": "Also fetch comments (combined mode)",
+            "type": "boolean",
+            "description": "When true in Mode A or B, comment rows are fetched for every post returned and joined into the same dataset - no second run needed.",
+            "default": false
+        },
+        "maxCommentsPerPost": {
+            "title": "Max comments per post",
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum number of comments to fetch per post (Mode C)."
+        },
+        "topLevelCommentsOnly": {
+            "title": "Top-level comments only (exclude replies)",
+            "type": "boolean",
+            "default": true,
+            "description": "If enabled, only fetch top-level comments and skip replies."
+        },
+        "maxCandidates": {
+            "title": "Max accounts to examine (discover and expand modes)",
+            "type": "integer",
+            "default": 30,
+            "minimum": 1,
+            "description": "How many accounts found by the search (or by expand) are examined at all, the cheap follower check included. In discover mode only accounts that pass the cheap check use up 'accounts to open in full'."
+        },
+        "maxFullLookups": {
+            "title": "Discover: max accounts to open in full",
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "description": "How many accounts inside the follower range are opened in full (profile, 10 posts, links, website, score). Accounts ruled out by the cheap follower look do not count. This, with the proxy cap, is what the run spends its money on."
+        },
+        "maxTiktokLookups": {
+            "title": "Discover: max TikTok profiles to open",
+            "type": "integer",
+            "default": 6,
+            "minimum": 0,
+            "description": "TikTok has no cheap first look and its profile pages are the heaviest to load, so only this many TikTok accounts are opened per run (the rest are skipped and counted in OUTPUT.discovery.tiktokNotOpened). TikTok is the bonus platform; raise this if you want more of it."
+        },
+        "excludeUsernames": {
+            "title": "Already-known usernames to skip (expand mode)",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Accounts you have already screened. They are never returned as candidates."
+        },
+        "searchKeywords": {
+            "title": "Discover: search keywords",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Topic keywords for mode 'discover', e.g. budgeting for beginners, debt free journey. Each keyword is searched on the public web once per platform."
+        },
+        "excludeWords": {
+            "title": "Discover: words to leave out of the search",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Added to every search as minus words, e.g. course, coach, 'my book'."
+        },
+        "searchModifiers": {
+            "title": "Discover: words that steer the search to creators",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Added to every search, for example the phrase link in bio, or the word creator. Searches for a topic alone return many brands and institutions; words that creators put in their bios bring profiles of people closer to the top."
+        },
+        "discoverPlatforms": {
+            "title": "Discover: platforms to search",
+            "type": "array",
+            "editor": "stringList",
+            "default": ["instagram", "facebook", "tiktok"],
+            "description": "Any of instagram, facebook, tiktok."
+        },
+        "searchEngines": {
+            "title": "Discover: search engines, in order",
+            "type": "array",
+            "editor": "stringList",
+            "default": ["google", "bing", "duckduckgo", "brave"],
+            "description": "Tried in this order for each search. 'google' goes through Apify's own Google SERP proxy (plain HTTP, billed per request by the platform); bing, duckduckgo and brave use the browser. An engine that answers with a bot check is reported as blocked and not used again in the run (nothing is solved or clicked through); one that keeps returning nothing is dropped."
+        },
+        "maxSearchPages": {
+            "title": "Discover: result pages per search",
+            "type": "integer",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 5,
+            "description": "How many result pages are read per keyword and platform (Google gives 10 results per page, Bing up to 50)."
+        },
+        "maxSearchSeconds": {
+            "title": "Discover: time budget for the search phase (seconds)",
+            "type": "integer",
+            "default": 600,
+            "minimum": 30,
+            "maximum": 1800,
+            "description": "The search phase stops starting new searches after this many seconds (the search proxy can be slow and each request may take up to a minute). Accounts found so far are still looked up; OUTPUT.discovery.search.stoppedOnTime tells you when it happened."
+        },
+        "readTiktokPosts": {
+            "title": "Discover: read TikTok's recent posts",
+            "type": "boolean",
+            "default": false,
+            "description": "Off by default: reading a TikTok creator's recent posts is slow, often blocked, and costly in proxy traffic (autoplaying videos). With it off, TikTok's post-based score rules (B1 sponsored, B2 engagement, B5 posting rate) are unknown and take the full points on the platforms listed in 'unknown rules get full points'."
+        },
+        "minFollowers": {
+            "title": "Screening: minimum followers",
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional. Rows get passesFilters/filterFailures set against the screening criteria you give. The Actor still returns the raw data."
+        },
+        "maxFollowers": {
+            "title": "Screening: maximum followers",
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional, see minimum followers."
+        },
+        "requireContactEmail": {
+            "title": "Screening: require a contact email in the bio",
+            "type": "boolean",
+            "default": false,
+            "description": "Optional screening. When on, profiles without an e-mail address written in the bio get passesFilters=false with the reason. The Actor still returns the raw data."
+        },
+        "excludeBioPatterns": {
+            "title": "Screening: fail if bio or link contains",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "For example stan.store, ebook, e-book. Case-insensitive text match on the bio and link URLs."
+        },
+        "excludeCategoryPatterns": {
+            "title": "Screening: fail if the Page category contains",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Facebook shows a category under each Page name (Financial service, Nonprofit organization, Public figure, ...). A Page whose category contains one of these words fails, with the reason. For example: financial service, nonprofit, company, bank, insurance, software, app page, government, organization, local business."
+        },
+        "onlyPassing": {
+            "title": "Only write profiles that pass the screening",
+            "type": "boolean",
+            "default": false,
+            "description": "Profiles that were read fine but fail the criteria are left out. Blocked or failed lookups are still written, never dropped silently."
+        },
+        "followLinkInBio": {
+            "title": "Screening: follow link-in-bio pages",
+            "type": "boolean",
+            "default": true,
+            "description": "When you give 'fail if bio or link contains' patterns, profiles that pass the first checks have their link-in-bio pages (linktr.ee, beacons.ai, bio.link, carrd.co, stan.store and similar) opened and the destination links checked against the same patterns, so a shop hidden one click behind a Linktree is seen. A page that cannot be read is reported in screeningWarnings, never counted as clean."
+        },
+        "followCreatorSite": {
+            "title": "Screening: read the creator's own website",
+            "type": "boolean",
+            "default": false,
+            "description": "For profiles that pass the first checks, open the creator's own site (the domain behind the bio link, not a platform or a link-in-bio page), read what a visitor sees first (title, description, headings, menu and button labels) and any public contact e-mail. The e-mail fills contactEmails (and siteContactEmails); the text is returned in creatorSites and checked against 'fail if website mentions'. With 'require contact e-mail' on, a missing bio e-mail is judged only after the site was read. Pages that cannot be read, or domains parked or for sale, are reported in screeningWarnings."
+        },
+        "excludeSitePatterns": {
+            "title": "Screening: fail if website mentions",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "Needs 'read the creator's own website'. For example course, masterclass, academy, coaching, my book, shop. Case-insensitive match on the site's title, description, headings and menu/button labels."
+        },
+        "maxSitePages": {
+            "title": "Screening: websites to read per creator",
+            "type": "integer",
+            "default": 2,
+            "minimum": 1,
+            "maximum": 5,
+            "description": "How many different sites per creator are read (the creator's own domain first). Each costs one light page load, plus one contact page when no e-mail is on the home page."
+        },
+        "reachPosts": {
+            "title": "Reach rule: number of latest posts to sample",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 12,
+            "description": "0 = off. When 4-6, profiles that pass the first screen get the median likes (and views, where shown) of their latest posts, as a percentage of followers: likesPctOfFollowers, viewsPctOfFollowers, reachPctOfFollowers. Costs one extra profile load plus one page per post, only for profiles that passed."
+        },
+        "minReachPercent": {
+            "title": "Screening: minimum reach (% of followers)",
+            "type": "number",
+            "minimum": 0,
+            "description": "Optional, needs 'Reach rule' above. Profiles whose measured reachPctOfFollowers is below this get passesFilters=false with the reason. When the reach cannot be computed (hidden likes, too few posts read) the profile is not failed: the row carries a warning instead."
+        },
+        "scorecard": {
+            "title": "Score: apply the Marketing Agent's scorecard",
+            "type": "boolean",
+            "default": false,
+            "description": "For profiles that pass the hard filters, read the latest 10 posts and compute the mechanical score B1-B5 (not monetised 20, engagement 15, size 10, reachable by e-mail 10, posts per week 5; maximum 60) with the points per rule. Also switches on the management/agency e-mail fail rule (A3). Rules the platform does not show are listed in scoreUnknownRules and warned about."
+        },
+        "minScore": {
+            "title": "Score: minimum total to pass",
+            "type": "number",
+            "minimum": 0,
+            "description": "Profiles scoring below this get passesFilters=false with the reason. Needs 'apply the scorecard'."
+        },
+        "agencyEmailPatterns": {
+            "title": "Score: management/agency e-mail words",
+            "type": "array",
+            "editor": "stringList",
+            "default": [
+                "management",
+                "mgmt",
+                "talent",
+                "agency",
+                "represent",
+                "entertainment",
+                "collective",
+                "artists",
+                "viralnation",
+                "bookings"
+            ],
+            "description": "A fail if an e-mail written in the BIO contains one of these words (A3). Needs 'apply the scorecard'."
+        },
+        "monetisationPatterns": {
+            "title": "Score: shop/course/coaching link words (B1)",
+            "type": "array",
+            "editor": "stringList",
+            "default": [
+                "shop",
+                "store",
+                "merch",
+                "etsy",
+                "checkout",
+                "liketoknow",
+                "ltk.",
+                "course",
+                "coaching",
+                "mentorship"
+            ],
+            "description": "B1 (not monetised) scores 0 if a bio link, a link-in-bio destination or the creator's website text contains one of these."
+        },
+        "warnPatterns": {
+            "title": "Score: words that only raise a warning",
+            "type": "array",
+            "editor": "stringList",
+            "default": [],
+            "description": "For example crypto, trading. Found in the bio, links or creator website: a warning to check the fit by hand, never a fail."
+        },
+        "maxSponsoredPosts": {
+            "title": "Score: sponsored posts allowed in the last 10 (B1)",
+            "type": "integer",
+            "default": 1,
+            "minimum": 0,
+            "description": "More than this scores 0 on B1. A post counts as sponsored with #ad, #sponsored, #paidpartnership, the words 'paid partnership', or the platform's own label."
+        },
+        "unknownFullScorePlatforms": {
+            "title": "Score: platforms where unknown rules get full points",
+            "type": "array",
+            "editor": "stringList",
+            "default": ["tiktok"],
+            "description": "On these platforms a rule whose data is not shown (TikTok hides most post data when logged out) is given its full points and listed in scoreUnknownRules, for the Marketing Agent to fill in by hand. On every other platform an unknown rule counts 0."
+        },
+        "enrichSearchAuthors": {
+            "title": "Load each creator's profile page in search (Mode B)",
+            "type": "boolean",
+            "description": "When true, every creator found by a keyword search also gets a full profile row (bio, links, contact email, exact follower count) by opening their profile page. Costs one extra page load per creator. When false, the profile row only carries what the search result itself showed.",
+            "default": true
+        },
+        "maxItemsPerRun": {
+            "title": "Hard cap: max dataset items this run may write",
+            "type": "integer",
+            "description": "Internal safety net in addition to the Actor run own maxItems/maxTotalChargeUsd call options.",
+            "default": 2000,
+            "minimum": 1,
+            "prefill": 20
+        },
+        "sessionCookies": {
+            "title": "Login session cookie header (this platform only)",
+            "type": "string",
+            "editor": "textfield",
+            "isSecret": true,
+            "description": "Session cookie header for the selected platform, exported from a real logged-in browser session. Never a password."
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "editor": "proxy",
+            "default": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": ["RESIDENTIAL"]
+            },
+            "description": "Proxy configuration to use for requests. RESIDENTIAL is the default because these platforms block datacenter addresses much more often.",
+            "prefill": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": ["RESIDENTIAL"]
+            }
+        },
+        "debugProbes": {
+            "title": "Diagnostic probes (mode = probe only)",
+            "type": "array",
+            "description": "Up to 12 items like {\"url\": \"https://www.tiktok.com/@nasa\", \"type\": \"page\"} or {\"url\": \"...\", \"type\": \"fetch\", \"headers\": {\"x-ig-app-id\": \"...\"}}. Optional per item: \"grep\": [\"text\", ...] (snippets around matches), \"outline\": {\"selector\": \"[role=main]\", \"maxDepth\": 10, \"maxLines\": 150} (compact DOM outline), \"captureUrls\": [\"/api/post/item_list\"] (records the JSON the page itself loads from matching URLs; with \"scroll\": 3 to scroll first and \"click\": \"selector\" to click once; \"captureHead\": 6000 for longer samples), \"jsonScriptId\" + \"jsonPath\": [\"key\", ...] (extract from an embedded JSON script). HTTPS GET on instagram/facebook/tiktok hosts only. Results are saved to the PROBE_RESULTS record. Reports what comes back, including login walls; it does not try to get past them.",
+            "editor": "json",
+            "default": []
+        },
+        "maxProxyMegabytes": {
+            "title": "Hard cap: proxy traffic (MB) this run may use",
+            "type": "integer",
+            "description": "The run stops cleanly once the browser has moved this many megabytes (residential proxy is billed per GB). Set to 0 for no cap.",
+            "default": 300,
+            "minimum": 0
+        },
+        "maxProxyUsd": {
+            "title": "Hard cap: proxy spend (USD) this run may use",
+            "type": "number",
+            "minimum": 0,
+            "description": "The run stops cleanly once its measured proxy traffic would cost this much (traffic in MB x the proxy price per GB). The measured traffic is accurate: it matched the billed proxy charge within a few percent. Rows already written are kept. Use together with, or instead of, the megabyte cap; the smaller applies."
+        },
+        "proxyPricePerGbUsd": {
+            "title": "Proxy price per GB (USD), for the cost report and the dollar cap",
+            "type": "number",
+            "default": 8,
+            "description": "Apify's residential proxy costs about US$8 per GB (measured on this Actor: US$1.57 for 196 MB). The cost report shows estimatedProxyUsd = megabytes / 1000 x this price. Change it only if your plan has a different rate."
+        },
+        "blockHeavyResources": {
+            "title": "Block images, video and fonts",
+            "type": "boolean",
+            "description": "Saves proxy traffic by not loading images, video and fonts. Off by default: TikTok returned an empty page when these were blocked. Try it on Instagram/Facebook to cut cost.",
+            "default": false
+        },
+        "blockResourceTypes": {
+            "title": "Resource types to skip",
+            "type": "array",
+            "editor": "select",
+            "items": {
+                "type": "string",
+                "enum": ["media", "image", "font"]
+            },
+            "description": "Types of files the browser is not allowed to download, to save proxy traffic. Default: media (video and audio streams; the TikTok creator page autoplays previews that otherwise cost a lot of proxy traffic). Blocking image and font together with media made TikTok return an empty page once, so add them only after testing.",
+            "default": ["media"]
+        },
+        "blockMode": {
+            "title": "How images and media are blocked",
+            "type": "string",
+            "editor": "select",
+            "enum": ["flags", "route"],
+            "enumTitles": [
+                "Browser flags (default; keeps the browser cache on, fonts are not blocked)",
+                "Request interception (old way; turns the browser cache off, blocks fonts too)"
+            ],
+            "default": "flags",
+            "description": "'flags' switches images off and stops media autoplay with browser flags and leaves the browser's HTTP cache on, so a page's scripts are downloaded once, not again on every page. 'route' (the old way) blocks by aborting requests, which also disables the cache. If a platform stops working with 'flags', set this to 'route'."
+        },
+        "standardUserAgent": {
+            "title": "Announce plain Chrome instead of HeadlessChrome",
+            "type": "boolean",
+            "description": "Headless Chromium puts 'HeadlessChrome' in its user agent, which some sites treat as a bot. This announces the same browser version as ordinary Chrome. It changes nothing else and does not hide automation.",
+            "default": false
+        },
+        "fullChromium": {
+            "title": "Use full Chrome (new headless mode)",
+            "type": "boolean",
+            "description": "Runs Chrome's full 'new headless' mode instead of the stripped-down headless shell. Experiment for TikTok, which flags the default headless shell as a bot.",
+            "default": false
+        },
+        "hideAutomationFlag": {
+            "title": "Do not set the automation flag",
+            "type": "boolean",
+            "description": "Leaves out Chromium's 'controlled by automation' flag (navigator.webdriver). Experiment for TikTok. Changes nothing else.",
+            "default": false
+        },
+        "maxConcurrentRuns": {
+            "title": "Max runs of this Actor working at once",
+            "type": "integer",
+            "default": 2,
+            "minimum": 0,
+            "description": "A new run waits until fewer than this many OTHER runs that started earlier are still active (parallel browser runs made page loads time out). 0 = no limit."
+        },
+        "concurrencyWaitMinutes": {
+            "title": "How long a run may wait for a free slot (minutes)",
+            "type": "integer",
+            "default": 10,
+            "minimum": 1,
+            "description": "After this the run ends without doing any work (OUTPUT.skipped = true) so the caller can retry later."
+        }
     },
-    "platform": {
-      "title": "Platform",
-      "type": "string",
-      "editor": "select",
-      "enum": [
-        "tiktok",
-        "instagram",
-        "facebook"
-      ],
-      "default": "instagram",
-      "description": "Which social platform to scrape: TikTok, Instagram or Facebook."
-    },
-    "usernames": {
-      "title": "Usernames (Mode A)",
-      "type": "array",
-      "editor": "stringList",
-      "description": "Handles/usernames to look up, without @ or full URL (e.g. \"nasa\").",
-      "default": []
-    },
-    "searchQueries": {
-      "title": "Search queries (Mode B)",
-      "type": "array",
-      "editor": "json",
-      "description": "Array of {\"query\": \"etf investing\", \"sortOrder\": \"relevance|recent|liked\", \"maxResults\": 25, \"dateFrom\": \"2026-01-01\", \"dateTo\": null}.",
-      "default": []
-    },
-    "postUrls": {
-      "title": "Post URLs (Mode C, or attached to A/B results)",
-      "type": "array",
-      "editor": "stringList",
-      "description": "Direct post/video URLs to pull comments for. Only used directly in Mode C - in Mode A/B, use fetchComments instead.",
-      "default": []
-    },
-    "maxResultsPerQuery": {
-      "title": "Max results per search query (Mode B default)",
-      "type": "integer",
-      "default": 25,
-      "minimum": 1,
-      "description": "Maximum number of results to return per search query (Mode B)."
-    },
-    "maxRecentPosts": {
-      "title": "Max recent posts per profile (Mode A)",
-      "type": "integer",
-      "default": 25,
-      "minimum": 0,
-      "description": "Maximum number of recent posts to fetch per profile (Mode A)."
-    },
-    "fetchComments": {
-      "title": "Also fetch comments (combined mode)",
-      "type": "boolean",
-      "description": "When true in Mode A or B, comment rows are fetched for every post returned and joined into the same dataset - no second run needed.",
-      "default": false
-    },
-    "maxCommentsPerPost": {
-      "title": "Max comments per post",
-      "type": "integer",
-      "default": 20,
-      "minimum": 1,
-      "maximum": 100,
-      "description": "Maximum number of comments to fetch per post (Mode C)."
-    },
-    "topLevelCommentsOnly": {
-      "title": "Top-level comments only (exclude replies)",
-      "type": "boolean",
-      "default": true,
-      "description": "If enabled, only fetch top-level comments and skip replies."
-    },
-    "maxItemsPerRun": {
-      "title": "Hard cap: max dataset items this run may write",
-      "type": "integer",
-      "description": "Internal safety net in addition to the Actor run own maxItems/maxTotalChargeUsd call options.",
-      "default": 2000,
-      "minimum": 1
-    },
-    "sessionCookies": {
-      "title": "Login session cookie header (this platform only)",
-      "type": "string",
-      "editor": "textfield",
-      "isSecret": true,
-      "description": "Session cookie header for the selected platform, exported from a real logged-in browser session. Never a password."
-    },
-    "proxyConfiguration": {
-      "title": "Proxy configuration",
-      "type": "object",
-      "editor": "proxy",
-      "default": {
-        "useApifyProxy": true
-      },
-      "description": "Proxy configuration to use for requests."
-    }
-  },
-  "required": [
-    "mode",
-    "platform"
-  ]
+    "required": ["mode", "platform"]
 }

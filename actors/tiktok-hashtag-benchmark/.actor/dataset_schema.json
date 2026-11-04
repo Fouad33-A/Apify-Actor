@@ -1,0 +1,52 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "benchmarks": {
+            "title": "Hashtag benchmarks and videos",
+            "transformation": {
+                "fields": [
+                    "recordType",
+                    "hashtag",
+                    "status",
+                    "videosUsed",
+                    "medianViews",
+                    "p25Views",
+                    "p75Views",
+                    "p90Views",
+                    "medianEngagementRatePct",
+                    "views",
+                    "likes",
+                    "comments",
+                    "region",
+                    "createdAt",
+                    "author",
+                    "url",
+                    "scrapedAt"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "recordType": { "label": "Row", "format": "text" },
+                    "hashtag": { "label": "Hashtag", "format": "text" },
+                    "status": { "label": "Status", "format": "text" },
+                    "videosUsed": { "label": "Videos used", "format": "number" },
+                    "medianViews": { "label": "Median views", "format": "number" },
+                    "p25Views": { "label": "25th pct views", "format": "number" },
+                    "p75Views": { "label": "75th pct views", "format": "number" },
+                    "p90Views": { "label": "90th pct views", "format": "number" },
+                    "medianEngagementRatePct": { "label": "Median engagement %", "format": "number" },
+                    "views": { "label": "Views", "format": "number" },
+                    "likes": { "label": "Likes", "format": "number" },
+                    "comments": { "label": "Comments", "format": "number" },
+                    "region": { "label": "Country", "format": "text" },
+                    "createdAt": { "label": "Posted", "format": "date" },
+                    "author": { "label": "Creator", "format": "text" },
+                    "url": { "label": "Video", "format": "link" },
+                    "scrapedAt": { "label": "Read at", "format": "date" }
+                }
+            }
+        }
+    }
+}

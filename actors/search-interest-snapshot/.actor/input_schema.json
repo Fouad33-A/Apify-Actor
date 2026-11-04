@@ -1,0 +1,84 @@
+{
+    "title": "Search Interest Snapshot Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "keywords": {
+            "title": "Keywords",
+            "type": "array",
+            "description": "Search terms to look up, for example igcse, sat prep, ib maths tutor.",
+            "editor": "stringList",
+            "default": ["igcse", "sat prep"],
+            "prefill": ["igcse", "sat prep"]
+        },
+        "geos": {
+            "title": "Countries",
+            "type": "array",
+            "description": "Two-letter country codes such as AE, SA, QA, GB, US. Leave the list empty or use an empty entry for worldwide.",
+            "editor": "stringList",
+            "default": ["AE"],
+            "prefill": ["AE", "SA"]
+        },
+        "timeRange": {
+            "title": "Time range",
+            "type": "string",
+            "description": "today 12-m (12 months), today 3-m, today 5-y, now 7-d, all, or two dates like 2025-01-01 2025-12-31.",
+            "editor": "textfield",
+            "default": "today 12-m"
+        },
+        "compareTogether": {
+            "title": "Compare keywords with each other",
+            "type": "boolean",
+            "description": "Off: each keyword gets its own 0-100 scale. On: up to 5 keywords share one scale, so their numbers can be compared.",
+            "editor": "checkbox",
+            "default": false
+        },
+        "property": {
+            "title": "Search type",
+            "type": "string",
+            "description": "Where the searches happened.",
+            "editor": "select",
+            "default": "",
+            "enum": ["", "youtube", "news", "images", "froogle"],
+            "enumTitles": ["Web search", "YouTube", "News", "Image search", "Google Shopping"]
+        },
+        "category": {
+            "title": "Category id",
+            "type": "integer",
+            "description": "Google Trends category id; 0 means all categories. Other ids are listed on the Trends page.",
+            "editor": "number",
+            "default": 0,
+            "minimum": 0
+        },
+        "includeTimeline": {
+            "title": "Add one row per time point",
+            "type": "boolean",
+            "description": "Adds the full weekly or daily series (recordType timeline), handy for charts.",
+            "editor": "checkbox",
+            "default": false
+        },
+        "includeRelatedQueries": {
+            "title": "Add related queries",
+            "type": "boolean",
+            "description": "Adds the top and rising related searches for each keyword (recordType relatedQuery).",
+            "editor": "checkbox",
+            "default": true
+        },
+        "language": {
+            "title": "Interface language",
+            "type": "string",
+            "description": "Language code used for the request, for example en-US.",
+            "editor": "textfield",
+            "default": "en-US"
+        },
+        "delayBetweenRequestsMs": {
+            "title": "Delay between requests (ms)",
+            "type": "integer",
+            "description": "Google Trends limits how fast it can be asked; 2500 ms is a gentle default. A rate-limit answer is waited out.",
+            "editor": "number",
+            "default": 2500,
+            "minimum": 0
+        }
+    },
+    "required": ["keywords"]
+}
