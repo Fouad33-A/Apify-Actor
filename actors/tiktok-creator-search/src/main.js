@@ -3,6 +3,7 @@ import { Actor, log } from 'apify';
 import { presetSearches } from './presets.js';
 import { defaultEngines, discoverCreators, parseFollowerHint, CRITERIA_QUERY } from './serp.js';
 import { fetchVideoPlace } from './video.js';
+import { fromCandidateFeed } from './candidate-source.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
 const RUNTIME_FIX_VERSION = '2026-11-04-v7';
@@ -24,6 +25,7 @@ const DEFAULTS = {
     matchMode: 'prefer',
     examPresets: [],
     seedHandles: [],
+    candidateFeed: [],
     knownHandles: [],
     rememberProcessedHandles: true,
     addMedianViews: false,
@@ -50,6 +52,7 @@ export function readInput(raw) {
         .map((h) => `#${h}`);
     const cleanHandle = (v) => String(v ?? '').trim().replace(/^@+/, '').toLowerCase();
     const seedHandles = [...new Set((input.seedHandles ?? []).map(cleanHandle).filter(Boolean))];
+    if (!Array.isArray(input.candidateFeed)) throw new Error('candidateFeed must be an array of handles or profile URLs.');
     const token = input.resumeToken ?? {};
     if (typeof token !== 'object' || Array.isArray(token)) throw new Error('resumeToken must be an object from a prior RUN_SUMMARY.');
     const resumeIndex = Number.isInteger(token.nextSearchIndex) && token.nextSearchIndex >= 0 ? token.nextSearchIndex : 0;
@@ -409,7 +412,13 @@ export async function runSearch({
         }
     };
 
-    for (let searchIndex = nextSearchIndex; searchIndex < input.searches.length; searchIndex += 1) {
+    const suppliedCandidates = fromCandidateFeed(input.candidateFeed, [...known]);
+    if (suppliedCandidates.length) {
+        for (const candidate of suppliedCandidates) seen.set(candidate.handle, candidate);
+        log.info('Offline candidate feed: ' + suppliedCandidates.length + ' new handles (no search request).');
+        await processCandidates(suppliedCandidates);
+    }
+    for (let searchIndex = nextSearchIndex; searchIndex < (suppliedCandidates.length ? 0 : input.searches.length); searchIndex += 1) {
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
         if (input.enrichProfiles && secondsLeft() < 130) break;
