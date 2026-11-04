@@ -11,24 +11,25 @@ export function selectCreators(rows, limit = 5) {
   }
   return out;
 }
-export function prepareCommentsInput(rows, maxCommentsPerPost = 100) {
+export function prepareCommentsInput(rows, maxCommentsPerPost = 100, maxVideosPerCreator = 10) {
+  const videoLimit = Math.max(2, Math.min(10, Math.floor(Number(maxVideosPerCreator) || 10)));
   const grouped = new Map();
   for (const row of rows ?? []) {
     if (row?.rowType !== 'summary' || !Array.isArray(row.topVideosByComments)) continue;
     const creator = handle(row.username ?? row.handle);
     if (!/^[a-z0-9._]{2,40}$/.test(creator)) continue;
     const urls = grouped.get(creator) ?? [];
-    for (const v of row.topVideosByComments.slice(0, 5)) {
+    for (const v of row.topVideosByComments) {
       const url = typeof v === 'string' ? v : v?.videoUrl ?? v?.url;
       const m = typeof url === 'string' && url.match(/^https:\/\/(?:www\.)?tiktok\.com\/@([\w.]+)\/video\/(\d+)(?:[/?#]|$)/i);
       if (!m || m[1].toLowerCase() !== creator) continue;
       const canonical = 'https://www.tiktok.com/@' + creator + '/video/' + m[2];
       if (!urls.includes(canonical)) urls.push(canonical);
     }
-    grouped.set(creator, urls.slice(0, 5));
+    grouped.set(creator, urls.slice(0, videoLimit));
   }
   const creatorVideos = [...grouped].filter(([, urls]) => urls.length >= 2).map(([creator, videoUrls]) => ({creator, videoUrls}));
-  return {creatorVideos, videoUrls: creatorVideos.flatMap(x => x.videoUrls), maxCommentsPerPost, minAskers: 3, minVideos: 2};
+  return {creatorVideos, videoUrls: creatorVideos.flatMap(x => x.videoUrls), maxCommentsPerPost, maxVideosPerCreator: videoLimit, minAskers: 3, minVideos: 2};
 }
 export function summarize({creators, commentsInput, commentRows, childRuns}) {
   const repeatedQuestions = (commentRows ?? []).filter(x => x.recordType === 'REPEATED_QUESTION' && x.askerCount >= 3 && x.videoCount >= 2);
