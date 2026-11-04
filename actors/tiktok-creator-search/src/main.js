@@ -273,6 +273,14 @@ export async function runSearch({
     shouldStop = () => false,
     now = () => Date.now(),
 }) {
+    // At most two paid profile enrichment calls per Creator Search run.
+    // This is a run-count guard, not an account-wide dollar spending guarantee.
+    let profileCalls = 0;
+    const budgetedEnrich = async (...args) => {
+        if (profileCalls >= 2) throw new Error('Nested profile enrichment call limit reached (2); skipping further paid calls.');
+        profileCalls += 1;
+        return enrich(...args);
+    };
     const startedMs = now();
     const started = new Date(startedMs).toISOString();
     const elapsed = () => Math.max(0, (now() - startedMs) / 1000);
@@ -365,7 +373,7 @@ export async function runSearch({
             log.info(`[${RUNTIME_FIX_VERSION}] Profile screening batch: ${names.length} creator(s) [${names.join(', ')}].`);
             let screened = new Map();
             try {
-                screened = await enrich(input.profileActor, names, {
+                screened = await budgetedEnrich(input.profileActor, names, {
                     medianViews: false,
                     needLatestVideo: false,
                     waitSecs: 115,
@@ -388,7 +396,7 @@ export async function runSearch({
             let full = new Map();
             if (eligible.length && !outOfTime() && secondsLeft() >= 130) {
                 try {
-                    full = await enrich(input.profileActor, eligible.map((c) => c.handle), {
+                    full = await budgetedEnrich(input.profileActor, eligible.map((c) => c.handle), {
                         medianViews: input.wantMedian,
                         videosForMedian: input.videosForMedian,
                         needLatestVideo: input.regions.length > 0,
