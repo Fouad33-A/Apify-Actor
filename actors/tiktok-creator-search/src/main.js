@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-04-v11';
+const RUNTIME_FIX_VERSION = '2026-11-04-v12';
 const BATCH = 5;
 const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
 
@@ -435,9 +435,9 @@ export async function runSearch({
     for (let searchIndex = nextSearchIndex; searchIndex < (explicitCandidateFeed || input.discoverySource === 'creativeCenter' ? 0 : input.searches.length); searchIndex += 1) {
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
-        // Reserve time for enrichment, but discover across multiple topics before screening.
-        if (input.enrichProfiles && secondsLeft() < 135) break;
-        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.criteriaOnly ? 45 : input.maxSearchSeconds, Math.floor(secondsLeft() - (input.enrichProfiles ? 105 : 25))));
+        // Spend at most ~90 seconds discovering; reserve the remainder for screening.
+        if (input.enrichProfiles && secondsLeft() < Math.max(120, input.maxRunSeconds - 90)) break;
+        const remainingSearchSeconds = Math.max(1, Math.min(input.maxSearchSeconds, input.enrichProfiles ? 20 : 45, Math.floor(secondsLeft() - (input.enrichProfiles ? Math.max(120, input.maxRunSeconds - 90) : 25))));
         const localReport = { queries: [], blocked: false, stoppedOnTime: false };
         const { candidates } = await discoverCreators({
             keywords: [keyword], excludeWords: input.excludeWords, maxPages: input.maxSearchPages,
