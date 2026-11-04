@@ -30,11 +30,18 @@ const DEFAULTS = {
     videosForMedian: 10,
     hashtagsFirst: true,
     excludeVerified: true,
+    minFollowers: 10000,
+    maxFollowers: 150000,
+    minMedianViews: 5000,
     maxDaysSinceLastPost: 7,
 };
 
 export function readInput(raw) {
     const input = { ...DEFAULTS, ...Object.fromEntries(Object.entries(raw ?? {}).filter(([, v]) => v != null)) };
+    const required = { minFollowers: 10000, maxFollowers: 150000, minMedianViews: 5000, maxDaysSinceLastPost: 7, excludeVerified: true, onlyPassing: true, enrichProfiles: true };
+    for (const key of Object.keys(required)) {
+        if (input[key] !== required[key]) throw new Error('Required screening setting invalid: ' + key);
+    }
     const presets = presetSearches(input.examPresets);
     const keywords = [...(input.keywords ?? []), ...presets.keywords].map((k) => String(k).trim()).filter(Boolean);
     const hashtags = [...(input.hashtags ?? []), ...presets.hashtags]
@@ -476,6 +483,7 @@ export async function runSearch({
         };
     });
     const summary = {
+        activeFilters: { minFollowers: input.minFollowers, maxFollowers: input.maxFollowers, minMedianViews: input.minMedianViews, maxDaysSinceLastPost: input.maxDaysSinceLastPost, excludeVerified: input.excludeVerified },
         recordType: 'RUN_SUMMARY', version: RUNTIME_FIX_VERSION, startedAt: started, finishedAt: new Date(now()).toISOString(),
         searches: input.searches, keywordsDone: searchedKeywords, keywordsRequested: input.searches.length, keywordsCompleted: searchedKeywords.length,
         handlesFound: seen.size, candidatesSelected: processed.size, creatorsProcessed: rows.length, skippedByHint, skippedKnownHandles,
