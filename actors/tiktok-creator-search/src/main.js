@@ -320,7 +320,6 @@ export async function runSearch({
     const processCandidates = async (candidates) => {
         const fresh = orderCandidates(candidates.filter((c) => !processed.has(c.handle) && !known.has(c.handle)), input)
             .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
-        for (const c of candidates) if (known.has(c.handle) && !skippedKnown.has(c.handle)) { skippedKnown.add(c.handle); skippedKnownHandles += 1; }
         for (let i = 0; i < fresh.length && !outOfTime(); i += BATCH) {
             if (input.enrichProfiles && secondsLeft() < 130) break; // Actor.call may wait up to 120 seconds
             const rawBatch = fresh.slice(i, i + BATCH);
@@ -419,6 +418,7 @@ export async function runSearch({
         report.blocked ||= localReport.blocked;
         report.stoppedOnTime ||= localReport.stoppedOnTime;
         for (const c of candidates) {
+            if (known.has(c.handle) && !skippedKnown.has(c.handle)) { skippedKnown.add(c.handle); skippedKnownHandles += 1; }
             const old = seen.get(c.handle);
             if (!old) seen.set(c.handle, c);
             else {
