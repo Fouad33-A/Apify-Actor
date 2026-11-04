@@ -28,9 +28,7 @@
         "required": [
           "creator",
           "videoUrls"
-        ],
-        "title": "Creator video group",
-        "description": "One creator and the TikTok videos to analyze for that creator."
+        ]
       }
     },
     "videoUrls": {
