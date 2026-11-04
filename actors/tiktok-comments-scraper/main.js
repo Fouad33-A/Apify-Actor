@@ -169,13 +169,25 @@ function detectLanguage(text) {
     return 'und';
 }
 
+function questionClusterKey(text) {
+    const normalized = normalizeQuestion(text);
+    if (!normalized) return null;
+    // Keep intent distinct: "how" and "why" are not interchangeable.
+    // Canonical token sets catch reordering and harmless filler, not arbitrary paraphrases.
+    const tokens = clusterTokens(text);
+    const topics = tokens.filter(isTopicToken);
+    if (tokens.length < 3 || topics.length < 2) return `exact:${normalized}`;
+    return `token:${questionType(text)}:${tokens.join('|')}`;
+}
+
 function buildRepeatedQuestions(questionRows, minDistinctAskers = 3, minDistinctVideos = 2) {
     const grouped = new Map();
     for (const row of questionRows) {
         const normalized = normalizeQuestion(row.commentText);
         const creator = row.creator ?? creatorFromVideoUrl(row.videoUrl);
-        if (!creator || !normalized || !row.username || !row.videoId) continue;
-        const key = `${creator.toLowerCase()}\u0000${normalized}`;
+        const clusterKey = questionClusterKey(row.commentText);
+        if (!creator || !normalized || !clusterKey || !row.username || !row.videoId) continue;
+        const key = `${creator.toLowerCase()}\u0000${clusterKey}`;
         const group = grouped.get(key) ?? [];
         group.push(row);
         grouped.set(key, group);
@@ -184,18 +196,28 @@ function buildRepeatedQuestions(questionRows, minDistinctAskers = 3, minDistinct
     for (const rows of grouped.values()) {
         const askers = new Set(rows.map(row => String(row.userId ?? row.username).trim().toLowerCase()));
         const videos = new Set(rows.map(row => row.videoId));
-        if (askers.size < minDistinctAskers || videos.size < minDistinctVideos) continue;
+        if (askers.size < Math.max(3, minDistinctAskers) || videos.size < Math.max(2, minDistinctVideos)) continue;
+        const uniqueExamples = [];
+        const exampleAskers = new Set();
+        for (const row of rows) {
+            const asker = String(row.userId ?? row.username).trim().toLowerCase();
+            if (exampleAskers.has(asker)) continue;
+            exampleAskers.add(asker);
+            uniqueExamples.push({ text: row.commentText, username: row.username, videoUrl: row.videoUrl });
+            if (uniqueExamples.length === 3) break;
+        }
         result.push({
             recordType: 'REPEATED_QUESTION',
             creator: rows[0].creator ?? creatorFromVideoUrl(rows[0].videoUrl),
             questionText: rows[0].commentText,
             normalizedQuestion: normalizeQuestion(rows[0].commentText),
             questionType: questionType(rows[0].commentText),
+            language: rows[0].language ?? detectLanguage(rows[0].commentText),
             askerCount: askers.size,
             videoCount: videos.size,
-            exampleComments: rows.slice(0, 3).map(row => ({ text: row.commentText, username: row.username, videoUrl: row.videoUrl })),
+            exampleComments: uniqueExamples,
             matchingVideoUrls: [...new Set(rows.map(row => row.videoUrl))],
-            clusterMethod: 'exact_normalized_question',
+            clusterMethod: questionClusterKey(rows[0].commentText).startsWith('token:') ? 'intent_and_canonical_tokens' : 'exact_normalized_question',
         });
     }
     return result.sort((a,b) => b.videoCount-a.videoCount || b.askerCount-a.askerCount);
