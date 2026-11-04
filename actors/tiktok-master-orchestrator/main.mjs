@@ -18,7 +18,7 @@ try {
   const maxCommentsPerPost = Math.max(1, Math.min(1000, Math.floor(Number(input.maxCommentsPerPost) || 100)));
   const timeoutSecs = Math.max(60, Math.min(3600, Math.floor(Number(input.childTimeoutSecs) || 900)));
   const searchRows = await runChild('creatorSearch', ACTOR_IDS.creatorSearch, {
-    ...(input.searchInput ?? {}), maxCreators, onlyPassing: true, enrichProfiles: true, profileActor: ACTOR_IDS.profileStats,
+    ...(input.searchInput ?? {}), ...(Array.isArray(input.keywords) ? {keywords: input.keywords} : {}), ...(Array.isArray(input.hashtags) ? {hashtags: input.hashtags} : {}), maxCreators, onlyPassing: true, enrichProfiles: true, profileActor: ACTOR_IDS.profileStats,
   }, timeoutSecs);
   const creators = selectCreators(searchRows, maxCreators);
   if (!creators.length) throw new Error('No confirmed qualifying creators; stopping before downstream runs.');
