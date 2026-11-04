@@ -415,20 +415,21 @@ export async function runSearch({
         }
     };
 
+    const explicitCandidateFeed = input.candidateFeed.length > 0;
     const suppliedCandidates = fromCandidateFeed(input.candidateFeed, [...known]);
     if (suppliedCandidates.length) {
         for (const candidate of suppliedCandidates) seen.set(candidate.handle, candidate);
         log.info('Offline candidate feed: ' + suppliedCandidates.length + ' new handles (no search request).');
         await processCandidates(suppliedCandidates);
     }
-    if (input.discoverySource === 'creativeCenter' && !suppliedCandidates.length) {
+    if (input.discoverySource === 'creativeCenter' && !explicitCandidateFeed) {
         const free = await discoverFromCreativeCenter({ known: [...known] });
         report.freeDiscovery = free.diagnostics;
         for (const candidate of free.candidates) seen.set(candidate.handle, candidate);
         log.info('Creative Center public pages: ' + free.candidates.length + ' new candidate handles.');
         await processCandidates(free.candidates);
     }
-    for (let searchIndex = nextSearchIndex; searchIndex < (suppliedCandidates.length || input.discoverySource === 'creativeCenter' ? 0 : input.searches.length); searchIndex += 1) {
+    for (let searchIndex = nextSearchIndex; searchIndex < (explicitCandidateFeed || input.discoverySource === 'creativeCenter' ? 0 : input.searches.length); searchIndex += 1) {
         const keyword = input.searches[searchIndex];
         if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
         if (input.enrichProfiles && secondsLeft() < 130) break;
