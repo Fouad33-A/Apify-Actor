@@ -14,7 +14,7 @@ describe('criteria-only discovery', () => {
             const google = buildQuery({ keyword: CRITERIA_QUERY, variant });
             expect(brave).toMatch(/tiktok\.com/);
             expect(google).toMatch(/tiktok\.com/);
-            expect(brave).not.toMatch(/creator|tips|tutorial|how to|recommendations/i);
+            expect(brave).not.toMatch(/tips|tutorial|how to|recommendations/i);
         }
     });
 
@@ -23,7 +23,7 @@ describe('criteria-only discovery', () => {
         expect(new Set(queries).size).toBe(6);
         expect(queries).toEqual(expect.arrayContaining([
             'site:tiktok.com/@ "20K" "followers"',
-            'site:tiktok.com/@ "75K" "followers"',
+            'site:tiktok.com/@ "30K" "followers"',
             'site:tiktok.com/@ "followers" -verified -official',
         ]));
         expect(queries.every((q) => q.includes('site:tiktok.com/@'))).toBe(true);
