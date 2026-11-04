@@ -35,10 +35,10 @@ describe('buildQuery', () => {
 describe('criteria-only discovery queries', () => {
     it('keeps six topic-neutral variants consistent across Google and Brave', () => {
         const expected = [
-            'site:tiktok.com/@ "20K" "followers"',
+            'site:tiktok.com/@ "10k" "followers"',
             'site:tiktok.com/@ "creator" "followers"',
             'site:tiktok.com/@ "10K" "followers"',
-            'site:tiktok.com/@ "followers" -verified -official',
+            'site:tiktok.com/@ "50k" "followers"',
             'site:tiktok.com/@ "10k followers" "creator"',
             'site:tiktok.com/@ "small creator" "followers"',
         ];
