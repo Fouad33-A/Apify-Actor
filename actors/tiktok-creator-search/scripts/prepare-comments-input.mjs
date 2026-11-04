@@ -29,6 +29,5 @@ if (process.argv[1]?.endsWith('prepare-comments-input.mjs') && process.argv[2]) 
     const source = fs.readFileSync(process.argv[2], 'utf8');
     const rows = source.trimStart().startsWith('[') ? JSON.parse(source) : source.trim().split('\n').map(JSON.parse);
     const result = prepare(rows);
-    const { creatorVideos, ...actorInput } = result;
-    fs.writeFileSync(process.argv[3] ?? 'comments-input.json', JSON.stringify(actorInput, null, 2));
+    fs.writeFileSync(process.argv[3] ?? 'comments-input.json', JSON.stringify(result, null, 2));
 }
