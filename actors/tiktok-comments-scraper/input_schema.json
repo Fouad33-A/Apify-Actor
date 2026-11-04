@@ -1,0 +1,87 @@
+{
+  "title": "TikTok Comments Scraper",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "creatorVideos": {
+      "title": "Videos grouped by creator",
+      "type": "array",
+      "editor": "json",
+      "description": "Preserves creator attribution. Each item: {creator, videoUrls}.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "creator": {
+            "type": "string"
+          },
+          "videoUrls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "creator",
+          "videoUrls"
+        ]
+      }
+    },
+    "videoUrls": {
+      "title": "Video URLs",
+      "type": "array",
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      }
+    },
+    "postUrls": {
+      "title": "Legacy post URLs",
+      "type": "array",
+      "editor": "json",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    "maxCommentsPerPost": {
+      "title": "Comments per video",
+      "type": "integer",
+      "default": 100,
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "includeReplies": {
+      "title": "Include replies",
+      "type": "boolean",
+      "default": false
+    },
+    "minAskers": {
+      "title": "Minimum distinct askers",
+      "type": "integer",
+      "default": 3,
+      "minimum": 3
+    },
+    "minVideos": {
+      "title": "Minimum distinct videos",
+      "type": "integer",
+      "default": 2,
+      "minimum": 2
+    },
+    "languages": {
+      "title": "Allowed language codes (optional)",
+      "type": "array",
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
