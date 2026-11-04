@@ -27,7 +27,7 @@ try {
   }, timeoutSecs);
   const commentsInput = prepareCommentsInput(profileRows, maxCommentsPerPost);
   if (!commentsInput.creatorVideos.length) throw new Error('No creators with two usable videos; stopping before Comments run.');
-  const commentRows = await runChild('comments', ACTOR_IDS.comments, { videoUrls: commentsInput.videoUrls, maxCommentsPerPost: commentsInput.maxCommentsPerPost, includeReplies: false }, timeoutSecs);
+  const commentRows = await runChild('comments', ACTOR_IDS.comments, { creatorVideos: commentsInput.creatorVideos, maxCommentsPerPost: commentsInput.maxCommentsPerPost, minAskers: 3, minVideos: 2, includeReplies: false }, timeoutSecs);
   const result = summarize({creators, commentsInput, commentRows, childRuns});
   await Actor.pushData(result);
   await Actor.setValue('OUTPUT', result);
