@@ -5,7 +5,7 @@ import { defaultEngines, discoverCreators, parseFollowerHint, CRITERIA_QUERY } f
 import { fetchVideoPlace } from './video.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-03-v6';
+const RUNTIME_FIX_VERSION = '2026-11-04-v7';
 const BATCH = 5; // bounded child calls leave room for a clean parent summary
 
 const DEFAULTS = {
@@ -483,6 +483,7 @@ export async function runSearch({
         };
     });
     const summary = {
+        screeningDecisions: rows.map((r) => ({ handle: r.handle, passesFilters: r.passesFilters, enrichStatus: r.enrichStatus, filterFailures: r.filterFailures })),
         activeFilters: { minFollowers: input.minFollowers, maxFollowers: input.maxFollowers, minMedianViews: input.minMedianViews, maxDaysSinceLastPost: input.maxDaysSinceLastPost, excludeVerified: input.excludeVerified },
         recordType: 'RUN_SUMMARY', version: RUNTIME_FIX_VERSION, startedAt: started, finishedAt: new Date(now()).toISOString(),
         searches: input.searches, keywordsDone: searchedKeywords, keywordsRequested: input.searches.length, keywordsCompleted: searchedKeywords.length,
@@ -525,11 +526,17 @@ async function main() {
     try {
         log.info(`[${RUNTIME_FIX_VERSION}] TikTok Creator Search runtime-safe build active; child enrichment batch size=${BATCH}.`);
         const input = readInput(await Actor.getInput());
+        let rejectionCache = {};
         let historyStore = null;
         let previousHandles = [];
         if (input.rememberProcessedHandles) {
             try {
                 historyStore = await Actor.openKeyValueStore('tiktok-creator-search-history');
+                const stored = await historyStore.getValue('REJECTED_HANDLES_V1');
+                const cutoff = Date.now() - 30 * 86400000;
+                rejectionCache = Object.fromEntries(Object.entries(stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}).filter(([, v]) => Number(v?.at) > cutoff));
+                input.knownHandles = [...new Set([...input.knownHandles, ...Object.keys(rejectionCache)])];
+                log.info('Cached stable rejections: ' + Object.keys(rejectionCache).length);
                 const history = await historyStore.getValue('PROCESSED_HANDLES');
                 previousHandles = Array.isArray(history) ? history.filter((h) => typeof h === 'string') : [];
                 input.knownHandles = [...new Set([...input.knownHandles, ...previousHandles])];
@@ -553,6 +560,8 @@ async function main() {
             try {
                 const { items } = await (await Actor.openDataset()).getData({ limit: 1000 });
                 const confirmed = items.filter((r) => r.recordType === 'creator' && r.enrichStatus === 'ok').map((r) => r.handle);
+                const rejected = Object.fromEntries((summary.screeningDecisions ?? []).filter((r) => r.passesFilters === false && r.enrichStatus === 'ok' && r.filterFailures?.some((x) => x.startsWith('followers') || x === 'verified/celebrity')).map((r) => [r.handle, { at: Date.now() }]));
+                await historyStore.setValue('REJECTED_HANDLES_V1', { ...rejectionCache, ...rejected });
                 const merged = [...new Set([...previousHandles, ...input.knownHandles, ...confirmed])].slice(-5000);
                 await historyStore.setValue('PROCESSED_HANDLES', merged);
                 log.info('Persistent history saved: ' + merged.length + ' handles (including supplied exclusions and newly qualified creators).');
@@ -560,6 +569,7 @@ async function main() {
                 log.warning('History save failed: ' + String(error?.message ?? error));
             }
         }
+        delete summary.screeningDecisions;
         await Actor.setValue('OUTPUT', summary);
         await Actor.setValue('RESUME_TOKEN', summary.resumeToken);
         log.info(`Done: ${summary.handlesFound} creators found, ${summary.returned} creator/near-miss row(s) returned; ${summary.creatorsProcessed} processed.`);
