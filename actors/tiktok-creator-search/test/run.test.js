@@ -93,7 +93,7 @@ describe('runSearch', () => {
         expect(out.filter((row) => row.recordType === 'creator').map((row) => row.handle))
             .toEqual(['mid_one']);
         expect(out.at(-1).recordType).toBe('RUN_SUMMARY');
-        expect(summary).toMatchObject({ handlesFound: 4, returned: 1, passing: 1 });
+        expect(summary).toMatchObject({ handlesFound: 4, returned: 1, passing: 1, searchVariantsAttempted: 3, searchVariantsPlanned: 3 });
     });
 
     it('can emit diagnostic creator rows when onlyPassing is disabled', async () => {
