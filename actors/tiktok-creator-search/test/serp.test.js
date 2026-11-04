@@ -36,11 +36,11 @@ describe('criteria-only discovery queries', () => {
     it('keeps six topic-neutral variants consistent across Google and Brave', () => {
         const expected = [
             'site:tiktok.com/@ "10K" "followers"',
-            'site:tiktok.com/@ "followers" -verified -official',
             'site:tiktok.com/@ "creator" "followers"',
-            'site:tiktok.com/@ "20K" "followers"',
-            'site:tiktok.com/@ "30K" "followers"',
-            'site:tiktok.com/@ "100K" "followers"',
+            'site:tiktok.com/@ "10k followers" "creator"',
+            'site:tiktok.com/@ "small creator" "followers"',
+            'site:tiktok.com/@ "content creator" "followers"',
+            'site:tiktok.com/@ "micro influencer" "followers"',
         ];
         expect(Array.from({ length: 6 }, (_, variant) => buildQuery({ keyword: CRITERIA_QUERY, variant }))).toEqual(expected);
         expect(Array.from({ length: 6 }, (_, variant) => buildBraveQuery({ keyword: CRITERIA_QUERY, variant }))).toEqual(expected);
