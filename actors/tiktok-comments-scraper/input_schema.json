@@ -12,19 +12,23 @@
         "type": "object",
         "properties": {
           "creator": {
-            "type": "string"
+            "type": "string",
+            "title": "Creator username"
           },
           "videoUrls": {
             "type": "array",
             "items": {
-              "type": "string"
-            }
+              "type": "string",
+              "title": "Video URL"
+            },
+            "title": "Creator video URLs"
           }
         },
         "required": [
           "creator",
           "videoUrls"
-        ]
+        ],
+        "title": "Creator video group"
       }
     },
     "videoUrls": {
@@ -32,7 +36,8 @@
       "type": "array",
       "editor": "stringList",
       "items": {
-        "type": "string"
+        "type": "string",
+        "title": "Video URL"
       }
     },
     "postUrls": {
@@ -43,12 +48,14 @@
         "type": "object",
         "properties": {
           "url": {
-            "type": "string"
+            "type": "string",
+            "title": "Post URL"
           }
         },
         "required": [
           "url"
-        ]
+        ],
+        "title": "Post URL entry"
       }
     },
     "maxCommentsPerPost": {
@@ -80,7 +87,8 @@
       "type": "array",
       "editor": "stringList",
       "items": {
-        "type": "string"
+        "type": "string",
+        "title": "Language code"
       }
     }
   }
