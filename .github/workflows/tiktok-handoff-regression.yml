@@ -17,3 +17,4 @@ jobs:
         with:
           node-version: '22'
       - run: node actors/tiktok-creator-search/scripts/test-handoff.mjs
+      - run: node actors/tiktok-comments-scraper/test-repeated-questions.mjs
