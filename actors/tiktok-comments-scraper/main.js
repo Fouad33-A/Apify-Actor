@@ -99,7 +99,7 @@ function isQuestionText(text) {
     const value = String(text ?? '').trim();
     if (!value) return false;
     if (value.includes('?') || value.includes('？')) return true;
-    return /^(who|what|when|where|why|how|which|can|could|would|should|do|does|did|is|are|am|was|were|will|have|has|had|may|might)\b/i.test(value);
+    return /^(who|what|when|where|why|how|which|can|could|would|should|do|does|did|is|are|am|was|were|will|have|has|had|may|might)(?![\p{L}\p{M}\p{N}_])/iu.test(value);
 }
 
 function normalizeQuestion(text) {
