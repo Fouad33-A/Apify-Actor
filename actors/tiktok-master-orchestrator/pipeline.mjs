@@ -14,21 +14,37 @@ export function selectCreators(rows, limit = 5) {
 export function prepareCommentsInput(rows, maxCommentsPerPost = 100, maxVideosPerCreator = 10) {
   const videoLimit = Math.max(2, Math.min(10, Math.floor(Number(maxVideosPerCreator) || 10)));
   const grouped = new Map();
+  const canonicalUrl = (creator, url) => {
+    const m = typeof url === 'string' && url.match(/^https:\/\/(?:www\.)?tiktok\.com\/@([\w.]+)\/video\/(\d+)(?:[/?#]|$)/i);
+    return m && m[1].toLowerCase() === creator ? 'https://www.tiktok.com/@' + creator + '/video/' + m[2] : null;
+  };
   for (const row of rows ?? []) {
-    if (row?.rowType !== 'summary' || !Array.isArray(row.topVideosByComments)) continue;
+    if (!row || !['video', 'summary'].includes(row.rowType) || row.status !== 'ok') continue;
     const creator = handle(row.username ?? row.handle);
     if (!/^[a-z0-9._]{2,40}$/.test(creator)) continue;
-    const urls = grouped.get(creator) ?? [];
-    for (const v of row.topVideosByComments) {
-      const url = typeof v === 'string' ? v : v?.videoUrl ?? v?.url;
-      const m = typeof url === 'string' && url.match(/^https:\/\/(?:www\.)?tiktok\.com\/@([\w.]+)\/video\/(\d+)(?:[/?#]|$)/i);
-      if (!m || m[1].toLowerCase() !== creator) continue;
-      const canonical = 'https://www.tiktok.com/@' + creator + '/video/' + m[2];
-      if (!urls.includes(canonical)) urls.push(canonical);
+    const videos = grouped.get(creator) ?? new Map();
+    if (row.rowType === 'video') {
+      const url = canonicalUrl(creator, row.videoUrl);
+      if (url) {
+        const comments = Number(row.comments);
+        videos.set(url, {url, comments: Number.isFinite(comments) && comments >= 0 ? comments : -1});
+      }
+    } else {
+      // Fallback for older Profile Stats datasets containing only summary rows.
+      for (const v of row.topVideosByComments ?? []) {
+        const url = canonicalUrl(creator, typeof v === 'string' ? v : v?.videoUrl ?? v?.url);
+        if (!url || videos.has(url)) continue;
+        const comments = Number(v?.comments);
+        videos.set(url, {url, comments: Number.isFinite(comments) && comments >= 0 ? comments : -1});
+      }
     }
-    grouped.set(creator, urls.slice(0, videoLimit));
+    grouped.set(creator, videos);
   }
-  const creatorVideos = [...grouped].filter(([, urls]) => urls.length >= 2).map(([creator, videoUrls]) => ({creator, videoUrls}));
+  const creatorVideos = [...grouped].map(([creator, videos]) => ({
+    creator,
+    videoUrls: [...videos.values()].sort((a, b) => b.comments - a.comments || a.url.localeCompare(b.url))
+      .slice(0, videoLimit).map(v => v.url)
+  })).filter(x => x.videoUrls.length >= 2);
   return {creatorVideos, videoUrls: creatorVideos.flatMap(x => x.videoUrls), maxCommentsPerPost, maxVideosPerCreator: videoLimit, minAskers: 3, minVideos: 2};
 }
 export function summarize({creators, commentsInput, commentRows, childRuns}) {
