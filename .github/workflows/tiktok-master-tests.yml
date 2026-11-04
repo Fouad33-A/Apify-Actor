@@ -1,0 +1,29 @@
+name: TikTok Master Pipeline offline tests
+
+on:
+    push:
+        branches: [fix/tiktok-creator-search-nov3]
+        paths:
+            - 'actors/tiktok-master-orchestrator/**'
+            - '.github/workflows/tiktok-master-tests.yml'
+    pull_request:
+        paths:
+            - 'actors/tiktok-master-orchestrator/**'
+            - '.github/workflows/tiktok-master-tests.yml'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    offline-handoff:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+            - name: Check master syntax
+              run: node --check actors/tiktok-master-orchestrator/main.mjs
+            - name: Test master handoff without Apify calls
+              run: node actors/tiktok-master-orchestrator/test-pipeline.mjs
