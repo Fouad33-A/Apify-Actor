@@ -260,9 +260,9 @@ export function parseSerpHtml(html) {
 }
 
 // Default page fetcher: one GET through the Google SERP proxy, one more try after a timeout. Replaced in tests.
-export async function fetchSerpPage({ url, proxyUrl, timeoutMs = 40_000 }) {
+export async function fetchSerpPage({ url, proxyUrl, timeoutMs = 12_000 }) {
     const get = () => gotScraping({ url, proxyUrl, timeout: { request: timeoutMs }, throwHttpErrors: false });
-    const response = await get().catch((err) => (/timeout/i.test(String(err?.message)) ? get() : Promise.reject(err)));
+    const response = await get(); // Never retry a timed-out paid search request.
     if (response.statusCode >= 400) throw new Error(`HTTP ${response.statusCode} from the search proxy`);
     return parseSerpHtml(response.body);
 }
@@ -332,7 +332,7 @@ export function defaultEngines({ serpProxyUrl, serpFetch = fetchSerpPage, braveF
             name: 'google',
             urlFor: googleUrl,
             queryFor: buildQuery,
-            fetch: ({ url }) => serpFetch({ url, proxyUrl: serpProxyUrl }),
+            fetch: ({ url, timeoutMs }) => serpFetch({ url, proxyUrl: serpProxyUrl, timeoutMs }),
             paceMs: 0,
             backoffMs: 0,
         });
@@ -383,7 +383,7 @@ export async function discoverCreators({
                 name: 'google',
                 urlFor: googleUrl,
                 queryFor: buildQuery,
-                fetch: ({ url }) => serpFetch({ url, proxyUrl: serpProxyUrl }),
+                fetch: ({ url, timeoutMs }) => serpFetch({ url, proxyUrl: serpProxyUrl, timeoutMs }),
                 paceMs: 0,
                 backoffMs: 0,
                 needsProxy: true,
@@ -427,7 +427,12 @@ export async function discoverCreators({
             for (let attempt = 0; attempt <= RATE_LIMIT_RETRIES && timeLeft(); attempt += 1) {
                 try {
                     await engine.gate();
-                    page = await engine.fetch({ url: engine.urlFor(query, p) });
+                    const remainingMs = deadline - Date.now();
+                    if (remainingMs <= 0) break;
+                    page = await Promise.race([
+                        engine.fetch({ url: engine.urlFor(query, p), timeoutMs: Math.min(12000, remainingMs) }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('search deadline exceeded')), remainingMs)),
+                    ]);
                     break;
                 } catch (err) {
                     if (err?.rateLimited) {
