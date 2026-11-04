@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-04-v13';
+const RUNTIME_FIX_VERSION = '2026-11-04-v14';
 const BATCH = 5;
 const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
 
@@ -223,7 +223,7 @@ export async function callProfileActor(
             maxItems: usernames.length * perCreator + 5,
             concurrency: 2,
         },
-        { waitSecs: Math.max(waitSecs, 120), maxTotalChargeUsd: 0.20, restartOnError: false },
+        { waitSecs: Math.max(10, Math.min(waitSecs, 100)), maxTotalChargeUsd: 0.20, restartOnError: false },
     );
     if (!run?.defaultDatasetId) throw new Error(`Run of ${actorId} returned no dataset (status ${run?.status})`);
     const terminal = new Set(['SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT']);
