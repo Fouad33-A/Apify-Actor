@@ -1,7 +1,7 @@
 # TikTok Master Pipeline
 One Apify Actor orchestrating existing Creator Search, Profile & Video Stats, and Comments Actors.
 
-Actor IDs: Creator Search `ABXXVWJ3VcAlhLYnL`, Profile `6HRoM9FvmfZjTfdFw`, Comments `3QDFPIaSngyuNE8Il`.
+Actor IDs: Creator Search `ABXXVWJ3VcAlhLYnL`, Profile `3QDFPIaSngyuNE8Il`, Comments `6HRoM9FvmfZjTfdFw`.
 
 Default pilot: five qualifying creators, up to five videos per creator, 100 comments per video. The master invokes child Actors and **incurs their usage charges**. Do not run until explicitly approved.
 
