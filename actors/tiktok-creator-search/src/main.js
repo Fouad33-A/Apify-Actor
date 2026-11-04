@@ -540,7 +540,7 @@ async function main() {
         });
         if (historyStore) {
             try {
-                const { items } = await Actor.apifyClient.dataset().listItems({ limit: 1000 });
+                const { items } = await (await Actor.openDataset()).getData({ limit: 1000 });
                 const confirmed = items.filter((r) => r.recordType === 'creator' && r.enrichStatus === 'ok').map((r) => r.handle);
                 const merged = [...new Set([...previousHandles, ...confirmed])].slice(-5000);
                 await historyStore.setValue('PROCESSED_HANDLES', merged);
