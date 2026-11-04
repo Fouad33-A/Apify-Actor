@@ -111,44 +111,21 @@ describe('runSearch', () => {
         expect(summary).toMatchObject({ handlesFound: 4, returned: 1, passing: 1, searchVariantsAttempted: 3, searchVariantsPlanned: 3 });
     });
 
-    it('can emit diagnostic creator rows when onlyPassing is disabled', async () => {
-        const { out, summary } = await run({
-            minFollowers: 10_000, maxFollowers: 150_000,
-            onlyPassing: false,
-        });
-        const rows = out.filter((row) => row.recordType === 'creator');
-        expect(rows).toHaveLength(4);
-        expect(rows.find((row) => row.handle === 'small_one').passesFilters).toBe(false);
-        expect(rows.find((row) => row.handle === 'big_one').passesFilters).toBe(false);
-        expect(rows.find((row) => row.handle === 'ghost_one').passesFilters).toBeNull();
-        expect(summary.unenriched).toBe(2); // out-of-range hint skip plus missing profile
+    it('rejects diagnostic-only runs and disabled mandatory filters', () => {
+        expect(() => readInput({ onlyPassing: false })).toThrow(/onlyPassing/);
+        expect(() => readInput({ enrichProfiles: false })).toThrow(/enrichProfiles/);
+        expect(() => readInput({ excludeVerified: false })).toThrow(/excludeVerified/);
     });
 
-    it('records child enrichment errors without inventing profile data', async () => {
-        const { out, summary } = await run({ onlyPassing: false }, async () => {
-            throw new Error('Actor not found');
-        });
-        expect(out.filter((row) => row.recordType === 'creator')).toHaveLength(4);
-        expect(summary.errors).toBeGreaterThan(0);
-        expect(summary.enrichNote).toMatch(/Actor not found/);
-    });
-
-    it('passes the video and region options to the child Actor', async () => {
+    it('passes video and region options to child enrichment', async () => {
         const calls = [];
         const enrich = async (_actor, names, options) => {
             calls.push(options);
             return new Map(names.filter((name) => profiles.has(name)).map((name) => [name, profiles.get(name)]));
         };
-        const { out } = await run({
-            minMedianViews: 5_000, regions: ['AE'], matchMode: 'only',
-            videosForMedian: 5, onlyPassing: false,
-        }, enrich);
-        expect(calls[0]).toMatchObject({
-            medianViews: false, needLatestVideo: false,
-        });
-        expect(calls[1]).toMatchObject({
-            medianViews: true, videosForMedian: 5, needLatestVideo: true,
-        });
+        const { out } = await run({ regions: ['AE'], matchMode: 'only', videosForMedian: 5 }, enrich);
+        expect(calls[0]).toMatchObject({ medianViews: false, needLatestVideo: false });
+        expect(calls[1]).toMatchObject({ medianViews: true, videosForMedian: 5, needLatestVideo: true });
         expect(out.at(-1).recordType).toBe('RUN_SUMMARY');
     });
 
@@ -169,6 +146,6 @@ describe('runSearch', () => {
             minFollowers: 10_000,
         });
         expect(summary.skippedKnownHandles).toBeGreaterThan(0);
-        expect(summary.returned).toBe(1); // the previously seen mid_one is excluded; big_one remains eligible
+        expect(summary.returned).toBe(0); // previously qualified mid_one excluded; out-of-range accounts rejected
     });
 });
