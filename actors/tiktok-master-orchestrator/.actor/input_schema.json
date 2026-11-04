@@ -41,6 +41,15 @@
       "type": "array",
       "description": "Optional hashtags passed to Creator Search.",
       "editor": "stringList"
+    },
+    "maxVideosPerCreator": {
+      "title": "Videos per qualifying creator",
+      "type": "integer",
+      "editor": "number",
+      "default": 10,
+      "minimum": 2,
+      "maximum": 10,
+      "description": "Analyze up to this many valid recent videos per qualified creator for repeated questions; TikTok public embed currently supports at most 10."
     }
   }
 }
