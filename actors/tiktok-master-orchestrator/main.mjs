@@ -24,7 +24,7 @@ try {
   const creators = selectCreators(searchRows, maxCreators);
   if (!creators.length) { const summary = searchRows.find(r => r?.recordType === 'RUN_SUMMARY'); log.warning('Creator Search diagnostic: ' + JSON.stringify({found: summary?.handlesFound, processed: summary?.creatorsProcessed, returned: summary?.returned, failures: summary?.failedByReason, activeFilters: summary?.activeFilters, stoppedEarly: summary?.stoppedEarly})); throw new Error('No confirmed qualifying creators; stopping before downstream runs.'); }
   const profileRows = await runChild('profileStats', ACTOR_IDS.profileStats, {
-    usernames: creators, mode: 'full', outputRows: 'summaryOnly', videosPerProfile: 10, maxItems: Math.max(200, creators.length * 2),
+    usernames: creators, mode: 'full', videosPerProfile: 10, maxItems: Math.max(200, creators.length * 2),
   }, timeoutSecs);
   const commentsInput = prepareCommentsInput(profileRows, maxCommentsPerPost, maxVideosPerCreator);
   log.info('Comments handoff: ' + JSON.stringify({creators: commentsInput.creatorVideos.length, videos: commentsInput.videoUrls.length, maxVideosPerCreator}));
