@@ -30,10 +30,17 @@
       "maximum": 3600,
       "description": "Maximum time to wait for each child Actor run in seconds."
     },
-    "searchInput": {
-      "title": "Creator Search options",
-      "type": "object",
-      "description": "Optional Creator Search input; filters and linked Profile Actor are enforced by the master."
+    "keywords": {
+      "title": "Search keywords",
+      "type": "array",
+      "description": "Optional keywords passed to Creator Search.",
+      "editor": "stringList"
+    },
+    "hashtags": {
+      "title": "Search hashtags",
+      "type": "array",
+      "description": "Optional hashtags passed to Creator Search.",
+      "editor": "stringList"
     }
   }
 }
