@@ -1617,7 +1617,30 @@ async function discoverBrowserProfile(
     let warning: string | null = null;
     try {
         const { chromium } = await import('playwright');
-        const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+        // Residential proxy smoke test: browser discovery only, one sticky session per profile.
+        // Apify manages proxy credentials; never log the proxy URL.
+        let browserProxy: { server: string; username: string; password: string } | undefined;
+        try {
+            const proxyConfiguration = await Actor.createProxyConfiguration({
+                groups: ['RESIDENTIAL'],
+            });
+            if (proxyConfiguration) {
+                const proxyUrl = new URL(await proxyConfiguration.newUrl());
+                browserProxy = {
+                    server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
+                    username: decodeURIComponent(proxyUrl.username),
+                    password: decodeURIComponent(proxyUrl.password),
+                };
+                log.info('Residential proxy configured for browser discovery (credentials redacted).');
+            }
+        } catch (proxyError) {
+            log.warning(`Residential proxy unavailable: ${proxyError instanceof Error ? proxyError.message : String(proxyError)}`);
+        }
+        const browser = await chromium.launch({
+            headless: true,
+            args: ['--no-sandbox'],
+            ...(browserProxy ? { proxy: browserProxy } : {}),
+        });
         try {
             const context = await browser.newContext({ locale: 'en-US' });
             // Optional operator-owned session, supplied as an Apify secret environment variable.
