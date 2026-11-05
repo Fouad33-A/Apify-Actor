@@ -65,8 +65,8 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
             hashtags: [],
             durationSeconds: firstNumber(asRecord(aweme.video), ['duration']) ?? null,
             isPinned, isSlideshow: null, isAd: null,
-            plays: firstNumber(stats, ['play_count', 'playCount', 'views']),
-            likes: firstNumber(stats, ['digg_count', 'diggCount', 'likes']),
+            plays: firstNumber(stats, ['play_count', 'playCount', 'views', 'view_count']),
+            likes: firstNumber(stats, ['digg_count', 'diggCount', 'likes', 'like_count']),
             comments: firstNumber(stats, ['comment_count', 'commentCount', 'comments']),
             shares: firstNumber(stats, ['share_count', 'shareCount', 'shares']),
             saves: firstNumber(stats, ['collect_count', 'collectCount', 'saves']),
@@ -78,6 +78,29 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
     for (const line of stdout.split('\n')) {
         if (!line.trim()) continue;
         try { consume(JSON.parse(line)); } catch { /* ignore non-JSON diagnostic lines */ }
+    }
+    if (records.size < requested) {
+        try {
+            const ytdlp = await run('/opt/gallery-venv/bin/yt-dlp', [
+                '--flat-playlist', '--dump-json', '--skip-download',
+                '--playlist-end', String(Math.min(60, requested + 10)),
+                '--no-warnings', '--socket-timeout', '15',
+                'https://www.tiktok.com/@' + username,
+            ], { timeout: 75000, maxBuffer: 12 * 1024 * 1024 });
+            let parsedLines = 0;
+            for (const line of ytdlp.stdout.split('\\n')) {
+                if (!line.trim()) continue;
+                try { consume(JSON.parse(line)); parsedLines++; } catch { /* ignore invalid JSON */ }
+            }
+            log.info('[YT-DLP] @' + username + ': jsonLines=' + parsedLines + ', uniqueVideoIds=' + records.size);
+            if (!records.size) warning = [warning, 'yt-dlp produced ' + parsedLines + ' JSON lines but zero usable video IDs'].filter(Boolean).join(' | ');
+        } catch (err: unknown) {
+            const e = err as { stdout?: string; stderr?: string; message?: string };
+            for (const line of (e.stdout ?? '').split('\\n')) {
+                try { consume(JSON.parse(line)); } catch { /* skip */ }
+            }
+            warning = [warning, 'yt-dlp: ' + String(e.stderr ?? e.message ?? 'unknown').slice(0, 250)].filter(Boolean).join(' | ');
+        }
     }
     const videos = [...records.values()].sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0));
     if (!videos.length) {
