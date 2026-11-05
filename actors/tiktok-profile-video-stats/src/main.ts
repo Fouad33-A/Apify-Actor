@@ -3286,6 +3286,90 @@ function buildSummary(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Optional authenticated TikHub discovery (separate from direct TikTok HTTP) */
+/* -------------------------------------------------------------------------- */
+
+interface TikHubDiscovery {
+    videos: VideoData[];
+    warning: string | null;
+    pages: number;
+}
+
+async function discoverTikHubVideos(username: string, secUid: string | null, requested: number): Promise<TikHubDiscovery> {
+    const token = process.env.TIKHUB_API_TOKEN?.trim();
+    if (!token) return { videos: [], warning: 'TIKHUB_API_TOKEN not configured', pages: 0 };
+    const seen = new Map<string, VideoData>();
+    let cursor = '0';
+    let pages = 0;
+    const usedCursors = new Set<string>();
+    try {
+        for (let page = 0; page < 8 && seen.size < requested + 10; page++) {
+            if (usedCursors.has(cursor)) break;
+            usedCursors.add(cursor);
+            const endpoint = new URL('https://api.tikhub.io/api/v1/tiktok/web/fetch_user_post');
+            if (!secUid) return { videos: [], warning: 'TikHub web endpoint requires secUid', pages };
+            endpoint.searchParams.set('secUid', secUid);
+            endpoint.searchParams.set('cursor', cursor);
+            endpoint.searchParams.set('count', '15');
+            endpoint.searchParams.set('coverFormat', '2');
+            const response = await fetch(endpoint, {
+                headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+                signal: AbortSignal.timeout(25000),
+            });
+            if (!response.ok) throw new Error(`TikHub HTTP ${response.status}`);
+            const payload: unknown = await response.json();
+            const envelope = asRecord(payload);
+            if (envelope?.code !== 200 && envelope?.code !== 0) {
+                throw new Error(`TikHub API code ${String(envelope?.code ?? 'unknown')}`);
+            }
+            const data = asRecord(envelope?.data);
+            const list = [data?.itemList, data?.item_list, data?.aweme_list, data?.items, data?.videos, envelope?.itemList]
+                .find(Array.isArray) as unknown[] | undefined;
+            if (!list) throw new Error('TikHub response contains no recognized video list');
+            for (const entry of list) {
+                const item = asRecord(entry);
+                if (!item) continue;
+                const id = firstString(item, ['id', 'aweme_id', 'video_id']);
+                if (!id || seen.has(id)) continue;
+                const stats = asRecord(item.stats) ?? asRecord(item.statistics);
+                const author = asRecord(item.author);
+                const actualUsername = firstString(author, ['uniqueId', 'unique_id', 'username']) ?? username;
+                const created = firstNumber(item, ['createTime', 'create_time']);
+                const pinned = firstBoolean(item, ['isPinned', 'is_pinned', 'pinned']);
+                const video: VideoData = {
+                    videoId: id,
+                    videoUrl: `https://www.tiktok.com/@${actualUsername}/video/${id}`,
+                    createdAt: safeIsoFromUnix(created),
+                    createTime: created,
+                    caption: firstString(item, ['desc', 'description', 'title']),
+                    hashtags: [],
+                    durationSeconds: firstNumber(asRecord(item.video), ['duration']),
+                    isPinned: pinned,
+                    isSlideshow: null,
+                    isAd: firstBoolean(item, ['isAd', 'is_ad']),
+                    plays: firstNumber(stats, ['playCount', 'play_count']),
+                    likes: firstNumber(stats, ['diggCount', 'digg_count', 'like_count']),
+                    comments: firstNumber(stats, ['commentCount', 'comment_count']),
+                    shares: firstNumber(stats, ['shareCount', 'share_count']),
+                    saves: firstNumber(stats, ['collectCount', 'collect_count']),
+                    soundName: firstString(asRecord(item.music), ['title']),
+                    sponsoredSignals: [],
+                };
+                seen.set(id, video);
+            }
+            pages++;
+            const next = asString(data?.cursor ?? envelope?.cursor);
+            const hasMore = firstBoolean(data, ['hasMore', 'has_more']) ?? false;
+            if (!hasMore || !next || next === cursor) break;
+            cursor = next;
+        }
+        return { videos: [...seen.values()].sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0)), warning: null, pages };
+    } catch (error) {
+        return { videos: [...seen.values()], warning: `TikHub discovery failed: ${error instanceof Error ? error.message : String(error)}`, pages };
+    }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Dataset                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -3537,6 +3621,36 @@ async function processHandle(
         };
     }
 
+    // Authenticated API discovery avoids repeated blocked TikTok embed requests.
+    const apiDiscovery = process.env.TIKHUB_API_TOKEN
+        ? await discoverTikHubVideos(username, profile.secUid, options.videosPerProfile)
+        : null;
+    if (apiDiscovery?.warning) warnings.push(apiDiscovery.warning);
+    if (apiDiscovery && apiDiscovery.videos.length > 0) {
+        log.info(`[TIKHUB] @${username}: ${apiDiscovery.videos.length} unique videos from ${apiDiscovery.pages} page(s)`);
+        const sorted = [...apiDiscovery.videos].sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0));
+        const unpinned = options.excludePinned ? sorted.filter(v => v.isPinned !== true) : sorted;
+        const selectedApi = unpinned.slice(0, options.videosPerProfile);
+        for (let i = 0; i < selectedApi.length; i++) {
+            await pushLimited({
+                rowType: 'video', username, profileUrl, status: 'ok',
+                rankNewest: i + 1, selectionBasis: 'tikhub_recent_create_time',
+                ...selectedApi[i],
+            }, options.maxItems);
+        }
+        const parsedApi: ParsedCandidate[] = apiDiscovery.videos.map(video => ({
+            candidate: { id: video.videoId, createTime: video.createTime, isPinned: video.isPinned },
+            status: 'parsed' as const, video, error: null,
+        }));
+        const selectionApi = selectVideos(parsedApi, options.videosPerProfile, options.excludePinned);
+        const coverageApi = buildCoverage(options.videosPerProfile, apiDiscovery.videos.length, parsedApi, selectionApi, options.excludePinned);
+        coverageApi.warnings.push(...warnings);
+        if (apiDiscovery.videos.some(v => v.isPinned === null)) coverageApi.warnings.push('Pin flags unavailable for some API records; pinned exclusion may be incomplete.');
+        if (selectedApi.length < options.videosPerProfile) coverageApi.warnings.push('Insufficient eligible API videos for requested sample.');
+        const summaryApi = buildSummary(profile, selectedApi, analyzeSelling(profile, selectedApi), coverageApi);
+        await pushLimited({ rowType: 'summary', username, profileUrl, status: 'ok', discoverySource: 'tikhub_authenticated_api', ...summaryApi }, options.maxItems);
+        return { username, status: 'ok', videosSaved: selectedApi.length, warnings: coverageApi.warnings };
+    }
     // First use video records already present in the public profile page.
     // This avoids the rate-limited creator embed whenever possible.
     let candidates = parseEmbedCandidates(profileHtml);
