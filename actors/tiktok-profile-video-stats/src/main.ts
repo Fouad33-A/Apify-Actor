@@ -1623,12 +1623,12 @@ async function discoverBrowserProfile(
             const page = await context.newPage();
             const feedResponses: string[] = [];
             page.on('response', (response) => {
-                if (/\\/api\\/(post\\/item_list|item_list)\\//.test(response.url())) {
+                if (/\/api\/(post\/item_list|item_list)\//.test(response.url())) {
                     feedResponses.push(`${response.status()} ${new URL(response.url()).pathname}`);
                 }
             });
             page.on('requestfailed', (request) => {
-                if (/\\/api\\/(post\\/item_list|item_list)\\//.test(request.url())) {
+                if (/\/api\/(post\/item_list|item_list)\//.test(request.url())) {
                     feedResponses.push(`FAILED ${request.failure()?.errorText ?? 'unknown'}`);
                 }
             });
