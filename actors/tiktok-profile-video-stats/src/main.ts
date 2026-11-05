@@ -17,8 +17,8 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
     let stdout = '';
     let warning: string | null = null;
     try {
-        const result = await run('python3', [
-            '-m', 'gallery_dl', '-j',
+        const result = await run('/opt/gallery-venv/bin/gallery-dl', [
+            '-j',
             '-o', 'extractor.tiktok.user.include=posts',
             '-o', 'extractor.tiktok.videos=false',
             '-o', 'extractor.tiktok.posts.order-posts=desc',
