@@ -7,8 +7,9 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-04-v14';
-const BATCH = 5;
+const RUNTIME_FIX_VERSION = '2026-11-05-v15';
+const BATCH = 2;
+const BETWEEN_PROFILE_BATCHES_MS = 20000;
 const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
 
 const DEFAULTS = {
@@ -221,7 +222,7 @@ export async function callProfileActor(
             mode: full ? 'full' : 'profileOnly',
             ...(full ? { videosPerProfile: videos } : {}),
             maxItems: usernames.length * perCreator + 5,
-            concurrency: 2,
+            concurrency: 1,
         },
         { waitSecs: Math.max(10, Math.min(waitSecs, 100)), maxTotalChargeUsd: 0.20, restartOnError: false },
     );
@@ -347,6 +348,12 @@ export async function runSearch({
         const fresh = orderCandidates(candidates.filter((c) => !processed.has(c.handle) && !known.has(c.handle)), input)
             .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
         for (let i = 0; i < fresh.length && !outOfTime(); i += BATCH) {
+            // Separate child runs otherwise bypass each other's in-process cooldown.
+            if (i > 0) {
+                if (secondsLeft() < 60) break;
+                log.info(`[${RUNTIME_FIX_VERSION}] Pausing ${BETWEEN_PROFILE_BATCHES_MS / 1000}s between TikTok profile batches.`);
+                await new Promise((resolve) => setTimeout(resolve, BETWEEN_PROFILE_BATCHES_MS));
+            }
             // Preserve unscreened handles for a later run rather than treating the call cap as a profile failure.
             if (input.enrichProfiles && profileCalls >= MAX_PROFILE_CALLS) break;
             if (input.enrichProfiles && secondsLeft() < 35) break; // leave time to save summary
@@ -413,7 +420,9 @@ export async function runSearch({
                     row.dataAvailabilityReason = null;
                 }
                 if (profile?.__regionSource) row.regionSource = profile.__regionSource;
-                rows.push(row); countRow(row, profile); await emitRow(row); processed.add(c.handle);
+                rows.push(row); countRow(row, profile); await emitRow(row);
+                // Missing video metrics or blocked profiles are unresolved, not rejected.
+                if (row.dataAvailability === 'complete') processed.add(c.handle);
             }
         }
     };
