@@ -61,6 +61,12 @@
       "minimum": 1,
       "maximum": 30,
       "description": "A qualifying creator must have posted within this many days."
+    },
+    "diagnosticOnly": {
+      "title": "Single-request HTTP diagnostic",
+      "description": "Run one TikTok user-search request, record response diagnostics, and skip creator verification.",
+      "type": "boolean",
+      "default": false
     }
   },
   "required": []
