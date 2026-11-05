@@ -11,7 +11,8 @@
     "apify": "^3.7.2",
     "crawlee": "^3.16.0",
     "got-scraping": "^4.0.0",
-    "tough-cookie": "^5.1.2"
+    "tough-cookie": "^5.1.2",
+    "playwright": "^1.56.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
