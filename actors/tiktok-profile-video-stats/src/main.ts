@@ -1662,6 +1662,13 @@ async function discoverBrowserProfile(
                 await page.mouse.wheel(0, 1400);
                 await page.waitForTimeout(1500);
             }
+            if (found.size === 0) {
+                const title = (await page.title().catch(() => '')).slice(0, 100);
+                const finalHost = (() => { try { return new URL(page.url()).host; } catch { return 'unknown'; } })();
+                const body = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+                const challenge = /captcha|verify you are human|security check|access denied|unusual traffic/i.test(body);
+                warning = `Browser rendered zero videos; title=${JSON.stringify(title)}; host=${finalHost}; bodyChars=${body.length}; challengeText=${challenge}`;
+            }
             await context.close();
         } finally { await browser.close(); }
     } catch (error) {
