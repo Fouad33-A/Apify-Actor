@@ -1542,6 +1542,68 @@ function parseEmbedCandidates(
     );
 }
 
+/*
+ * Experimental public creator-feed discovery. This uses the same
+ * got-scraping + cookie-jar + shared request gate as the working
+ * Comments Scraper. A 200 response is not proof of usable feed data.
+ * Never fabricate video IDs or claim complete coverage.
+ */
+async function discoverCreatorFeed(
+    profile: ProfileData,
+    profileUrl: string,
+    requested: number,
+): Promise<{ candidates: VideoCandidate[]; warning: string | null }> {
+    if (!profile.secUid) {
+        return { candidates: [], warning: 'Creator feed unavailable: missing secUid.' };
+    }
+    const found = new Map<string, VideoCandidate>();
+    let cursor = 0;
+    let warning: string | null = null;
+    for (let page = 0; page < 3 && found.size < requested; page += 1) {
+        const url = new URL('https://www.tiktok.com/api/post/item_list/');
+        url.searchParams.set('aid', '1988');
+        url.searchParams.set('secUid', profile.secUid);
+        url.searchParams.set('count', String(Math.min(35, requested - found.size)));
+        url.searchParams.set('cursor', String(cursor));
+        const response = await fetchText(url.toString(), {
+            referer: profileUrl, maxRetries: 0, label: 'CREATOR_FEED',
+        });
+        if (!response.ok || !response.text) {
+            warning = `Creator feed HTTP ${response.status ?? 'unknown'}: ${response.error ?? 'empty response'}`;
+            break;
+        }
+        let data: Record<string, unknown> | null = null;
+        try { data = asRecord(JSON.parse(response.text)); } catch {
+            warning = 'Creator feed returned non-JSON content.';
+            break;
+        }
+        if (!data || (data['status_code'] !== undefined && Number(data['status_code']) !== 0)) {
+            warning = `Creator feed rejected request: status_code=${String(data?.['status_code'] ?? 'unknown')}`;
+            break;
+        }
+        const items = data['itemList'] ?? data['item_list'];
+        if (!Array.isArray(items) || items.length === 0) {
+            warning = 'Creator feed returned no video items.';
+            break;
+        }
+        for (const raw of items) {
+            const item = asRecord(raw);
+            if (!item) continue;
+            const id = firstString(item, ['id', 'awemeId', 'aweme_id', 'itemId']);
+            const timestamp = firstNumber(item, ['createTime', 'create_time']);
+            if (!id || !/^\\d{15,25}$/.test(id) || (!timestamp && !asRecord(item['video']))) continue;
+            found.set(id, {
+                id, createTime: timestamp,
+                isPinned: firstBoolean(item, ['isPinnedItem', 'isPinned', 'pinned']),
+            });
+        }
+        const next = asNumber(data['cursor']) ?? asNumber(data['maxCursor']) ?? asNumber(data['max_cursor']);
+        if (data['hasMore'] === false || data['has_more'] === false || next === null || next <= cursor) break;
+        cursor = next;
+    }
+    return { candidates: [...found.values()].sort((a,b) => (b.createTime ?? 0) - (a.createTime ?? 0)).slice(0, requested), warning };
+}
+
 /* Parse video stats already embedded in a public profile response. */
 function parseProfileVideoStats(username: string, html: string): Map<string, VideoData> {
     const result = new Map<string, VideoData>();
@@ -3343,6 +3405,14 @@ async function processHandle(
             candidates = parseEmbedCandidates(embedResponse.text);
             discoverySource = 'tiktok_creator_embed';
         }
+    }
+    if (candidates.length === 0) {
+        const feed = await discoverCreatorFeed(profile, profileUrl, options.videosPerProfile);
+        if (feed.candidates.length > 0) {
+            candidates = feed.candidates;
+            discoverySource = 'public_creator_feed';
+        }
+        if (feed.warning) warnings.push(feed.warning);
     }
     log.info(`[DISCOVERY] @${username}: ${candidates.length} candidates from ${discoverySource}`);
 
