@@ -1667,7 +1667,24 @@ async function discoverBrowserProfile(
                 const finalHost = (() => { try { return new URL(page.url()).host; } catch { return 'unknown'; } })();
                 const body = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
                 const challenge = /captcha|verify you are human|security check|access denied|unusual traffic/i.test(body);
-                warning = `Browser rendered zero videos; title=${JSON.stringify(title)}; host=${finalHost}; bodyChars=${body.length}; challengeText=${challenge}`;
+                // Store diagnostics in the run's private key-value store, not the dataset.
+                // Capture only the public page; do not save cookies or credentials.
+                try {
+                    const screenshot = await page.screenshot({ type: 'png', fullPage: false, timeout: 12000 });
+                    await Actor.setValue('DIAGNOSTIC_PROFILE_SCREENSHOT', screenshot, { contentType: 'image/png' });
+                    await Actor.setValue('DIAGNOSTIC_PROFILE_PAGE', {
+                        username,
+                        url: page.url(),
+                        title,
+                        bodyText: body.slice(0, 3000),
+                        videoLinkCount: await page.locator('a[href*="/video/"]').count(),
+                        documentHtmlLength: (await page.content()).length,
+                        challengeText: challenge,
+                    });
+                } catch (diagnosticError) {
+                    log.warning(`Could not save browser diagnostic: ${String(diagnosticError)}`);
+                }
+                warning = `Browser rendered zero videos; title=${JSON.stringify(title)}; host=${finalHost}; bodyChars=${body.length}; challengeText=${challenge}; screenshotKey=DIAGNOSTIC_PROFILE_SCREENSHOT; pageKey=DIAGNOSTIC_PROFILE_PAGE`;
             }
             await context.close();
         } finally { await browser.close(); }
