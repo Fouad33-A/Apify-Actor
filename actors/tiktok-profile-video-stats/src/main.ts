@@ -1604,6 +1604,73 @@ async function discoverCreatorFeed(
     return { candidates: [...found.values()].sort((a,b) => (b.createTime ?? 0) - (a.createTime ?? 0)).slice(0, requested), warning };
 }
 
+/*
+ * Browser-rendered profile fallback: runs only after lightweight HTTP discovery
+ * fails. Uses our own Playwright browser, not an external Actor or service.
+ * Read-only navigation, no login, no CAPTCHA or challenge bypass.
+ */
+async function discoverBrowserProfile(
+    username: string,
+    requested: number,
+): Promise<{ candidates: VideoCandidate[]; warning: string | null }> {
+    const found = new Map<string, VideoCandidate>();
+    let warning: string | null = null;
+    try {
+        const { chromium } = await import('playwright');
+        const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+        try {
+            const context = await browser.newContext({ locale: 'en-US' });
+            const page = await context.newPage();
+            page.on('response', async (response) => {
+                if (found.size >= requested) return;
+                const url = response.url();
+                if (!/\\/api\\/(post\\/item_list|item_list)\\//.test(url)) return;
+                try {
+                    const data = await response.json() as Record<string, unknown>;
+                    const items = data['itemList'] ?? data['item_list'];
+                    if (!Array.isArray(items)) return;
+                    for (const raw of items) {
+                        const item = asRecord(raw);
+                        if (!item) continue;
+                        const id = firstString(item, ['id', 'awemeId', 'aweme_id', 'itemId']);
+                        if (!id || !/^\\d{15,25}$/.test(id)) continue;
+                        found.set(id, {
+                            id,
+                            createTime: firstNumber(item, ['createTime', 'create_time']),
+                            isPinned: firstBoolean(item, ['isPinnedItem', 'isPinned', 'pinned']),
+                        });
+                    }
+                } catch { /* A response may be blocked, empty, or non-JSON. */ }
+            });
+            await page.goto(`https://www.tiktok.com/@${username}`, {
+                waitUntil: 'domcontentloaded', timeout: 30000,
+            });
+            await page.waitForTimeout(3000);
+            for (let i = 0; i < 4 && found.size < requested; i += 1) {
+                const html = await page.content();
+                for (const item of parseEmbedCandidates(html)) found.set(item.id, item);
+                const hrefs = await page.locator('a[href*="/video/"]').evaluateAll(
+                    (elements) => elements.map((el) => (el as HTMLAnchorElement).href),
+                );
+                for (const href of hrefs) {
+                    const match = href.match(/\\/video\\/(\\d{15,25})/);
+                    if (match && !found.has(match[1])) {
+                        found.set(match[1], { id: match[1], createTime: null, isPinned: null });
+                    }
+                }
+                if (found.size >= requested) break;
+                await page.mouse.wheel(0, 1400);
+                await page.waitForTimeout(1500);
+            }
+            await context.close();
+        } finally { await browser.close(); }
+    } catch (error) {
+        warning = `Browser profile discovery failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (found.size === 0 && !warning) warning = 'Browser profile rendered without accessible video links.';
+    return { candidates: [...found.values()].slice(0, requested), warning };
+}
+
 /* Parse video stats already embedded in a public profile response. */
 function parseProfileVideoStats(username: string, html: string): Map<string, VideoData> {
     const result = new Map<string, VideoData>();
@@ -3413,6 +3480,14 @@ async function processHandle(
             discoverySource = 'public_creator_feed';
         }
         if (feed.warning) warnings.push(feed.warning);
+    }
+    if (candidates.length === 0) {
+        const browser = await discoverBrowserProfile(username, options.videosPerProfile);
+        if (browser.candidates.length > 0) {
+            candidates = browser.candidates;
+            discoverySource = 'browser_rendered_profile';
+        }
+        if (browser.warning) warnings.push(browser.warning);
     }
     log.info(`[DISCOVERY] @${username}: ${candidates.length} candidates from ${discoverySource}`);
 
