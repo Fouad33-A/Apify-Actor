@@ -1,4 +1,6 @@
 import { Actor, log } from 'apify';
+import { gotScraping } from 'got-scraping';
+import { CookieJar } from 'tough-cookie';
 
 await Actor.init();
 
@@ -624,6 +626,9 @@ function daysBetween(
 /* HTTP                                                                       */
 /* -------------------------------------------------------------------------- */
 
+const tiktokCookieJar = new CookieJar();
+const tiktokClient = gotScraping.extend({ cookieJar: tiktokCookieJar, timeout: { request: 25000 }, throwHttpErrors: false, retry: { limit: 0 } });
+
 async function fetchText(
     url: string,
     options: FetchOptions = {},
@@ -671,44 +676,24 @@ async function fetchText(
         );
 
         try {
-            const response = await fetch(
+            const response = await tiktokClient({
                 url,
-                {
-                    method: 'GET',
-
-                    redirect: 'follow',
-
-                    signal:
-                        controller.signal,
-
-                    headers: {
-                        'user-agent':
-                            USER_AGENT,
-
-                        accept:
-                            'text/html,application/xhtml+xml,' +
-                            'application/json;q=0.9,*/*;q=0.8',
-
-                        'accept-language':
-                            'en-US,en;q=0.9',
-
-                        ...(options.referer
-                            ? {
-                                referer:
-                                    options.referer,
-                            }
-                            : {}),
-                    },
+                method: 'GET',
+                followRedirect: true,
+                responseType: 'text',
+                signal: controller.signal,
+                headers: {
+                    accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+                    'accept-language': 'en-US,en;q=0.9',
+                    ...(options.referer ? { referer: options.referer } : {}),
                 },
-            );
-
-            const text =
-                await response.text();
+            });
+            const text = response.body;
 
             clearTimeout(timeout);
 
             lastStatus =
-                response.status;
+                response.statusCode;
 
             /*
              * 429 is special:
@@ -717,8 +702,8 @@ async function fetchText(
              * this worker, because that allowed the second worker to continue
              * hitting TikTok during the cooldown in the previous build.
              */
-            if (response.status === 429) {
-                const retryAfter = response.headers.get('retry-after');
+            if (response.statusCode === 429) {
+                const retryAfter = response.headers['retry-after'];
                 const seconds = retryAfter ? Number(retryAfter) : NaN;
                 const dateDelay = retryAfter && !Number.isFinite(seconds)
                     ? Date.parse(retryAfter) - Date.now() : NaN;
@@ -745,7 +730,7 @@ async function fetchText(
              * the global TikTok cooldown unless TikTok explicitly returns 429.
              */
             if (
-                response.status >= 500 &&
+                response.statusCode >= 500 &&
                 attempt < maxRetries
             ) {
                 const delay =
@@ -756,7 +741,7 @@ async function fetchText(
                     );
 
                 log.warning(
-                    `[${label}] HTTP ${response.status} ${url} — retrying in ${delay} ms`,
+                    `[${label}] HTTP ${response.statusCode} ${url} — retrying in ${delay} ms`,
                 );
 
                 await sleep(delay);
@@ -765,9 +750,9 @@ async function fetchText(
             }
 
             return {
-                ok: response.ok,
+                ok: response.statusCode >= 200 && response.statusCode < 300,
                 status:
-                    response.status,
+                    response.statusCode,
                 finalUrl:
                     response.url,
                 text,
