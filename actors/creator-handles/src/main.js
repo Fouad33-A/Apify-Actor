@@ -124,6 +124,19 @@ async function discover(keyword, page) {
             const scripts = $('script[src]').map((_, el) => $(el).attr('src')).get();
             const visibleText = $('body').text().replace(/\\s+/g, ' ').trim();
             const handles = [...new Set([...html.matchAll(new RegExp('tiktok[.]com/@([a-zA-Z0-9._]{2,24})', 'g'))].map(m => m[1].toLowerCase()).filter(validHandle))];
+            // Inspect a bounded set of public JS bundles for creator-listing API route hints.
+            const assets = scripts.map(src => { try { return new URL(src, finalUrl).toString(); } catch { return null; } }).filter(Boolean);
+            await Actor.pushData({ recordType: 'TIKTOK_ONE_ASSET_INDEX', scriptUrls: assets.slice(0, 20).map(url => { const u = new URL(url); return { host: u.hostname, path: u.pathname.slice(0, 180) }; }), inlineScriptCount: $('script:not([src])').length, htmlRouteHints: [...new Set((html.match(new RegExp('[/][a-zA-Z0-9_/-]{0,70}(creator|influencer|marketplace)[a-zA-Z0-9_/-]{0,70}', 'gi')) || []).map(x => x.slice(0, 120)))].slice(0, 15) });
+            for (const asset of assets.slice(0, 5)) {
+                try {
+                    const res = await client({ url: asset, responseType: 'text', timeout: { request: 15000 }, headers: { accept: '*/*', referer: exploreUrl } });
+                    const js = String(res.body ?? '');
+                    const routeCandidates = [...new Set((js.match(new RegExp('[/][a-zA-Z0-9_./-]{0,90}(creator|influencer|marketplace|search)[a-zA-Z0-9_./-]{0,90}', 'gi')) || []).filter(x => x.includes('/')).map(x => x.slice(0, 150)))].slice(0, 20);
+                    const u = new URL(asset);
+                    await Actor.pushData({ recordType: 'TIKTOK_ONE_JS_PROBE', assetHost: u.hostname, assetPath: u.pathname.slice(0, 160), httpStatus: res.statusCode, bodyLength: js.length, routeCandidates, hasCreatorTerms: /creator|influencer/i.test(js) });
+                } catch (error) { await Actor.pushData({ recordType: 'TIKTOK_ONE_JS_PROBE', error: String(error.message).slice(0, 160) }); }
+                await sleep(300);
+            }
             await Actor.pushData({ recordType: 'TIKTOK_ONE_DIAGNOSTIC', httpStatus: explore.statusCode, contentType: String(explore.headers['content-type'] ?? ''), finalHost: finalUrl.hostname, finalPath: finalUrl.pathname, bodyLength: html.length, title: $('title').first().text().slice(0, 160), scriptCount: scripts.length, scriptHosts: [...new Set(scripts.map(x => { try { return new URL(x, finalUrl).hostname; } catch { return ''; } }))].filter(Boolean).slice(0, 10), loginSignals: /log\\s?in|sign\\s?in|captcha|verify you are human|access denied/i.test(visibleText.slice(0, 15000)), creatorSignals: /creator marketplace|creator explore|creator search|creator discovery|followers/i.test(visibleText.slice(0, 15000)), visibleTextStart: visibleText.slice(0, 300), tiktokProfileLinksFound: handles.length, sampleHandles: handles.slice(0, 5), hasNextData: Boolean($('script#__NEXT_DATA__').length), hasUniversalState: Boolean($('script#__UNIVERSAL_DATA_FOR_REHYDRATION__').length) });
         } catch (error) { await Actor.pushData({ recordType: 'TIKTOK_ONE_DIAGNOSTIC', error: String(error.message).slice(0, 240) }); }
     }
