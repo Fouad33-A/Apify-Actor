@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-05-v18';
+const RUNTIME_FIX_VERSION = '2026-11-05-v19';
 const BATCH = 2;
 const BETWEEN_PROFILE_BATCHES_MS = 20000;
 const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
@@ -299,6 +299,8 @@ export async function runSearch({
     const seen = new Map();
     const processed = new Set();
     const attempted = new Set();
+    const retryAfter = input.retryAfter ?? {};
+    const deferred = new Set();
     const emitted = new Set();
     const rows = [];
     let enrichNote = null;
@@ -350,7 +352,7 @@ export async function runSearch({
         return null;
     };
     const processCandidates = async (candidates) => {
-        const fresh = orderCandidates(candidates.filter((c) => !attempted.has(c.handle) && !processed.has(c.handle) && !known.has(c.handle)), input)
+        const fresh = orderCandidates(candidates.filter((c) => !attempted.has(c.handle) && !processed.has(c.handle) && !known.has(c.handle) && !(Number(retryAfter[c.handle]) > now())), input)
             .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
         for (let i = 0; i < fresh.length && !outOfTime() && !screeningRateLimited; i += BATCH) {
             // Separate child runs otherwise bypass each other's in-process cooldown.
@@ -433,7 +435,14 @@ export async function runSearch({
                 rows.push(row); countRow(row, profile); await emitRow(row);
                 // Private profiles cannot qualify; known follower/verification failures are definitive.
                 // Missing profiles and transient fetch failures remain retryable on future runs.
-                if (row.dataAvailability === 'complete' || profile?.status === 'private' || (profile && row.passesFilters === false && row.filterFailures?.some((reason) => reason.startsWith('followers') || reason === 'verified/celebrity'))) processed.add(c.handle);
+                if (row.dataAvailability === 'complete' || profile?.status === 'private' || (profile && row.passesFilters === false && row.filterFailures?.some((reason) => reason.startsWith('followers') || reason === 'verified/celebrity'))) {
+                    processed.add(c.handle);
+                    delete retryAfter[c.handle];
+                } else {
+                    // Delay transient retries so the next run can screen new candidates first.
+                    retryAfter[c.handle] = now() + (profile?.status === 'not_found' ? 6 * 3600000 : 45 * 60000);
+                    deferred.add(c.handle);
+                }
             }
         }
     };
@@ -555,12 +564,12 @@ export async function runSearch({
         },
         stoppedEarly: screeningRateLimited || outOfTime() || nextSearchIndex < input.searches.length,
         screeningRateLimited,
-        pendingCandidateHandles: [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle)).map((c) => c.handle).slice(0, 500),
+        pendingCandidateHandles: [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle) && !deferred.has(c.handle)).map((c) => c.handle).concat([...deferred]).slice(0, 500),
         searchVariantsAttempted: report.queries.reduce((total, q) => total + (q.attempts?.length ?? 0), 0),
         searchVariantsPlanned: input.criteriaOnly ? 6 : input.searches.length * 3,
         searchVariantsExhausted: input.criteriaOnly ? report.queries.some((q) => (q.attempts?.length ?? 0) >= 6) : null,
         nextSearchIndex,
-        resumeToken: { nextSearchIndex, processedHandles: [...new Set([...(input.priorProcessed ?? []), ...processed])], pendingCandidateHandles: [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle)).map((c) => c.handle).slice(0, 500) },
+        resumeToken: { nextSearchIndex, processedHandles: [...new Set([...(input.priorProcessed ?? []), ...processed])], pendingCandidateHandles: [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle) && !deferred.has(c.handle)).map((c) => c.handle).concat([...deferred]).slice(0, 500) },
         runtimeBudgetSeconds: input.maxRunSeconds,
         search: report, estimatedCostUsd: null, billedEvents: null,
         estimatedCostNote: 'Exact run cost and billed events are not available authoritatively inside the Actor; use the Apify run billing/usage record.',
@@ -605,6 +614,8 @@ async function main() {
             }
         }
         if (historyStore) {
+            const retryState = await historyStore.getValue('PROFILE_RETRY_AFTER_V1').catch(() => null);
+            input.retryAfter = retryState && typeof retryState === 'object' && !Array.isArray(retryState) ? retryState : {};
             const pending = await historyStore.getValue('PENDING_SCREENING_V1').catch(() => null);
             if (Array.isArray(pending) && pending.length) {
                 const queued = pending.filter((h) => typeof h === 'string' && !input.knownHandles.includes(h));
@@ -626,6 +637,7 @@ async function main() {
         if (historyStore) {
             try {
                 await historyStore.setValue('PENDING_SCREENING_V1', summary.pendingCandidateHandles);
+                await historyStore.setValue('PROFILE_RETRY_AFTER_V1', Object.fromEntries(Object.entries(input.retryAfter ?? {}).filter(([handle, until]) => typeof handle === 'string' && Number(until) > Date.now())));
                 const { items } = await (await Actor.openDataset()).getData({ limit: 1000 });
                 const confirmed = items.filter((r) => r.recordType === 'creator' && r.enrichStatus === 'ok').map((r) => r.handle);
                 const rejected = Object.fromEntries((summary.screeningDecisions ?? []).filter((r) => r.passesFilters === false && r.enrichStatus === 'ok' && r.filterFailures?.some((x) => x.startsWith('followers') || x === 'verified/celebrity')).map((r) => [r.handle, { at: Date.now() }]));
