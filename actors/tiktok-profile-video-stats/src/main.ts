@@ -1562,10 +1562,10 @@ async function discoverCreatorFeed(
     let cursor = 0;
     let warning: string | null = null;
     for (let page = 0; page < 3 && found.size < requested; page += 1) {
-        const url = new URL('https://www.tiktok.com/api/post/item_list/');
+        const url = new URL('https://www.tiktok.com/api/creator/item_list/');
         url.searchParams.set('aid', '1988');
         url.searchParams.set('secUid', profile.secUid);
-        url.searchParams.set('count', String(Math.min(35, requested - found.size)));
+        url.searchParams.set('count', String(Math.min(15, requested - found.size)));
         url.searchParams.set('cursor', String(cursor));
         const response = await fetchText(url.toString(), {
             referer: profileUrl, maxRetries: 0, label: 'CREATOR_FEED',
@@ -1583,7 +1583,8 @@ async function discoverCreatorFeed(
             warning = `Creator feed rejected request: status_code=${String(data?.['status_code'] ?? 'unknown')}`;
             break;
         }
-        const items = data['itemList'] ?? data['item_list'];
+        const payload = asRecord(data['data']) ?? data;
+        const items = payload['itemList'] ?? payload['item_list'] ?? payload['items'];
         if (!Array.isArray(items) || items.length === 0) {
             warning = 'Creator feed returned no video items.';
             break;
@@ -1599,8 +1600,8 @@ async function discoverCreatorFeed(
                 isPinned: firstBoolean(item, ['isPinnedItem', 'isPinned', 'pinned']),
             });
         }
-        const next = asNumber(data['cursor']) ?? asNumber(data['maxCursor']) ?? asNumber(data['max_cursor']);
-        if (data['hasMore'] === false || data['has_more'] === false || next === null || next <= cursor) break;
+        const next = asNumber(payload['cursor']) ?? asNumber(payload['maxCursor']) ?? asNumber(payload['max_cursor']);
+        if (payload['hasMore'] === false || payload['has_more'] === false || next === null || next <= cursor) break;
         cursor = next;
     }
     return { candidates: [...found.values()].sort((a,b) => (b.createTime ?? 0) - (a.createTime ?? 0)).slice(0, requested), warning };
@@ -3710,6 +3711,14 @@ async function processHandle(
         candidates = [...byId.values()];
     };
     let discoverySource = 'public_profile_html';
+    if (candidates.length < options.videosPerProfile) {
+        const feed = await discoverCreatorFeed(profile, profileUrl, options.videosPerProfile);
+        if (feed.candidates.length > 0) {
+            mergeCandidates(feed.candidates);
+            discoverySource = 'public_creator_feed';
+        }
+        if (feed.warning) warnings.push(feed.warning);
+    }
     let embedResponse: FetchResult = { ok: false, status: null, finalUrl: null, text: null, error: null };
     if (candidates.length === 0) {
         const embedUrl = `https://www.tiktok.com/embed/@${username}`;
@@ -3723,14 +3732,6 @@ async function processHandle(
             candidates = parseEmbedCandidates(embedResponse.text);
             discoverySource = 'tiktok_creator_embed';
         }
-    }
-    if (candidates.length < options.videosPerProfile) {
-        const feed = await discoverCreatorFeed(profile, profileUrl, options.videosPerProfile);
-        if (feed.candidates.length > 0) {
-            mergeCandidates(feed.candidates);
-            discoverySource = 'public_creator_feed';
-        }
-        if (feed.warning) warnings.push(feed.warning);
     }
     if (candidates.length < options.videosPerProfile) {
         const browser = await discoverBrowserProfile(username, options.videosPerProfile, options.useResidentialProxy);
