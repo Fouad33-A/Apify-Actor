@@ -218,6 +218,8 @@ interface SellingAnalysis {
     selling: boolean;
     sellingSignals: string[];
     managementEmailInBio: boolean;
+    sponsored: boolean;
+    sponsoredSignals: string[];
 }
 
 interface FetchResult {
@@ -2866,17 +2868,19 @@ function analyzeSelling(
         );
     }
 
-    for (
-        const video of videos
-    ) {
-        for (
-            const signal of
-            video.sponsoredSignals
-        ) {
-            signals.add(
-                signal,
-            );
-        }
+    // Sponsorship is separate from creator-owned product or service sales.
+    const sponsoredSignals = new Set<string>();
+    for (const video of videos) {
+        if (video.isAd === true) sponsoredSignals.add('video_ad_flag');
+        for (const signal of video.sponsoredSignals) sponsoredSignals.add(signal);
+    }
+    const domain = (profile.bioLinkDomain ?? '').toLowerCase();
+    const link = (profile.bioLink ?? '').toLowerCase();
+    if (/(?:^|\.)(?:shop|store)$/.test(domain) || /\.(?:shop|store)(?:\/|$)/.test(link)) {
+        signals.add('bio_commerce_domain');
+    }
+    if (/\b(?:merch|merchandise|shop|store|course|courses)\b/i.test(lower)) {
+        signals.add('bio_commerce_language');
     }
 
     const managementEmailInBio =
@@ -2898,6 +2902,8 @@ function analyzeSelling(
             [...signals],
 
         managementEmailInBio,
+        sponsored: sponsoredSignals.size > 0,
+        sponsoredSignals: [...sponsoredSignals],
     };
 }
 
@@ -3151,29 +3157,18 @@ function buildSummary(
         number | null =
         null;
 
-    /*
-     * Cadence uses the median gap between adjacent sampled posts instead of
-     * the full newest-to-oldest span. This is robust to one isolated old
-     * highlighted/pinned candidate contaminating an otherwise recent sample
-     * (the cause of implausibly tiny values such as ~0.04 posts/week).
-     */
+    // Use the full sample span to avoid inflated burst-posting estimates.
     const postingGapDays: number[] = [];
-
     for (let i = 0; i + 1 < sortedDates.length; i++) {
-        const gapDays =
-            (sortedDates[i] - sortedDates[i + 1]) / 86400;
-
-        if (gapDays > 0 && Number.isFinite(gapDays)) {
-            postingGapDays.push(gapDays);
-        }
+        const gapDays = (sortedDates[i] - sortedDates[i + 1]) / 86400;
+        if (gapDays > 0 && Number.isFinite(gapDays)) postingGapDays.push(gapDays);
     }
-
-    const medianPostingGapDays =
-        median(postingGapDays);
-
-    if (medianPostingGapDays && medianPostingGapDays > 0) {
-        postsPerWeek =
-            round(7 / medianPostingGapDays, 2);
+    const medianPostingGapDays = median(postingGapDays);
+    const sampledSpanDays = sortedDates.length >= 2
+        ? (sortedDates[0] - sortedDates[sortedDates.length - 1]) / 86400
+        : null;
+    if (sampledSpanDays !== null && sampledSpanDays > 0) {
+        postsPerWeek = round((sortedDates.length - 1) * 7 / sampledSpanDays, 2);
     }
 
     let daysSinceLastPost:
@@ -3390,7 +3385,7 @@ function buildSummary(
         topVideoSelectionCoverage: videos.length >= 30 ? '30_or_more' : 'partial_under_30',
 
         postsPerWeekMethod:
-            '7_divided_by_median_adjacent_post_gap_days',
+            'sampled_intervals_per_oldest_to_newest_span_days',
 
         medianPostingGapDays:
             round(medianPostingGapDays, 2),
