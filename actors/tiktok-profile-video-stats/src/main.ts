@@ -3427,6 +3427,7 @@ async function processHandle(
         maxFollowers:
             number | null;
         maxItems: number;
+        retrievalMode: 'freeOnly' | 'tikhubFallback';
     },
 ): Promise<{
     username: string;
@@ -3463,7 +3464,7 @@ async function processHandle(
     let profile = parseProfile(username, profileHtml);
     // When direct TikTok profile HTML is blocked, recover the secUid from
     // the authenticated profile endpoint rather than aborting video discovery.
-    if ((!profile || !profile.secUid) && process.env.TIKHUB_API_TOKEN) {
+    if ((!profile || !profile.secUid) && options.retrievalMode === 'tikhubFallback' && process.env.TIKHUB_API_TOKEN) {
         try {
             const endpoint = new URL('https://api.tikhub.io/api/v1/tiktok/app/v3/handler_user_profile');
             endpoint.searchParams.set('unique_id', username);
@@ -3653,7 +3654,7 @@ async function processHandle(
     }
 
     // Authenticated API discovery avoids repeated blocked TikTok embed requests.
-    const apiDiscovery = process.env.TIKHUB_API_TOKEN
+    const apiDiscovery = options.retrievalMode === 'tikhubFallback' && process.env.TIKHUB_API_TOKEN
         ? await discoverTikHubVideos(username, profile.secUid, options.videosPerProfile)
         : null;
     if (apiDiscovery?.warning) warnings.push(apiDiscovery.warning);
@@ -4110,6 +4111,10 @@ try {
             30,
         );
 
+    const retrievalMode: 'freeOnly' | 'tikhubFallback' =
+        input.retrievalMode === 'tikhubFallback' ? 'tikhubFallback' : 'freeOnly';
+    log.info(`[RETRIEVAL] ${retrievalMode}; TikHub API calls ${retrievalMode === 'freeOnly' ? 'disabled' : 'explicitly enabled'}`);
+
     const excludePinned =
         input.excludePinned !==
         false;
@@ -4255,6 +4260,7 @@ try {
                             maxFollowers,
 
                             maxItems,
+                            retrievalMode,
                         },
                     );
                 } catch (
@@ -4404,7 +4410,7 @@ try {
         maxItems,
 
         discoverySource:
-            process.env.TIKHUB_API_TOKEN ? 'tikhub_authenticated_api_with_public_fallback' : 'profile_html_embed_feed_browser_fallback',
+            retrievalMode === 'tikhubFallback' && process.env.TIKHUB_API_TOKEN ? 'tikhub_authenticated_api_with_public_fallback' : 'profile_html_embed_feed_browser_fallback',
 
         selectionMethod:
             'parse_all_candidates_then_sort_by_create_time',
@@ -4427,7 +4433,7 @@ try {
         deferredDueToRateLimit: rateLimitCircuitOpen,
 
         externalPaidServicesUsed:
-            Boolean(process.env.TIKHUB_API_TOKEN && results.some(result => result?.videosSaved > 0)),
+            Boolean(retrievalMode === 'tikhubFallback' && process.env.TIKHUB_API_TOKEN && results.some(result => result?.videosSaved > 0)),
 
         proxyUsed:
             false,
