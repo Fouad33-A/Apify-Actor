@@ -1687,7 +1687,7 @@ async function discoverBrowserProfile(
             const feedResponses: string[] = [];
             const feedRequestDiagnostics: Array<Record<string, unknown>> = [];
             const feedResponseDiagnostics: Array<Record<string, unknown>> = [];
-            const feedPathPattern = /\\/api\\/(?:post\\/item_list|item_list|creator\\/item_list)\\//;
+            const feedPathPattern = /\/api\/(?:post\/item_list|item_list|creator\/item_list)\//;
             // Capture parameter names only, never parameter values, signatures, cookies or headers.
             page.on('request', (request) => {
                 if (!feedPathPattern.test(request.url()) || feedRequestDiagnostics.length >= 8) return;
