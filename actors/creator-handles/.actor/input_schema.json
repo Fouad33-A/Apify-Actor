@@ -8,7 +8,8 @@
       "type": "integer",
       "default": 100,
       "minimum": 1,
-      "maximum": 100
+      "maximum": 100,
+      "description": "Maximum number of verified creator handles to return."
     },
     "keywords": {
       "title": "Search keywords",
@@ -30,31 +31,36 @@
         "art",
         "sports",
         "music"
-      ]
+      ],
+      "description": "Topics used to discover public TikTok creator profiles."
     },
     "maxCandidates": {
       "title": "Maximum profiles to inspect",
       "type": "integer",
       "default": 600,
       "minimum": 10,
-      "maximum": 3000
+      "maximum": 3000,
+      "description": "Maximum number of distinct discovered profiles to inspect."
     },
     "minFollowers": {
       "title": "Minimum followers",
       "type": "integer",
-      "default": 10000
+      "default": 10000,
+      "description": "Minimum allowed follower count, inclusive."
     },
     "maxFollowers": {
       "title": "Maximum followers",
       "type": "integer",
-      "default": 150000
+      "default": 150000,
+      "description": "Maximum allowed follower count, inclusive."
     },
     "activeWithinDays": {
       "title": "Posted within days",
       "type": "integer",
       "default": 7,
       "minimum": 1,
-      "maximum": 30
+      "maximum": 30,
+      "description": "A qualifying creator must have posted within this many days."
     }
   },
   "required": []
