@@ -1445,7 +1445,9 @@ function collectEmbedCandidates(
                 obj ||
             'create_time' in
                 obj ||
-            'author' in obj ||
+            // A creator/user object can have a numeric id and an
+            // author field, but it is not a video. Require video-specific
+            // evidence before treating an id as a candidate.
             'music' in obj ||
             'isPinnedItem' in
                 obj ||
