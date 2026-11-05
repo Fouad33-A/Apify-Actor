@@ -1435,23 +1435,26 @@ function collectEmbedCandidates(
             id,
         )
     ) {
+        // Profile/user objects also expose id, stats and description fields.
+        // Only accept an item with a video-specific structure or timestamp.
+        const media = asRecord(obj['video']);
+        const hasMediaEvidence = !!media && (
+            'duration' in media ||
+            'playAddr' in media ||
+            'downloadAddr' in media ||
+            'cover' in media
+        );
         const videoLike =
-            'video' in obj ||
-            'stats' in obj ||
-            'statistics' in
-                obj ||
-            'desc' in obj ||
-            'createTime' in
-                obj ||
-            'create_time' in
-                obj ||
-            // A creator/user object can have a numeric id and an
-            // author field, but it is not a video. Require video-specific
-            // evidence before treating an id as a candidate.
-            'music' in obj ||
-            'isPinnedItem' in
-                obj ||
-            'isPinned' in obj;
+            hasMediaEvidence ||
+            ('createTime' in obj && (
+                'desc' in obj ||
+                'video' in obj ||
+                'music' in obj
+            )) ||
+            ('create_time' in obj && (
+                'desc' in obj ||
+                'video' in obj
+            ));
 
         if (videoLike) {
             const createTime =
