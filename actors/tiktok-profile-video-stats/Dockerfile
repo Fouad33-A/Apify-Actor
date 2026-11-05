@@ -8,7 +8,7 @@ RUN npm install --include=dev --audit=false
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
     && python3 -m venv /opt/gallery-venv \
-    && /opt/gallery-venv/bin/pip install --no-cache-dir 'gallery-dl>=1.32.0' \
+    && /opt/gallery-venv/bin/pip install --no-cache-dir 'gallery-dl>=1.32.0' 'yt-dlp>=2025.1.0' \
     && ln -s /opt/gallery-venv/bin/gallery-dl /usr/local/bin/gallery-dl \
     && rm -rf /var/lib/apt/lists/*
 USER myuser
