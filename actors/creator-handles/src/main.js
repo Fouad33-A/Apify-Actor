@@ -84,6 +84,35 @@ async function discover(keyword, page) {
             await Actor.pushData({ recordType: 'MOBILE_HTTP_DIAGNOSTIC', endpoint: mobile.origin + mobile.pathname, keyword, httpStatus: mobileResponse.statusCode, contentType: String(mobileResponse.headers['content-type'] ?? ''), finalHost: (() => { try { return new URL(mobileResponse.url).hostname; } catch { return null; } })(), bodyLength: mobileBody.length, bodyStartsWith: mobileBody.trimStart().slice(0, 1), jsonSummary: (() => { try { const j = JSON.parse(mobileBody); return { keys: Object.keys(j).slice(0, 12), status_code: j.status_code ?? null, status_msg: String(j.status_msg ?? '').slice(0, 120), user_list_length: Array.isArray(j.user_list) ? j.user_list.length : null, userList_length: Array.isArray(j.userList) ? j.userList.length : null }; } catch { return { parseError: true }; } })(), locationHeaderHost: (() => { try { return new URL(mobileResponse.headers.location).hostname; } catch { return null; } })() });
         } catch (error) { await Actor.pushData({ recordType: 'MOBILE_HTTP_DIAGNOSTIC', endpoint: mobile.origin + mobile.pathname, error: String(error.message).slice(0, 250) }); }
     }
+    if (diagnosticOnly) {
+        // Compare plausible TikTok-native routes with the same established session.
+        // This is endpoint discovery, not evidence that any route is supported.
+        const probes = [
+            ['mobile-user-search', 'https://m.tiktok.com/api/search/user/full/'],
+            ['mobile-general-search', 'https://m.tiktok.com/api/search/general/full/'],
+            ['desktop-general-search', 'https://www.tiktok.com/api/search/general/full/'],
+            ['mobile-search-page', 'https://m.tiktok.com/search/user'],
+        ];
+        for (const [name, base] of probes) {
+            const u = new URL(base);
+            if (name === 'mobile-search-page') u.searchParams.set('q', keyword);
+            else {
+                u.searchParams.set('aid', '1988');
+                u.searchParams.set('keyword', keyword);
+                u.searchParams.set('offset', '0');
+                u.searchParams.set('count', '20');
+                if (token) u.searchParams.set('msToken', token);
+            }
+            try {
+                const r = await client({ url: u.toString(), responseType: 'text', followRedirect: true, headers: { accept: name === 'mobile-search-page' ? 'text/html,application/xhtml+xml' : 'application/json, text/plain, */*', referer: 'https://' + u.hostname + '/search?q=' + encodeURIComponent(keyword) } });
+                const body = String(r.body ?? '');
+                let parsed = null;
+                try { parsed = JSON.parse(body); } catch { /* not JSON */ }
+                await Actor.pushData({ recordType: 'ENDPOINT_PROBE', probe: name, host: u.hostname, path: u.pathname, httpStatus: r.statusCode, contentType: String(r.headers['content-type'] ?? ''), bodyLength: body.length, jsonParsed: parsed !== null, jsonKeys: parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 12) : [], tiktokStatusCode: parsed?.status_code ?? null, tiktokStatusMessage: String(parsed?.status_msg ?? '').slice(0, 160), handlesFound: parsed ? extractSearchHandles(parsed).length : 0, htmlTitle: !parsed ? (body.match(/<title[^>]*>([^<]*)<\\/title>/i)?.[1] ?? '').slice(0, 120) : '' });
+            } catch (e) { await Actor.pushData({ recordType: 'ENDPOINT_PROBE', probe: name, error: String(e.message).slice(0, 180) }); }
+            await sleep(300);
+        }
+    }
     if (response.statusCode === 429) { diagnostics.searchBlocked++; throw new Error('TikTok search HTTP 429; stopping discovery to avoid further rate limits'); }
     if (response.statusCode !== 200) throw new Error('TikTok search HTTP ' + response.statusCode);
     let json;
