@@ -18,7 +18,7 @@ This build uses TikTok's public creator embed for video discovery. That source e
 
 Each creator summary contains two Comments Scraper handoffs:
 
-- `commentScraperInput` keeps the existing top-3-by-comments handoff.
+- `commentScraperInput` keeps the existing top-10-by-comments handoff.
 - `commentScraperInputAll` contains **all analyzed videos**, up to the public-source 10-video cap, for full creator question mining.
 
 Both use the same canonical contract:
@@ -33,7 +33,7 @@ Both use the same canonical contract:
 
 A compatibility `postUrls: [{"url":"..."}]` representation is also emitted in both handoffs. TikTok Comments Scraper v2 accepts both forms.
 
-`topVideosByComments` contains the top three analyzed videos ranked by comment count and includes `videoId`, `videoUrl`, `comments`, `saves`, `plays`, `createdAt`, and `caption`, so comment/save decisions can be made directly from the creator summary without a second lookup.
+`topVideoUrlsByComments` provides a simple ordered list of up to 10 TikTok video links per creator. Set `outputRows` to `summaryOnly` for one creator summary per successful profile, rather than separate video rows. The ranking is limited to the available public embed sample (up to 10 recent candidates), not the latest 30 videos.\n\n`topVideosByComments` contains the top ten analyzed videos ranked by comment count and includes `videoId`, `videoUrl`, `comments`, `saves`, `plays`, `createdAt`, and `caption`, so comment/save decisions can be made directly from the creator summary without a second lookup.
 
 ## Median audit IDs
 
