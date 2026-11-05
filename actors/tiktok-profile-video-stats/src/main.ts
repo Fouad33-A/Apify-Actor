@@ -1569,7 +1569,7 @@ async function discoverCreatorFeed(
             referer: profileUrl, maxRetries: 0, label: 'CREATOR_FEED',
         });
         if (!response.ok || !response.text) {
-            warning = `Creator feed HTTP ${response.status ?? 'unknown'}: ${response.error ?? 'empty response'}`;
+            warning = `Creator feed HTTP ${response.status ?? 'unknown'}: ${response.error ?? 'empty response'}; bodyLength=${response.text?.length ?? 0}; finalUrlHost=${(() => { try { return new URL(response.finalUrl ?? url.toString()).host; } catch { return 'unknown'; } })()}`;
             break;
         }
         let data: Record<string, unknown> | null = null;
