@@ -3457,11 +3457,39 @@ async function processHandle(
         profileResponse.text ??
         '';
 
-    const profile =
-        parseProfile(
-            username,
-            profileHtml,
-        );
+    let profile = parseProfile(username, profileHtml);
+    // When direct TikTok profile HTML is blocked, recover the secUid from
+    // the authenticated profile endpoint rather than aborting video discovery.
+    if ((!profile || !profile.secUid) && process.env.TIKHUB_API_TOKEN) {
+        try {
+            const endpoint = new URL('https://api.tikhub.io/api/v1/tiktok/app/v3/handler_user_profile');
+            endpoint.searchParams.set('unique_id', username);
+            const response = await fetch(endpoint, {
+                headers: { Authorization: `Bearer ${process.env.TIKHUB_API_TOKEN}`, Accept: 'application/json' },
+                signal: AbortSignal.timeout(25000),
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const payload = asRecord(await response.json());
+            const data = asRecord(payload?.data);
+            const user = asRecord(data?.user) ?? asRecord(data?.user_info) ?? asRecord(data?.userInfo) ?? data;
+            const nested = asRecord(user?.user) ?? user;
+            const secUid = firstString(nested, ['sec_uid', 'secUid', 'sec_user_id']);
+            if (!secUid) throw new Error('No secUid in authenticated profile response');
+            if (!profile) {
+                profile = {
+                    username, displayName: firstString(nested, ['nickname', 'displayName']),
+                    secUid, userId: firstString(nested, ['uid', 'id']), bio: firstString(nested, ['signature', 'bio']),
+                    bioLink: null, bioLinkDomain: null, emails: [], contactText: [],
+                    followers: null, following: null, likes: null, videos: null,
+                    verified: firstBoolean(nested, ['verified']), privateAccount: firstBoolean(nested, ['privateAccount', 'private_account']),
+                    region: null, language: null, commerceUser: null, businessAccount: null, shop: null, avatarUrl: null,
+                };
+            } else profile.secUid = secUid;
+            log.info(`[PROFILE API] @${username}: secUid resolved`);
+        } catch (error) {
+            warnings.push(`Authenticated profile lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
 
     if (!profile) {
         const status =
