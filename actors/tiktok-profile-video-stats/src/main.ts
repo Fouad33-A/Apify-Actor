@@ -3281,44 +3281,31 @@ async function processHandle(
         };
     }
 
-    const embedUrl =
-        `https://www.tiktok.com/embed/@${username}`;
-
-    /*
-     * Creator embed is our critical discovery request.
-     *
-     * It now gets:
-     * initial attempt
-     * + 5 sec retry
-     * + 10 sec retry
-     * + 20 sec retry
-     *
-     * Any 429 also pauses the other worker.
-     */
-    const embedResponse =
-        await fetchText(
-            embedUrl,
-            {
-                referer:
-                    profileUrl,
-
-                maxRetries:
-                    EMBED_MAX_RETRIES,
-
-                retryDelaysMs:
-                    EMBED_RETRY_DELAYS_MS,
-
-                label:
-                    'EMBED',
-            },
-        );
+    // First use video records already present in the public profile page.
+    // This avoids the rate-limited creator embed whenever possible.
+    let candidates = parseEmbedCandidates(profileHtml).slice(0, OFFICIAL_EMBED_RECENT_LIMIT);
+    let discoverySource = 'public_profile_html';
+    let embedResponse: FetchResult = { ok: false, status: null, finalUrl: null, text: null, error: null };
+    if (candidates.length === 0) {
+        const embedUrl = `https://www.tiktok.com/embed/@${username}`;
+        embedResponse = await fetchText(embedUrl, {
+            referer: profileUrl,
+            maxRetries: EMBED_MAX_RETRIES,
+            retryDelaysMs: EMBED_RETRY_DELAYS_MS,
+            label: 'EMBED',
+        });
+        if (embedResponse.ok && embedResponse.text) {
+            candidates = parseEmbedCandidates(embedResponse.text);
+            discoverySource = 'tiktok_creator_embed';
+        }
+    }
+    log.info(`[DISCOVERY] @${username}: ${candidates.length} candidates from ${discoverySource}`);
 
     if (
-        !embedResponse.ok ||
-        !embedResponse.text
+        candidates.length === 0
     ) {
         warnings.push(
-            `Creator embed failed after bounded retries with HTTP ${embedResponse.status ?? 'unknown'}.`,
+            `No profile or embed video candidates; embed HTTP ${embedResponse.status ?? 'unknown'}.`,
         );
 
         if (
@@ -3404,15 +3391,6 @@ async function processHandle(
                 coverage.warnings,
         };
     }
-
-    const candidates =
-        parseEmbedCandidates(
-            embedResponse.text,
-        );
-
-    log.info(
-        `[DISCOVERY] @${username}: ${candidates.length} candidate video(s) from creator embed`,
-    );
 
     const parsedCandidates:
         ParsedCandidate[] =
