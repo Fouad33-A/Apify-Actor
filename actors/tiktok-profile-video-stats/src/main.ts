@@ -2784,7 +2784,7 @@ function buildSummary(
             )
             .slice(
                 0,
-                5,
+                10,
             )
             .map(
                 (video) => ({
@@ -2977,6 +2977,9 @@ function buildSummary(
 
         topVideosByComments,
 
+        // Simple, ready-to-export links, ranked by comment count.
+        topVideoUrlsByComments: topVideosByComments.map((video) => video.videoUrl),
+
         commentScraperInputAll: {
             /* All analyzed videos (up to the public-source 10-video cap). */
             videoUrls:
@@ -3000,7 +3003,7 @@ function buildSummary(
         },
 
         commentScraperInput: {
-            /* Top-five-by-comments convenience contract consumed by TikTok Comments Scraper. */
+            /* Top-ten-by-comments convenience contract consumed by TikTok Comments Scraper. */
             videoUrls:
                 topVideosByComments.map(
                     (video) =>
