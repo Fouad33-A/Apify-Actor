@@ -1692,7 +1692,7 @@ async function discoverBrowserProfile(
                 } catch { /* A response may be blocked, empty, or non-JSON. */ }
             });
             await page.goto(`https://www.tiktok.com/@${username}`, {
-                waitUntil: 'domcontentloaded', timeout: 30000,
+                waitUntil: 'commit', timeout: 20000,
             });
             await page.waitForTimeout(3000);
             for (let i = 0; i < 4 && found.size < requested; i += 1) {
