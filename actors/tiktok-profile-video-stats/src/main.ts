@@ -132,7 +132,7 @@ interface SelectionInfo {
 }
 
 interface CoverageInfo {
-    source: 'tiktok_creator_embed';
+    source: 'tiktok_creator_embed' | 'tikhub_authenticated_api';
 
     requestedVideos: number;
 
