@@ -3876,6 +3876,27 @@ async function processHandle(
             await pushLimited({ rowType: 'video', username, profileUrl, status: 'ok',
                 rankNewest: i + 1, selectionBasis: 'native_discovery_unverified_order', engagementComplete: selectedNative[i].comments !== null, ...selectedNative[i] }, options.maxItems);
         }
+        // Separate ranked output: retain all recent video rows and emit the
+        // ten most-commented videos per creator for downstream workflows.
+        const rankedByComments = [...selectedNative]
+            .filter(video => video.comments !== null)
+            .sort((a, b) =>
+                (b.comments ?? 0) - (a.comments ?? 0) ||
+                (b.createTime ?? 0) - (a.createTime ?? 0) ||
+                a.videoId.localeCompare(b.videoId))
+            .slice(0, 10);
+        const commentRankingComplete = selectedNative.length === options.videosPerProfile &&
+            selectedNative.every(video => video.comments !== null);
+        for (let i = 0; i < rankedByComments.length; i++) {
+            await pushLimited({
+                rowType: 'top_commented_video', username, profileUrl, status: 'ok',
+                rankByComments: i + 1,
+                rankingBasis: 'comment_count_desc_within_retrieved_recent_videos',
+                rankingComplete: commentRankingComplete,
+                pinnedStatusVerified: rankedByComments[i].isPinned !== null,
+                ...rankedByComments[i],
+            }, options.maxItems);
+        }
         const parsedNative: ParsedCandidate[] = nativeDiscovery.videos.map(video => ({
             candidate: { id: video.videoId, createTime: video.createTime, isPinned: video.isPinned },
             status: 'parsed' as const, video, error: null,
@@ -3885,11 +3906,11 @@ async function processHandle(
         coverageNative.officialRecentVideoLimit = 0;
         coverageNative.completeForRequestedCount = selectedNative.length === options.videosPerProfile && selectedNative.every(v => v.comments !== null && v.createTime !== null);
         coverageNative.selectionReliable = coverageNative.completeForRequestedCount;
-        if (selectedNative.some(v => v.comments === null)) coverageNative.warnings.push('Comment counts unavailable for some videos: do NOT rank top videos by comments.');
+        if (selectedNative.some(v => v.comments === null)) coverageNative.warnings.push('Comment counts unavailable for some videos: top-commented ranking is provisional.');
         if (selectedNative.some(v => v.createTime === null)) coverageNative.warnings.push('Publication dates unavailable for some videos: newest-30 ordering is unverified.');
         if (selectedNative.length < options.videosPerProfile) coverageNative.warnings.push('Fewer video IDs than requested; coverage incomplete.');
         coverageNative.warnings = coverageNative.warnings.filter(w => !w.includes('public TikTok creator embed'));
-        coverageNative.warnings.push(...warnings);
+        coverageNative.warnings.push(...warnings.filter(w => !w.includes('gallery-dl found video URLs but no comment counts')));
         const summaryNative = buildSummary(profile, selectedNative, analyzeSelling(profile, selectedNative), coverageNative);
         await pushLimited({ rowType: 'summary', username, profileUrl, status: 'ok',
             discoverySource: 'gallery_dl_or_ytdlp_native', ...summaryNative }, options.maxItems);
