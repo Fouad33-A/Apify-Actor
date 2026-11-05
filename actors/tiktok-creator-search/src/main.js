@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-05-v17';
+const RUNTIME_FIX_VERSION = '2026-11-05-v18';
 const BATCH = 2;
 const BETWEEN_PROFILE_BATCHES_MS = 20000;
 const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
@@ -298,6 +298,7 @@ export async function runSearch({
     let nextSearchIndex = input.resumeIndex ?? 0;
     const seen = new Map();
     const processed = new Set();
+    const attempted = new Set();
     const emitted = new Set();
     const rows = [];
     let enrichNote = null;
@@ -349,7 +350,7 @@ export async function runSearch({
         return null;
     };
     const processCandidates = async (candidates) => {
-        const fresh = orderCandidates(candidates.filter((c) => !processed.has(c.handle) && !known.has(c.handle)), input)
+        const fresh = orderCandidates(candidates.filter((c) => !attempted.has(c.handle) && !processed.has(c.handle) && !known.has(c.handle)), input)
             .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
         for (let i = 0; i < fresh.length && !outOfTime() && !screeningRateLimited; i += BATCH) {
             // Separate child runs otherwise bypass each other's in-process cooldown.
@@ -387,6 +388,7 @@ export async function runSearch({
                 continue;
             }
             const names = enrichable.map((c) => c.handle);
+            for (const name of names) attempted.add(name);
             log.info(`[${RUNTIME_FIX_VERSION}] Profile screening batch: ${names.length} creator(s) [${names.join(', ')}].`);
             // A single full-mode call provides followers, verification, latest activity and
             // the ten-video median together. Avoid the former profileOnly + full two-call
@@ -429,8 +431,9 @@ export async function runSearch({
                 }
                 if (profile?.__regionSource) row.regionSource = profile.__regionSource;
                 rows.push(row); countRow(row, profile); await emitRow(row);
-                // Missing video metrics or blocked profiles are unresolved, not rejected.
-                if (row.dataAvailability === 'complete') processed.add(c.handle);
+                // Private profiles cannot qualify; known follower/verification failures are definitive.
+                // Missing profiles and transient fetch failures remain retryable on future runs.
+                if (row.dataAvailability === 'complete' || profile?.status === 'private' || (profile && row.passesFilters === false && row.filterFailures?.some((reason) => reason.startsWith('followers') || reason === 'verified/celebrity'))) processed.add(c.handle);
             }
         }
     };
