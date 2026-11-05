@@ -31,31 +31,52 @@ async function request(url) {
     if (response.statusCode !== 200) throw new Error('HTTP ' + response.statusCode);
     return response.body;
 }
-async function discover(keyword, page) {
-    const query = 'site:tiktok.com/@ ' + keyword + ' TikTok';
-    const urls = [
-        'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&first=' + (page * 10 + 1),
-        'https://www.google.com/search?q=' + encodeURIComponent(query) + '&start=' + (page * 10) + '&num=10',
-        'https://www.google.com/search?tbm=vid&q=' + encodeURIComponent(query) + '&start=' + (page * 10),
+// TikTok-native discovery, using the Comments Scraper's persistent cookie jar,
+// browser-like HTTP client, msToken, JSON status validation and request pacing.
+let discoveryInitialized = false;
+async function initializeDiscovery() {
+    if (discoveryInitialized) return;
+    discoveryInitialized = true;
+    const response = await client({ url: 'https://www.tiktok.com/', responseType: 'text', headers: { accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' } });
+    if (response.statusCode === 429) throw new Error('TikTok discovery bootstrap HTTP 429');
+    if (response.statusCode !== 200) log.warning('TikTok bootstrap HTTP ' + response.statusCode);
+}
+function extractSearchHandles(json) {
+    const entries = [
+        ...(Array.isArray(json.user_list) ? json.user_list : []),
+        ...(Array.isArray(json.userList) ? json.userList : []),
+        ...(Array.isArray(json.data?.user_list) ? json.data.user_list : []),
+        ...(Array.isArray(json.data?.userList) ? json.data.userList : []),
     ];
-    const found = new Set();
-    for (const url of urls) {
-        let html;
-        try { html = await request(url); } catch (error) { diagnostics.searchErrors++; log.warning('Search HTTP failure: ' + String(error.message)); continue; }
-        const $ = cheerio.load(html);
-        $('a[href]').each((_, a) => {
-            const raw = $(a).attr('href') ?? '';
-            let candidate = raw;
-            try { const wrapped = new URL(raw, url); candidate = wrapped.searchParams.get('q') ?? wrapped.searchParams.get('url') ?? wrapped.href; } catch { /* ignore */ }
-            const handle = getHandle(candidate);
-            if (handle) found.add(handle);
-        });
-        for (const match of html.matchAll(/tiktok\.com(?:\/|%2F)@([a-zA-Z0-9._]{2,24})/gi)) if (validHandle(match[1])) found.add(match[1].toLowerCase());
-        if (found.size) return [...found];
-        diagnostics.searchEmpty++;
-        if (/captcha|unusual traffic|verify you are human|automated queries/i.test(html)) diagnostics.searchBlocked++;
+    const handles = new Set();
+    for (const entry of entries) {
+        const user = entry.user_info ?? entry.userInfo ?? entry.user ?? entry;
+        const handle = user.unique_id ?? user.uniqueId ?? user.username ?? user.handle;
+        if (typeof handle === 'string' && validHandle(handle)) handles.add(handle.toLowerCase());
     }
-    return [...found];
+    return [...handles];
+}
+async function discover(keyword, page) {
+    await initializeDiscovery();
+    const api = new URL('https://www.tiktok.com/api/search/user/full/');
+    api.searchParams.set('aid', '1988');
+    api.searchParams.set('keyword', keyword);
+    api.searchParams.set('offset', String(page * 20));
+    api.searchParams.set('count', '20');
+    const token = (await jar.getCookies('https://www.tiktok.com/')).find(c => c.key === 'msToken')?.value;
+    if (token) api.searchParams.set('msToken', token);
+    const response = await client({
+        url: api.toString(), responseType: 'text',
+        headers: { accept: 'application/json, text/plain, */*', referer: 'https://www.tiktok.com/search/user?q=' + encodeURIComponent(keyword) },
+    });
+    if (response.statusCode === 429) { diagnostics.searchBlocked++; throw new Error('TikTok search HTTP 429; stopping discovery to avoid further rate limits'); }
+    if (response.statusCode !== 200) throw new Error('TikTok search HTTP ' + response.statusCode);
+    let json;
+    try { json = JSON.parse(response.body); } catch { diagnostics.searchBlocked++; throw new Error('TikTok search returned non-JSON response'); }
+    if (json.status_code !== undefined && Number(json.status_code) !== 0) throw new Error('TikTok search status_code=' + json.status_code + (json.status_msg ? ': ' + json.status_msg : ''));
+    const handles = extractSearchHandles(json);
+    if (!handles.length) diagnostics.searchEmpty++;
+    return handles;
 }
 function embeddedState(html) {
     const $ = cheerio.load(html);
@@ -128,6 +149,7 @@ async function verify(handle) {
 }
 try {
     const candidates = [];
+    let discoveryRateLimited = false;
     for (let page = 0; page < 5 && candidates.length < maxCandidates; page++) {
         for (const keyword of keywords) {
             if (candidates.length >= maxCandidates) break;
@@ -135,9 +157,14 @@ try {
             try {
                 const found = await discover(String(keyword), page);
                 for (const h of found) if (!seen.has(h)) { seen.add(h); candidates.push(h); }
-            } catch (e) { diagnostics.searchErrors++; log.warning('Search unavailable: ' + String(e.message)); }
+            } catch (e) {
+                diagnostics.searchErrors++;
+                log.warning('TikTok discovery unavailable: ' + String(e.message));
+                if (String(e.message).includes('429')) { discoveryRateLimited = true; break; }
+            }
             await sleep(750);
         }
+        if (discoveryRateLimited) break;
     }
     for (const handle of candidates) {
         if (results.length >= target) break;
@@ -149,5 +176,5 @@ try {
         } catch (e) { diagnostics.profileErrors++; log.warning('@' + handle + ': ' + String(e.message)); }
         await sleep(1250);
     }
-    await Actor.pushData({ recordType: 'RUN_SUMMARY', target, qualified: results.length, candidatesDiscovered: candidates.length, criteria: { minFollowers, maxFollowers, activeWithinDays: days }, diagnostics, note: results.length < target ? 'Fewer than target could be verified from publicly available profile and recent-post data.' : 'Target reached.' });
+    await Actor.pushData({ recordType: 'RUN_SUMMARY', discoveryMethod: 'TikTok native user search', discoveryRateLimited, target, qualified: results.length, candidatesDiscovered: candidates.length, criteria: { minFollowers, maxFollowers, activeWithinDays: days }, diagnostics, note: results.length < target ? 'Fewer than target could be verified from publicly available profile and recent-post data.' : 'Target reached.' });
 } finally { await Actor.exit(); }
