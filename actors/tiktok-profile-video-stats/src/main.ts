@@ -29,7 +29,7 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
     } catch (err: unknown) {
         const e = err as { stdout?: string; stderr?: string; message?: string };
         stdout = e.stdout ?? '';
-        warning = 'gallery-dl returned an error; ' + String(e.stderr ?? e.message ?? 'unknown').slice(0, 180).replace(/https?:\\/\\/\\S+/g, '[URL]');
+        warning = 'gallery-dl returned an error; ' + String(e.stderr ?? e.message ?? 'unknown').slice(0, 180).replace(/https?:\/\/\S+/g, '[URL]');
     }
     const records = new Map<string, VideoData>();
     const consume = (value: unknown): void => {
@@ -47,7 +47,7 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
         const aweme = asRecord(obj.aweme_detail) ?? asRecord(obj.aweme) ?? asRecord(obj.item) ?? obj;
         const rawId = firstString(aweme, ['aweme_id', 'id', 'video_id', 'videoId']) ??
             firstString(obj, ['aweme_id', 'id', 'video_id', 'videoId']);
-        if (!rawId || !/^\\d{15,25}$/.test(rawId)) return;
+        if (!rawId || !/^\d{15,25}$/.test(rawId)) return;
         const stats = asRecord(aweme.statistics) ?? asRecord(aweme.stats) ?? asRecord(obj.statistics) ?? asRecord(obj.stats);
         const createTime = firstNumber(aweme, ['create_time', 'createTime', 'timestamp']) ??
             firstNumber(obj, ['create_time', 'createTime', 'timestamp']);
@@ -72,7 +72,7 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
         const existing = records.get(rawId);
         if (!existing || (existing.comments === null && video.comments !== null)) records.set(rawId, video);
     };
-    for (const line of stdout.split('\\n')) {
+    for (const line of stdout.split('\n')) {
         if (!line.trim()) continue;
         try { consume(JSON.parse(line)); } catch { /* ignore non-JSON diagnostic lines */ }
     }
