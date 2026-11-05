@@ -451,7 +451,7 @@ export async function runSearch({
     }
     for (let searchIndex = nextSearchIndex; searchIndex < (explicitCandidateFeed || input.discoverySource === 'creativeCenter' ? 0 : input.searches.length); searchIndex += 1) {
         const keyword = input.searches[searchIndex];
-        if (outOfTime() || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
+        if (outOfTime() || screeningRateLimited || (counts.returned >= input.maxCreators && input.onlyPassing)) break;
         // Stop discovery once there is a useful pool; the expensive step is verifying profiles.
         const waiting = [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle)).length;
         if (input.enrichProfiles && waiting >= 20) {
