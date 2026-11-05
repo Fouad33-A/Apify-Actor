@@ -557,7 +557,7 @@ export async function runSearch({
         searchVariantsPlanned: input.criteriaOnly ? 6 : input.searches.length * 3,
         searchVariantsExhausted: input.criteriaOnly ? report.queries.some((q) => (q.attempts?.length ?? 0) >= 6) : null,
         nextSearchIndex,
-        resumeToken: { nextSearchIndex, processedHandles: [...new Set([...(input.priorProcessed ?? []), ...[...processed])]], pendingCandidateHandles: [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle)).map((c) => c.handle).slice(0, 500) },
+        resumeToken: { nextSearchIndex, processedHandles: [...new Set([...(input.priorProcessed ?? []), ...processed])], pendingCandidateHandles: [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle)).map((c) => c.handle).slice(0, 500) },
         runtimeBudgetSeconds: input.maxRunSeconds,
         search: report, estimatedCostUsd: null, billedEvents: null,
         estimatedCostNote: 'Exact run cost and billed events are not available authoritatively inside the Actor; use the Apify run billing/usage record.',
