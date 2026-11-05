@@ -88,7 +88,7 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
                 'https://www.tiktok.com/@' + username,
             ], { timeout: 75000, maxBuffer: 12 * 1024 * 1024 });
             let parsedLines = 0;
-            for (const line of ytdlp.stdout.split('\\n')) {
+            for (const line of ytdlp.stdout.split('\n')) {
                 if (!line.trim()) continue;
                 try { consume(JSON.parse(line)); parsedLines++; } catch { /* ignore invalid JSON */ }
             }
@@ -96,7 +96,7 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
             if (!records.size) warning = [warning, 'yt-dlp produced ' + parsedLines + ' JSON lines but zero usable video IDs'].filter(Boolean).join(' | ');
         } catch (err: unknown) {
             const e = err as { stdout?: string; stderr?: string; message?: string };
-            for (const line of (e.stdout ?? '').split('\\n')) {
+            for (const line of (e.stdout ?? '').split('\n')) {
                 try { consume(JSON.parse(line)); } catch { /* skip */ }
             }
             warning = [warning, 'yt-dlp: ' + String(e.stderr ?? e.message ?? 'unknown').slice(0, 250)].filter(Boolean).join(' | ');
