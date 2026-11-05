@@ -816,7 +816,7 @@ function extractScriptJson(
 
     const regex =
         new RegExp(
-            `<script[^>]+id=["']${escaped}["'][^>]*>([\\s\\S]*?)<\\/script>`,
+            `<script[^>]+id=["']${escaped}["'][^>]*>([\\s\\S]*?)<\/script>`,
             'i',
         );
 
@@ -1591,7 +1591,7 @@ async function discoverCreatorFeed(
             if (!item) continue;
             const id = firstString(item, ['id', 'awemeId', 'aweme_id', 'itemId']);
             const timestamp = firstNumber(item, ['createTime', 'create_time']);
-            if (!id || !/^\\d{15,25}$/.test(id) || (!timestamp && !asRecord(item['video']))) continue;
+            if (!id || !/^\d{15,25}$/.test(id) || (!timestamp && !asRecord(item['video']))) continue;
             found.set(id, {
                 id, createTime: timestamp,
                 isPinned: firstBoolean(item, ['isPinnedItem', 'isPinned', 'pinned']),
@@ -1624,7 +1624,7 @@ async function discoverBrowserProfile(
             page.on('response', async (response) => {
                 if (found.size >= requested) return;
                 const url = response.url();
-                if (!/\\/api\\/(post\\/item_list|item_list)\\//.test(url)) return;
+                if (!/\/api\/(post\/item_list|item_list)\//.test(url)) return;
                 try {
                     const data = await response.json() as Record<string, unknown>;
                     const items = data['itemList'] ?? data['item_list'];
@@ -1633,7 +1633,7 @@ async function discoverBrowserProfile(
                         const item = asRecord(raw);
                         if (!item) continue;
                         const id = firstString(item, ['id', 'awemeId', 'aweme_id', 'itemId']);
-                        if (!id || !/^\\d{15,25}$/.test(id)) continue;
+                        if (!id || !/^\d{15,25}$/.test(id)) continue;
                         found.set(id, {
                             id,
                             createTime: firstNumber(item, ['createTime', 'create_time']),
@@ -1653,7 +1653,7 @@ async function discoverBrowserProfile(
                     (elements) => elements.map((el) => (el as HTMLAnchorElement).href),
                 );
                 for (const href of hrefs) {
-                    const match = href.match(/\\/video\\/(\\d{15,25})/);
+                    const match = href.match(/\/video\/(\d{15,25})/);
                     if (match && !found.has(match[1])) {
                         found.set(match[1], { id: match[1], createTime: null, isPinned: null });
                     }
@@ -1677,7 +1677,7 @@ function parseProfileVideoStats(username: string, html: string): Map<string, Vid
     for (const root of extractAllJsonRoots(html)) {
         const objects = findObjects(root, (obj) => {
             const id = firstString(obj, ['id', 'awemeId', 'aweme_id', 'itemId', 'videoId']);
-            return !!id && /^\\d{15,25}$/.test(id) &&
+            return !!id && /^\d{15,25}$/.test(id) &&
                 !!asRecord(obj['stats'] ?? obj['statistics']);
         });
         for (const obj of objects) {
