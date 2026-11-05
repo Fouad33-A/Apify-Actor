@@ -3335,7 +3335,10 @@ async function discoverTikHubVideos(username: string, secUid: string | null, req
                 const author = asRecord(item.author);
                 const actualUsername = firstString(author, ['uniqueId', 'unique_id', 'username']) ?? username;
                 const created = firstNumber(item, ['createTime', 'create_time']);
-                const pinned = firstBoolean(item, ['isPinned', 'is_pinned', 'pinned']);
+                const pinMarker = asRecord(item.item_control) ?? asRecord(item.itemControl);
+                const pinned = firstBoolean(item, ['isPinned', 'is_pinned', 'pinned', 'is_top'])
+                    ?? firstBoolean(pinMarker, ['is_pinned', 'isPinned', 'is_top'])
+                    ?? (Array.isArray(item.label_top) ? item.label_top.some((v: unknown) => String(v).toLowerCase().includes('pin')) : null);
                 const video: VideoData = {
                     videoId: id,
                     videoUrl: `https://www.tiktok.com/@${actualUsername}/video/${id}`,
@@ -3672,6 +3675,12 @@ async function processHandle(
         }));
         const selectionApi = selectVideos(parsedApi, options.videosPerProfile, options.excludePinned);
         const coverageApi = buildCoverage(options.videosPerProfile, apiDiscovery.videos.length, parsedApi, selectionApi, options.excludePinned);
+        coverageApi.source = 'tikhub_authenticated_api';
+        coverageApi.officialRecentVideoLimit = null;
+        coverageApi.warnings = coverageApi.warnings.filter(w => !w.includes('public TikTok creator embed'));
+        coverageApi.completeForRequestedCount = selectedApi.length === options.videosPerProfile && !apiDiscovery.warning
+            && (!options.excludePinned || selectedApi.every(v => v.isPinned !== null));
+        coverageApi.selectionReliable = coverageApi.completeForRequestedCount;
         coverageApi.warnings.push(...warnings);
         if (apiDiscovery.videos.some(v => v.isPinned === null)) coverageApi.warnings.push('Pin flags unavailable for some API records; pinned exclusion may be incomplete.');
         if (selectedApi.length < options.videosPerProfile) coverageApi.warnings.push('Insufficient eligible API videos for requested sample.');
@@ -4395,7 +4404,7 @@ try {
         maxItems,
 
         discoverySource:
-            'profile_html_embed_feed_browser_fallback',
+            process.env.TIKHUB_API_TOKEN ? 'tikhub_authenticated_api_with_public_fallback' : 'profile_html_embed_feed_browser_fallback',
 
         selectionMethod:
             'parse_all_candidates_then_sort_by_create_time',
@@ -4404,7 +4413,7 @@ try {
             OFFICIAL_EMBED_RECENT_LIMIT,
 
         complete30VideoParity:
-            results.every((result) => result?.videosSaved === 30),
+            videosPerProfile === 30 && results.length > 0 && results.every((result) => result?.videosSaved === 30 && !result.warnings.some(w => /pin flags unavailable|incomplete|insufficient|failed/i.test(w))),
 
         sharedRateLimitCooldown:
             true,
@@ -4418,7 +4427,7 @@ try {
         deferredDueToRateLimit: rateLimitCircuitOpen,
 
         externalPaidServicesUsed:
-            false,
+            Boolean(process.env.TIKHUB_API_TOKEN && results.some(result => result?.videosSaved > 0)),
 
         proxyUsed:
             false,
