@@ -1694,13 +1694,18 @@ async function discoverBrowserProfile(
             await page.goto(`https://www.tiktok.com/@${username}`, {
                 waitUntil: 'commit', timeout: 20000,
             });
-            await page.waitForTimeout(3000);
+            await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {
+                log.warning('Profile DOM readiness timed out; checking any available video links.');
+            });
+            await page.waitForTimeout(2000);
             for (let i = 0; i < 4 && found.size < requested; i += 1) {
-                const html = await page.content();
-                for (const item of parseEmbedCandidates(html)) found.set(item.id, item);
+                const html = await page.content().catch(() => '');
+                if (html) {
+                    for (const item of parseEmbedCandidates(html)) found.set(item.id, item);
+                }
                 const hrefs = await page.locator('a[href*="/video/"]').evaluateAll(
                     (elements) => elements.map((el) => (el as HTMLAnchorElement).href),
-                );
+                ).catch(() => [] as string[]);
                 for (const href of hrefs) {
                     const match = href.match(/\/video\/(\d{15,25})/);
                     if (match && !found.has(match[1])) {
