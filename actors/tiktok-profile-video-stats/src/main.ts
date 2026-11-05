@@ -1562,8 +1562,14 @@ async function discoverCreatorFeed(
     let cursor = 0;
     let warning: string | null = null;
     for (let page = 0; page < 3 && found.size < requested; page += 1) {
-        const url = new URL('https://www.tiktok.com/api/creator/item_list/');
+        const url = new URL('https://www.tiktok.com/api/post/item_list/');
         url.searchParams.set('aid', '1988');
+        url.searchParams.set('app_name', 'tiktok_web');
+        url.searchParams.set('device_platform', 'web');
+        url.searchParams.set('from_page', 'user');
+        url.searchParams.set('sourceType', '8');
+        url.searchParams.set('appId', '1233');
+        url.searchParams.set('language', 'en');
         url.searchParams.set('secUid', profile.secUid);
         url.searchParams.set('count', String(Math.min(15, requested - found.size)));
         url.searchParams.set('cursor', String(cursor));
