@@ -8,6 +8,7 @@
   "dependencies": {
     "apify": "^3.4.0",
     "got-scraping": "^4.1.1",
-    "cheerio": "^1.0.0"
+    "cheerio": "^1.0.0",
+    "tough-cookie": "^5.1.2"
   }
 }
