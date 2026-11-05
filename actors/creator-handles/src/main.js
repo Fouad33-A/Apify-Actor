@@ -113,6 +113,20 @@ async function discover(keyword, page) {
             await sleep(300);
         }
     }
+    if (diagnosticOnly) {
+        // Probe the user-provided TikTok One creator exploration page once.
+        const exploreUrl = 'https://ads.tiktok.com/creative/creator/explore?aioChannel=SEO&aioScene=AIOEntrance&aioCode=685cefab91818007&region=us_ttp';
+        try {
+            const explore = await client({ url: exploreUrl, responseType: 'text', followRedirect: true, headers: { accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' } });
+            const html = String(explore.body ?? '');
+            const $ = cheerio.load(html);
+            const finalUrl = new URL(explore.url || exploreUrl);
+            const scripts = $('script[src]').map((_, el) => $(el).attr('src')).get();
+            const visibleText = $('body').text().replace(/\\s+/g, ' ').trim();
+            const handles = [...new Set((html.match(/(?:https?:\\/\\/)?(?:www\\.)?tiktok\\.com\\/@[a-zA-Z0-9._]{2,24}/g) ?? []).map(x => getHandle(x.startsWith('http') ? x : 'https://' + x)).filter(Boolean))];
+            await Actor.pushData({ recordType: 'TIKTOK_ONE_DIAGNOSTIC', httpStatus: explore.statusCode, contentType: String(explore.headers['content-type'] ?? ''), finalHost: finalUrl.hostname, finalPath: finalUrl.pathname, bodyLength: html.length, title: $('title').first().text().slice(0, 160), scriptCount: scripts.length, scriptHosts: [...new Set(scripts.map(x => { try { return new URL(x, finalUrl).hostname; } catch { return ''; } }))].filter(Boolean).slice(0, 10), loginSignals: /log\\s?in|sign\\s?in|captcha|verify you are human|access denied/i.test(visibleText.slice(0, 15000)), creatorSignals: /creator marketplace|creator explore|creator search|creator discovery|followers/i.test(visibleText.slice(0, 15000)), visibleTextStart: visibleText.slice(0, 300), tiktokProfileLinksFound: handles.length, sampleHandles: handles.slice(0, 5), hasNextData: Boolean($('script#__NEXT_DATA__').length), hasUniversalState: Boolean($('script#__UNIVERSAL_DATA_FOR_REHYDRATION__').length) });
+        } catch (error) { await Actor.pushData({ recordType: 'TIKTOK_ONE_DIAGNOSTIC', error: String(error.message).slice(0, 240) }); }
+    }
     if (response.statusCode === 429) { diagnostics.searchBlocked++; throw new Error('TikTok search HTTP 429; stopping discovery to avoid further rate limits'); }
     if (response.statusCode !== 200) throw new Error('TikTok search HTTP ' + response.statusCode);
     let json;
