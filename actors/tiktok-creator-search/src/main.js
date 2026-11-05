@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-05-v15';
+const RUNTIME_FIX_VERSION = '2026-11-05-v16';
 const BATCH = 2;
 const BETWEEN_PROFILE_BATCHES_MS = 20000;
 const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
@@ -238,7 +238,9 @@ export async function callProfileActor(
     const byName = new Map();
     const summaries = new Map();
     const latest = new Map();
+    let childRateLimited = false;
     for (const item of items) {
+        if (item.rowType === 'output' && (item.rateLimitCircuitOpen || item.deferredDueToRateLimit)) childRateLimited = true;
         const name = String(item.username ?? '').toLowerCase();
         if (!name) continue;
         if (item.rowType === 'profile') byName.set(name, item);
@@ -264,6 +266,7 @@ export async function callProfileActor(
                 postsPerWeek: s.postsPerWeek ?? null,
             });
     }
+    byName.rateLimitCircuitOpen = childRateLimited;
     return byName;
 }
 
@@ -300,6 +303,7 @@ export async function runSearch({
     let enrichNote = null;
     let rateLimitedOrUnavailable = 0;
     let skippedByHint = 0;
+    let screeningRateLimited = false;
     let skippedKnownHandles = 0;
     const skippedKnown = new Set();
     const counts = {
@@ -347,7 +351,7 @@ export async function runSearch({
     const processCandidates = async (candidates) => {
         const fresh = orderCandidates(candidates.filter((c) => !processed.has(c.handle) && !known.has(c.handle)), input)
             .slice(0, Math.max(0, input.maxCreators * 10 - processed.size));
-        for (let i = 0; i < fresh.length && !outOfTime(); i += BATCH) {
+        for (let i = 0; i < fresh.length && !outOfTime() && !screeningRateLimited; i += BATCH) {
             // Separate child runs otherwise bypass each other's in-process cooldown.
             if (i > 0) {
                 if (secondsLeft() < 60) break;
@@ -399,6 +403,10 @@ export async function runSearch({
                 enrichNote = `Full profile enrichment failed for batch: ${String(error?.message ?? error)}`;
                 counts.errors += 1;
                 log.warning(enrichNote);
+            }
+            if (full.rateLimitCircuitOpen) {
+                screeningRateLimited = true;
+                log.warning(`[${RUNTIME_FIX_VERSION}] Child rate-limit circuit opened; stopping profile batches and preserving pending handles for a later run.`);
             }
             log.info(`[${RUNTIME_FIX_VERSION}] Full profile batch: ${[...full.values()].filter((p) => p?.status === 'ok').length}/${names.length} profile(s) retrieved; applying all strict filters.`);
             for (const c of enrichable) {
@@ -485,7 +493,7 @@ export async function runSearch({
 
     // Rank all discovered candidates together; otherwise the first hashtag consumes
     // every enrichment slot and later keywords never get a fair opportunity.
-    if (!explicitCandidateFeed && input.discoverySource !== 'creativeCenter' && !outOfTime()) {
+    if (!explicitCandidateFeed && input.discoverySource !== 'creativeCenter' && !outOfTime() && !screeningRateLimited) {
         const pool = [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle));
         log.info(`[${RUNTIME_FIX_VERSION}] Cross-query candidate pool: ${pool.length} handles from ${report.queries.length} search attempts; enriching best-ranked candidates.`);
         await processCandidates(pool);
@@ -542,12 +550,14 @@ export async function runSearch({
             verifiedCelebrity: rows.filter((r) => r.filterFailures?.includes('verified/celebrity')).length,
             enrichment: rows.filter((r) => r.enrichStatus === 'failed').length,
         },
-        stoppedEarly: outOfTime() || nextSearchIndex < input.searches.length,
+        stoppedEarly: screeningRateLimited || outOfTime() || nextSearchIndex < input.searches.length,
+        screeningRateLimited,
+        pendingCandidateHandles: [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle)).map((c) => c.handle).slice(0, 500),
         searchVariantsAttempted: report.queries.reduce((total, q) => total + (q.attempts?.length ?? 0), 0),
         searchVariantsPlanned: input.criteriaOnly ? 6 : input.searches.length * 3,
         searchVariantsExhausted: input.criteriaOnly ? report.queries.some((q) => (q.attempts?.length ?? 0) >= 6) : null,
         nextSearchIndex,
-        resumeToken: nextSearchIndex < input.searches.length ? { nextSearchIndex, processedHandles: [...new Set([...(input.priorProcessed ?? []), ...rows.map((r) => r.handle)])] } : null,
+        resumeToken: { nextSearchIndex, processedHandles: [...new Set([...(input.priorProcessed ?? []), ...[...processed])]], pendingCandidateHandles: [...seen.values()].filter((c) => !processed.has(c.handle) && !known.has(c.handle)).map((c) => c.handle).slice(0, 500) },
         runtimeBudgetSeconds: input.maxRunSeconds,
         search: report, estimatedCostUsd: null, billedEvents: null,
         estimatedCostNote: 'Exact run cost and billed events are not available authoritatively inside the Actor; use the Apify run billing/usage record.',
@@ -591,6 +601,14 @@ async function main() {
                 log.warning('History unavailable: ' + String(error?.message ?? error));
             }
         }
+        if (historyStore) {
+            const pending = await historyStore.getValue('PENDING_SCREENING_V1').catch(() => null);
+            if (Array.isArray(pending) && pending.length) {
+                const queued = pending.filter((h) => typeof h === 'string' && !input.knownHandles.includes(h));
+                input.candidateFeed = [...new Set([...queued, ...input.candidateFeed])].slice(0, 500);
+                log.info(`[${RUNTIME_FIX_VERSION}] Resuming ${queued.length} previously unscreened creator(s) before new discovery.`);
+            }
+        }
         // Brave Search needs no proxy; the Google SERP proxy, when the account has it, is the fallback engine.
         const serp = await Actor.createProxyConfiguration({ groups: ['GOOGLE_SERP'] }).catch(() => null);
         const serpProxyUrl = serp ? await serp.newUrl() : null;
@@ -603,6 +621,7 @@ async function main() {
         });
         if (historyStore) {
             try {
+                await historyStore.setValue('PENDING_SCREENING_V1', summary.pendingCandidateHandles);
                 const { items } = await (await Actor.openDataset()).getData({ limit: 1000 });
                 const confirmed = items.filter((r) => r.recordType === 'creator' && r.enrichStatus === 'ok').map((r) => r.handle);
                 const rejected = Object.fromEntries((summary.screeningDecisions ?? []).filter((r) => r.passesFilters === false && r.enrichStatus === 'ok' && r.filterFailures?.some((x) => x.startsWith('followers') || x === 'verified/celebrity')).map((r) => [r.handle, { at: Date.now() }]));
