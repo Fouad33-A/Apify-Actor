@@ -1,0 +1,23 @@
+name: Free TikTok extractor comparison
+on:
+  push:
+    branches: [fix/tiktok-creator-search-nov3]
+    paths:
+      - .github/workflows/free-tiktok-extractors.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install free metadata extractors
+        run: python -m pip install --disable-pip-version-check yt-dlp gallery-dl
+      - name: Test public creator URLs without downloading videos
+        working-directory: actors/tiktok-profile-video-stats
+        run: python tools/test_free_tiktok_extractors.py allanainaction
