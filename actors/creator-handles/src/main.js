@@ -21,7 +21,7 @@ const validHandle = s => /^[a-zA-Z0-9._]{2,24}$/.test(s) && !s.includes('..') &&
 const getHandle = href => {
     try {
         const u = new URL(href);
-        if (!/(^|\\.)tiktok\\.com$/i.test(u.hostname)) return null;
+        if (!/(^|\.)tiktok\.com$/i.test(u.hostname)) return null;
         const h = decodeURIComponent(u.pathname.split('/').find(x => x.startsWith('@'))?.slice(1) ?? '');
         return validHandle(h) ? h.toLowerCase() : null;
     } catch { return null; }
@@ -50,7 +50,7 @@ async function discover(keyword, page) {
             const handle = getHandle(candidate);
             if (handle) found.add(handle);
         });
-        for (const match of html.matchAll(/tiktok\\.com(?:\\/|%2F)@([a-zA-Z0-9._]{2,24})/gi)) if (validHandle(match[1])) found.add(match[1].toLowerCase());
+        for (const match of html.matchAll(/tiktok\.com(?:\/|%2F)@([a-zA-Z0-9._]{2,24})/gi)) if (validHandle(match[1])) found.add(match[1].toLowerCase());
         if (found.size) return [...found];
         diagnostics.searchEmpty++;
         if (/captcha|unusual traffic|verify you are human|automated queries/i.test(html)) diagnostics.searchBlocked++;
