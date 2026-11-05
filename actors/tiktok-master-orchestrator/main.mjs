@@ -22,15 +22,16 @@ try {
     ...(input.searchInput ?? {}), ...(Array.isArray(input.keywords) ? {keywords: input.keywords} : {}), ...(Array.isArray(input.hashtags) ? {hashtags: input.hashtags} : {}), maxCreators: Math.max(5, maxCreators), onlyPassing: true, enrichProfiles: true, profileActor: ACTOR_IDS.profileStats,
   }, timeoutSecs);
   const creators = selectCreators(searchRows, maxCreators);
-  if (!creators.length) { const summary = searchRows.find(r => r?.recordType === 'RUN_SUMMARY'); log.warning('Creator Search diagnostic: ' + JSON.stringify({found: summary?.handlesFound, processed: summary?.creatorsProcessed, returned: summary?.returned, failures: summary?.failedByReason, activeFilters: summary?.activeFilters, stoppedEarly: summary?.stoppedEarly})); throw new Error('No confirmed qualifying creators; stopping before downstream runs.'); }
-  const profileRows = await runChild('profileStats', ACTOR_IDS.profileStats, {
-    usernames: creators, mode: 'full', videosPerProfile: 10, maxItems: Math.max(200, creators.length * 2),
-  }, timeoutSecs);
-  const commentsInput = prepareCommentsInput(profileRows, maxCommentsPerPost, maxVideosPerCreator);
-  log.info('Comments handoff: ' + JSON.stringify({creators: commentsInput.creatorVideos.length, videos: commentsInput.videoUrls.length, maxVideosPerCreator}));
-  if (!commentsInput.creatorVideos.length) throw new Error('No creators with two usable videos; stopping before Comments run.');
-  const commentRows = await runChild('comments', ACTOR_IDS.comments, { creatorVideos: commentsInput.creatorVideos, maxCommentsPerPost: commentsInput.maxCommentsPerPost, minAskers: 3, minVideos: 2, includeReplies: false }, timeoutSecs);
-  const result = summarize({creators, commentsInput, commentRows, childRuns});
+  const summary = searchRows.find(r => r?.recordType === 'RUN_SUMMARY');
+  log.info('Creator Search diagnostic: ' + JSON.stringify({found: summary?.handlesFound, processed: summary?.creatorsProcessed, returned: summary?.returned, failures: summary?.failedByReason, stoppedEarly: summary?.stoppedEarly, pending: summary?.pendingCandidateHandles?.length}));
+  // TEMPORARY: question/comment screening is disabled during creator discovery validation.
+  // Restore Profile Stats -> Comments handoff once creator discovery is stable.
+  const result = {
+    recordType: 'PIPELINE_SUMMARY', status: creators.length ? 'completed' : 'no_qualifying_creators',
+    stage: 'creator_discovery_only', questionScreeningEnabled: false,
+    creatorsSelected: creators.length, creators, creatorSearchSummary: summary ?? null,
+    childRuns, note: 'Repeated-question screening temporarily disabled; creator eligibility filters remain unchanged.',
+  };
   await Actor.pushData(result);
   await Actor.setValue('OUTPUT', result);
 } catch (error) {
