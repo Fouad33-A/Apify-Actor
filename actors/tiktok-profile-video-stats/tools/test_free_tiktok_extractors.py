@@ -36,8 +36,13 @@ def run(name, args):
             item = json.loads(line)
         except json.JSONDecodeError:
             continue
-        entries = item.get("entries", []) if isinstance(item, dict) else []
-        records = entries if isinstance(entries, list) else [item]
+        if isinstance(item, dict):
+            entries = item.get("entries")
+            records = entries if isinstance(entries, list) else [item]
+        elif isinstance(item, list):
+            records = [part for part in item if isinstance(part, dict)]
+        else:
+            records = []
         for record in records:
             if not isinstance(record, dict):
                 continue
@@ -62,5 +67,4 @@ def run(name, args):
 
 run("yt-dlp", ["yt-dlp", "--flat-playlist", "--dump-single-json",
                "--playlist-end", "30", "--skip-download", "--no-warnings", URL])
-run("gallery-dl", ["gallery-dl", "--dump-json", "--range", "1-30",
-                   "--no-download", URL])
+run("gallery-dl", ["gallery-dl", "--dump-json", "--range", "1-30", URL])
