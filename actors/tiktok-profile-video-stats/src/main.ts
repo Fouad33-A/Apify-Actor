@@ -2784,6 +2784,185 @@ function selectVideos(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Posting cadence                                                            */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * postsPerWeek is a span-based estimate: (dated posts - 1) * 7 / days between
+ * the newest and the oldest post used. Unlike a gap-based figure it is not
+ * inflated by bursts of posts, but one old pinned or highlighted video can
+ * stretch the span and make the rate look far too low.
+ *
+ * So videos that are clearly not part of the recent posting rhythm are left out
+ * of THIS calculation only. They stay in the video rows and in every other
+ * metric (medians, top videos by comments, ...):
+ *   - OLD videos TikTok marks as pinned (isPinned === true): a pinned video
+ *     older than the oldest unpinned post in the sample. A pinned video posted
+ *     inside the window of the other posts is an ordinary recent post and
+ *     counts like any other.
+ *   - videos the existing conservative date-gap heuristic suspects are old
+ *     highlighted videos (identifySuspectedHighlightedVideos)
+ *
+ * Anything less clear is NOT discarded. The estimate is flagged instead, and
+ * the figure without the oldest post is reported next to it so a reader can
+ * judge.
+ */
+const CADENCE_FEW_POSTS = 5;
+const CADENCE_BURST_SPAN_DAYS = 1;
+const CADENCE_ISOLATED_OLDEST_MIN_GAP_DAYS = 14;
+const CADENCE_ISOLATED_OLDEST_GAP_RATIO = 4;
+
+interface PostingCadence {
+    postsPerWeek: number | null;
+    method: string;
+    confidence: 'high' | 'medium' | 'low' | 'insufficient';
+    flags: string[];
+    postsUsed: number;
+    spanDays: number | null;
+    excludedVideoIds: string[];
+    postsPerWeekIfOldestExcluded: number | null;
+}
+
+// newest-first unix timestamps -> posts per week over their span
+function spanPostsPerWeek(
+    sortedNewestFirst: number[],
+): {
+    postsPerWeek: number | null;
+    spanDays: number | null;
+} {
+    if (sortedNewestFirst.length < 2) {
+        return { postsPerWeek: null, spanDays: null };
+    }
+
+    const spanDays = daysBetween(
+        sortedNewestFirst[0],
+        sortedNewestFirst[sortedNewestFirst.length - 1],
+    );
+
+    if (!(spanDays > 0)) {
+        return { postsPerWeek: null, spanDays: null };
+    }
+
+    return {
+        postsPerWeek: round(((sortedNewestFirst.length - 1) * 7) / spanDays, 2),
+        spanDays: round(spanDays, 1),
+    };
+}
+
+function computePostingCadence(
+    videos: VideoData[],
+): PostingCadence {
+    const flags: string[] = [];
+
+    const dated = videos.filter(
+        (video): video is VideoData & { createTime: number } =>
+            typeof video.createTime === 'number' && video.createTime > 0,
+    );
+
+    const pinned = dated.filter((video) => video.isPinned === true);
+    const unpinned = dated.filter((video) => video.isPinned !== true);
+
+    const oldestUnpinnedTime =
+        unpinned.length > 0
+            ? Math.min(...unpinned.map((video) => video.createTime))
+            : null;
+
+    // Only a pinned video older than every unpinned post is out of rhythm.
+    const oldPinned =
+        oldestUnpinnedTime === null
+            ? []
+            : pinned.filter((video) => video.createTime < oldestUnpinnedTime);
+
+    const candidates = dated.filter((video) => !oldPinned.includes(video));
+    const suspectedHighlighted = identifySuspectedHighlightedVideos(candidates);
+
+    const used = candidates
+        .filter((video) => !suspectedHighlighted.has(video.videoId))
+        .sort((a, b) => b.createTime - a.createTime);
+
+    const excludedVideoIds = [
+        ...oldPinned.map((video) => video.videoId),
+        ...suspectedHighlighted,
+    ];
+
+    if (oldPinned.length > 0) flags.push('pinned_excluded_from_cadence');
+    if (suspectedHighlighted.size > 0) flags.push('suspected_highlighted_excluded_from_cadence');
+    if (unpinned.length === 0 && pinned.length > 0) flags.push('only_pinned_posts_sampled');
+
+    const method =
+        excludedVideoIds.length > 0
+            ? 'span_excluding_pinned_or_suspected_highlighted'
+            : 'span_all_sampled_posts';
+
+    const times = used.map((video) => video.createTime);
+    const main = spanPostsPerWeek(times);
+
+    if (main.postsPerWeek === null) {
+        flags.push(used.length < 2 ? 'fewer_than_2_dated_posts' : 'posts_share_one_timestamp');
+        return {
+            postsPerWeek: null,
+            method,
+            confidence: 'insufficient',
+            flags,
+            postsUsed: used.length,
+            spanDays: null,
+            excludedVideoIds,
+            postsPerWeekIfOldestExcluded: null,
+        };
+    }
+
+    let confidence: 'high' | 'medium' | 'low' = flags.includes('only_pinned_posts_sampled') ? 'low' : 'high';
+    let postsPerWeekIfOldestExcluded: number | null = null;
+
+    if (used.length < CADENCE_FEW_POSTS) {
+        flags.push('few_posts_sampled');
+        if (confidence === 'high') confidence = 'medium';
+    }
+
+    if (main.spanDays !== null && main.spanDays < CADENCE_BURST_SPAN_DAYS) {
+        flags.push('burst_posting_short_span');
+        confidence = 'low';
+    }
+
+    // Is the oldest post far from the rest? Flag it, do not drop it.
+    if (used.length >= 4) {
+        const lastGapDays = daysBetween(times[times.length - 2], times[times.length - 1]);
+
+        const otherGapsDays: number[] = [];
+        for (let i = 0; i + 2 < times.length; i++) {
+            otherGapsDays.push(daysBetween(times[i], times[i + 1]));
+        }
+        const typicalGapDays = median(otherGapsDays) ?? 0;
+
+        if (
+            lastGapDays >=
+            Math.max(
+                CADENCE_ISOLATED_OLDEST_MIN_GAP_DAYS,
+                typicalGapDays * CADENCE_ISOLATED_OLDEST_GAP_RATIO,
+            )
+        ) {
+            flags.push('oldest_post_isolated');
+            if (used[used.length - 1].isPinned === null) {
+                flags.push('oldest_post_pin_status_unknown');
+            }
+            postsPerWeekIfOldestExcluded = spanPostsPerWeek(times.slice(0, -1)).postsPerWeek;
+            confidence = 'low';
+        }
+    }
+
+    return {
+        postsPerWeek: main.postsPerWeek,
+        method,
+        confidence,
+        flags,
+        postsUsed: used.length,
+        spanDays: main.spanDays,
+        excludedVideoIds,
+        postsPerWeekIfOldestExcluded,
+    };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Selling                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -3153,23 +3332,17 @@ function buildSummary(
                     b - a,
             );
 
-    let postsPerWeek:
-        number | null =
-        null;
+    // Span-based posting frequency; see "Posting cadence" above for what is
+    // left out of it, and how uncertain estimates are flagged.
+    const cadence = computePostingCadence(videos);
+    const postsPerWeek = cadence.postsPerWeek;
 
-    // Use the full sample span to avoid inflated burst-posting estimates.
     const postingGapDays: number[] = [];
     for (let i = 0; i + 1 < sortedDates.length; i++) {
         const gapDays = (sortedDates[i] - sortedDates[i + 1]) / 86400;
         if (gapDays > 0 && Number.isFinite(gapDays)) postingGapDays.push(gapDays);
     }
     const medianPostingGapDays = median(postingGapDays);
-    const sampledSpanDays = sortedDates.length >= 2
-        ? (sortedDates[0] - sortedDates[sortedDates.length - 1]) / 86400
-        : null;
-    if (sampledSpanDays !== null && sampledSpanDays > 0) {
-        postsPerWeek = round((sortedDates.length - 1) * 7 / sampledSpanDays, 2);
-    }
 
     let daysSinceLastPost:
         number | null =
@@ -3384,8 +3557,13 @@ function buildSummary(
         postingFrequencyCoverage: 'sampled_public_recent_videos_only',
         topVideoSelectionCoverage: videos.length >= 30 ? '30_or_more' : 'partial_under_30',
 
-        postsPerWeekMethod:
-            'sampled_intervals_per_oldest_to_newest_span_days',
+        postsPerWeekMethod: cadence.method,
+        postingCadenceConfidence: cadence.confidence,
+        postingCadenceFlags: cadence.flags,
+        postingCadencePostsUsed: cadence.postsUsed,
+        postingCadenceSpanDays: cadence.spanDays,
+        postingCadenceExcludedVideoIds: cadence.excludedVideoIds,
+        postsPerWeekIfOldestExcluded: cadence.postsPerWeekIfOldestExcluded,
 
         medianPostingGapDays:
             round(medianPostingGapDays, 2),
@@ -3398,6 +3576,13 @@ function buildSummary(
         sellingSignals:
             selling
                 .sellingSignals,
+
+        sponsored:
+            selling.sponsored,
+
+        sponsoredSignals:
+            selling
+                .sponsoredSignals,
 
         managementEmailInBio:
             selling

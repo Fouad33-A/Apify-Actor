@@ -12,7 +12,43 @@ This build uses TikTok's public creator embed for video discovery. That source e
 
 `isPinned` and `isSlideshow` are populated only when TikTok exposes enough evidence. Unknown state remains `null`; it is not silently converted to `false`. When `excludePinned=true`, explicitly pinned videos are excluded. A conservative date-gap heuristic may also exclude an isolated old highlighted candidate, but that candidate is reported as *suspected highlighted*, not asserted to be pinned.
 
-`postsPerWeek` is calculated as `7 / median adjacent post gap in days` over the selected sample. This is more robust than using the full newest-to-oldest span, which can be badly distorted by one old highlighted/pinned candidate. `medianPostingGapDays` and `postsPerWeekMethod` are returned for auditability.
+## Posting cadence
+
+`postsPerWeek` is span-based: `(dated posts - 1) × 7 ÷ days between the newest and the oldest post used`. A span-based figure is not inflated by a burst of posts, but one old pinned or highlighted video can stretch the span and make the rate look far too low. So some videos are left out of **this calculation only**. They stay in the video rows and in every other metric (medians, top videos by comments, and so on).
+
+Left out of the cadence calculation:
+
+- **Old pinned videos**: videos TikTok marks as pinned (`isPinned: true`) that are older than the oldest unpinned video in the sample. A pinned video posted inside the window of the other posts is an ordinary recent post and counts normally.
+- **Suspected highlighted videos**: the same conservative date-gap heuristic described above. They are reported as *suspected*, not asserted to be pinned.
+
+Anything less clear is **not discarded**. The estimate is flagged instead, so you can judge it:
+
+| Field | Meaning |
+| --- | --- |
+| `postsPerWeek` | The span-based figure, or `null` when it cannot be calculated. |
+| `postsPerWeekMethod` | `span_all_sampled_posts`, or `span_excluding_pinned_or_suspected_highlighted` when videos were left out. |
+| `postingCadenceConfidence` | `high`, `medium`, `low` or `insufficient`. |
+| `postingCadenceFlags` | Why the estimate may be uncertain (see below). |
+| `postingCadencePostsUsed`, `postingCadenceSpanDays` | How many posts the figure is based on, and the span in days. |
+| `postingCadenceExcludedVideoIds` | Videos left out of the cadence calculation only. |
+| `postsPerWeekIfOldestExcluded` | Only when the oldest post looks isolated: the figure without it, next to the main one. |
+| `medianPostingGapDays`, `postingAnomaly` | Unchanged: the median gap between adjacent posts, and whether `postsPerWeek` is above 20. |
+
+Flags in `postingCadenceFlags`:
+
+- `pinned_excluded_from_cadence`, `suspected_highlighted_excluded_from_cadence`: videos were left out, see `postingCadenceExcludedVideoIds`.
+- `oldest_post_isolated`: the oldest post is at least 14 days (and at least 4 times the typical gap) away from the one before it. It is kept, and `postsPerWeekIfOldestExcluded` shows the alternative. Confidence is `low`.
+- `oldest_post_pin_status_unknown`: with the flag above, TikTok did not say whether that oldest post is pinned.
+- `few_posts_sampled`: fewer than 5 dated posts (confidence at most `medium`).
+- `burst_posting_short_span`: the posts used cover less than a day, so the weekly rate is an extrapolation (confidence `low`).
+- `only_pinned_posts_sampled`: every sampled post is pinned, so none could be compared (confidence `low`).
+- `fewer_than_2_dated_posts`, `posts_share_one_timestamp`: no figure can be calculated (`insufficient`).
+
+## Selling and sponsorship
+
+`selling` and `sellingSignals` describe creator-owned sales: commerce language in the bio (shop, store, merch, courses, discount codes, affiliate links, booking), commerce link domains (`.shop`, `.store`) and TikTok shop or commerce flags.
+
+Paid or sponsored content is reported separately in `sponsored` (boolean) and `sponsoredSignals`, from the video ad flag and the sponsorship signals found in captions. A creator can be sponsored without selling, and the other way round. `sponsoredCount` and `sponsoredPct` are unchanged.
 
 ## Comments handoff
 
