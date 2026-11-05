@@ -3539,7 +3539,20 @@ async function processHandle(
 
     // First use video records already present in the public profile page.
     // This avoids the rate-limited creator embed whenever possible.
-    let candidates = parseEmbedCandidates(profileHtml).slice(0, OFFICIAL_EMBED_RECENT_LIMIT);
+    let candidates = parseEmbedCandidates(profileHtml);
+    const mergeCandidates = (incoming: VideoCandidate[]): void => {
+        const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+        for (const candidate of incoming) {
+            const existing = byId.get(candidate.id);
+            if (!existing) byId.set(candidate.id, candidate);
+            else byId.set(candidate.id, {
+                ...existing,
+                createTime: existing.createTime ?? candidate.createTime,
+                isPinned: existing.isPinned ?? candidate.isPinned,
+            });
+        }
+        candidates = [...byId.values()];
+    };
     let discoverySource = 'public_profile_html';
     let embedResponse: FetchResult = { ok: false, status: null, finalUrl: null, text: null, error: null };
     if (candidates.length === 0) {
@@ -3555,18 +3568,18 @@ async function processHandle(
             discoverySource = 'tiktok_creator_embed';
         }
     }
-    if (candidates.length === 0) {
+    if (candidates.length < options.videosPerProfile) {
         const feed = await discoverCreatorFeed(profile, profileUrl, options.videosPerProfile);
         if (feed.candidates.length > 0) {
-            candidates = feed.candidates;
+            mergeCandidates(feed.candidates);
             discoverySource = 'public_creator_feed';
         }
         if (feed.warning) warnings.push(feed.warning);
     }
-    if (candidates.length === 0) {
+    if (candidates.length < options.videosPerProfile) {
         const browser = await discoverBrowserProfile(username, options.videosPerProfile);
         if (browser.candidates.length > 0) {
-            candidates = browser.candidates;
+            mergeCandidates(browser.candidates);
             discoverySource = 'browser_rendered_profile';
         }
         if (browser.warning) warnings.push(browser.warning);
@@ -3943,7 +3956,7 @@ try {
             input.videosPerProfile,
             10,
             1,
-            OFFICIAL_EMBED_RECENT_LIMIT,
+            30,
         );
 
     const excludePinned =
@@ -4240,7 +4253,7 @@ try {
         maxItems,
 
         discoverySource:
-            'tiktok_creator_embed',
+            'profile_html_embed_feed_browser_fallback',
 
         selectionMethod:
             'parse_all_candidates_then_sort_by_create_time',
@@ -4249,7 +4262,7 @@ try {
             OFFICIAL_EMBED_RECENT_LIMIT,
 
         complete30VideoParity:
-            false,
+            results.every((result) => result?.videosSaved === 30),
 
         sharedRateLimitCooldown:
             true,
