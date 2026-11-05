@@ -1,6 +1,6 @@
 {
   "title": "TikTok Profile & Video Stats",
-  "description": "Screens public TikTok creators and attempts to discover up to 30 recent videos using public profile HTML, creator feed, and browser fallback. TikTok access can be blocked or incomplete.",
+  "description": "Retrieves TikTok creator videos. Free-only mode never uses the paid TikHub API but may be blocked by TikTok; optional authenticated TikHub retrieval requires explicit opt-in.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
@@ -88,6 +88,21 @@
       "enumTitles": [
         "All rows",
         "Summary rows only"
+      ]
+    },
+    "retrievalMode": {
+      "title": "Video retrieval mode",
+      "type": "string",
+      "description": "Free only is the default and never calls TikHub, even if a token is configured. TikHub fallback uses a potentially paid external API and requires TIKHUB_API_TOKEN.",
+      "editor": "select",
+      "default": "freeOnly",
+      "enum": [
+        "freeOnly",
+        "tikhubFallback"
+      ],
+      "enumTitles": [
+        "Free public TikTok methods only",
+        "TikHub API (may incur charges)"
       ]
     }
   },
