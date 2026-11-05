@@ -1685,6 +1685,22 @@ async function discoverBrowserProfile(
             }
             const page = await context.newPage();
             const feedResponses: string[] = [];
+            const feedRequestDiagnostics: Array<Record<string, unknown>> = [];
+            const feedResponseDiagnostics: Array<Record<string, unknown>> = [];
+            const feedPathPattern = /\\/api\\/(?:post\\/item_list|item_list|creator\\/item_list)\\//;
+            // Capture parameter names only, never parameter values, signatures, cookies or headers.
+            page.on('request', (request) => {
+                if (!feedPathPattern.test(request.url()) || feedRequestDiagnostics.length >= 8) return;
+                try {
+                    const url = new URL(request.url());
+                    feedRequestDiagnostics.push({
+                        method: request.method(),
+                        path: url.pathname,
+                        parameterNames: [...url.searchParams.keys()].sort(),
+                        resourceType: request.resourceType(),
+                    });
+                } catch { /* Ignore malformed request URLs. */ }
+            });
             page.on('response', (response) => {
                 if (/\/api\/(post\/item_list|item_list)\//.test(response.url())) {
                     feedResponses.push(`${response.status()} ${new URL(response.url()).pathname}`);
@@ -1696,6 +1712,31 @@ async function discoverBrowserProfile(
                 }
             });
             page.on('response', async (response) => {
+                if (feedPathPattern.test(response.url()) && feedResponseDiagnostics.length < 8) {
+                    try {
+                        const body = await response.body();
+                        const contentType = response.headers()['content-type'] ?? '';
+                        let statusCode: unknown = null;
+                        let statusMessage: unknown = null;
+                        if (body.length > 0 && contentType.includes('json')) {
+                            try {
+                                const parsed = asRecord(JSON.parse(body.toString('utf8')));
+                                statusCode = parsed?.['status_code'] ?? null;
+                                statusMessage = parsed?.['status_msg'] ?? null;
+                            } catch { /* No valid JSON. */ }
+                        }
+                        feedResponseDiagnostics.push({
+                            status: response.status(),
+                            path: new URL(response.url()).pathname,
+                            contentType: contentType.slice(0, 80),
+                            bodyLength: body.length,
+                            statusCode: typeof statusCode === 'number' ? statusCode : null,
+                            statusMessage: typeof statusMessage === 'string' ? statusMessage.slice(0, 100) : null,
+                        });
+                    } catch {
+                        feedResponseDiagnostics.push({ status: response.status(), bodyReadFailed: true });
+                    }
+                }
                 if (found.size >= requested) return;
                 const url = response.url();
                 if (!/\/api\/(post\/item_list|item_list)\//.test(url)) return;
@@ -1760,6 +1801,8 @@ async function discoverBrowserProfile(
                         documentHtmlLength: (await page.content()).length,
                         challengeText: challenge,
                         feedResponses: feedResponses.slice(0, 20),
+                        feedRequestDiagnostics,
+                        feedResponseDiagnostics,
                         gridErrorVisible: /Something went wrong|Please try again later/i.test(body),
                         sessionConfigured: Boolean(process.env.TIKTOK_SESSIONID),
                         loginPromptVisible: /(^|\\n)Log in(\\n|$)/i.test(body),
