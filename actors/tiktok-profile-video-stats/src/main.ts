@@ -1621,6 +1621,17 @@ async function discoverBrowserProfile(
         try {
             const context = await browser.newContext({ locale: 'en-US' });
             const page = await context.newPage();
+            const feedResponses: string[] = [];
+            page.on('response', (response) => {
+                if (/\\/api\\/(post\\/item_list|item_list)\\//.test(response.url())) {
+                    feedResponses.push(`${response.status()} ${new URL(response.url()).pathname}`);
+                }
+            });
+            page.on('requestfailed', (request) => {
+                if (/\\/api\\/(post\\/item_list|item_list)\\//.test(request.url())) {
+                    feedResponses.push(`FAILED ${request.failure()?.errorText ?? 'unknown'}`);
+                }
+            });
             page.on('response', async (response) => {
                 if (found.size >= requested) return;
                 const url = response.url();
@@ -1680,6 +1691,8 @@ async function discoverBrowserProfile(
                         videoLinkCount: await page.locator('a[href*="/video/"]').count(),
                         documentHtmlLength: (await page.content()).length,
                         challengeText: challenge,
+                        feedResponses: feedResponses.slice(0, 20),
+                        gridErrorVisible: /Something went wrong|Please try again later/i.test(body),
                     });
                 } catch (diagnosticError) {
                     log.warning(`Could not save browser diagnostic: ${String(diagnosticError)}`);
