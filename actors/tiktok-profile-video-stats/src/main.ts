@@ -1708,6 +1708,8 @@ async function discoverBrowserProfile(
                         challengeText: challenge,
                         feedResponses: feedResponses.slice(0, 20),
                         gridErrorVisible: /Something went wrong|Please try again later/i.test(body),
+                        sessionConfigured: Boolean(process.env.TIKTOK_SESSIONID),
+                        loginPromptVisible: /(^|\\n)Log in(\\n|$)/i.test(body),
                     });
                 } catch (diagnosticError) {
                     log.warning(`Could not save browser diagnostic: ${String(diagnosticError)}`);
