@@ -128,7 +128,7 @@ async function discover(keyword, page) {
             const assets = scripts.map(src => { try { return new URL(src, finalUrl).toString(); } catch { return null; } }).filter(Boolean);
             await Actor.pushData({ recordType: 'TIKTOK_ONE_ASSET_INDEX', scriptUrls: assets.slice(0, 20).map(url => { const u = new URL(url); return { host: u.hostname, path: u.pathname.slice(0, 180) }; }), inlineScriptCount: $('script:not([src])').length, htmlRouteHints: [...new Set((html.match(new RegExp('[/][a-zA-Z0-9_/-]{0,70}(creator|influencer|marketplace)[a-zA-Z0-9_/-]{0,70}', 'gi')) || []).map(x => x.slice(0, 120)))].slice(0, 15) });
             // Prioritize the app's entry bundle and its route-module references, not SDKs.
-            const selectedAssets = assets.filter(x => /\\/(main|6434|hooks|components)\\.[a-f0-9]+\\.js(?:\\?|$)/.test(x)).slice(0, 4);
+            const selectedAssets = assets.filter(x => ['main.', '6434.', 'hooks.', 'components.'].some(name => x.split('/').pop().startsWith(name))).slice(0, 4);
             for (const asset of selectedAssets) {
                 try {
                     const res = await client({ url: asset, responseType: 'text', timeout: { request: 15000 }, headers: { accept: '*/*', referer: exploreUrl } });
@@ -137,7 +137,7 @@ async function discover(keyword, page) {
                     const u = new URL(asset);
                     const apiPaths = [...new Set((js.match(new RegExp('[/][a-zA-Z0-9_.-]*(?:api|creator|search|explore)[a-zA-Z0-9_./-]{2,140}', 'gi')) || []).filter(x => /api|search|explore/i.test(x)).map(x => x.slice(0, 160)))].slice(0, 40);
                     const chunkNames = [...new Set((js.match(new RegExp('[a-zA-Z0-9_-]{2,80}\\\\.[a-f0-9]{8}\\\\.js', 'g')) || []))].slice(0, 30);
-                    await Actor.pushData({ recordType: 'TIKTOK_ONE_ROUTE_HINTS', assetPath: u.pathname.slice(0, 160), apiPaths, chunkNames, hasExploreRoute: js.includes('creator/explore'), hasApiClient: /axios|fetch\\\\(/.test(js) });
+                    await Actor.pushData({ recordType: 'TIKTOK_ONE_ROUTE_HINTS', assetPath: u.pathname.slice(0, 160), apiPaths, chunkNames, hasExploreRoute: js.includes('creator/explore'), hasApiClient: js.includes('axios') || js.includes('fetch(') });
                     await Actor.pushData({ recordType: 'TIKTOK_ONE_JS_PROBE', assetHost: u.hostname, assetPath: u.pathname.slice(0, 160), httpStatus: res.statusCode, bodyLength: js.length, routeCandidates, hasCreatorTerms: /creator|influencer/i.test(js) });
                 } catch (error) { await Actor.pushData({ recordType: 'TIKTOK_ONE_JS_PROBE', error: String(error.message).slice(0, 160) }); }
                 await sleep(300);
