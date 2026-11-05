@@ -1537,6 +1537,46 @@ function parseEmbedCandidates(
     );
 }
 
+/* Parse video stats already embedded in a public profile response. */
+function parseProfileVideoStats(username: string, html: string): Map<string, VideoData> {
+    const result = new Map<string, VideoData>();
+    for (const root of extractAllJsonRoots(html)) {
+        const objects = findObjects(root, (obj) => {
+            const id = firstString(obj, ['id', 'awemeId', 'aweme_id', 'itemId', 'videoId']);
+            return !!id && /^\\d{15,25}$/.test(id) &&
+                !!asRecord(obj['stats'] ?? obj['statistics']);
+        });
+        for (const obj of objects) {
+            const id = firstString(obj, ['id', 'awemeId', 'aweme_id', 'itemId', 'videoId']);
+            if (!id) continue;
+            const stats = asRecord(obj['stats'] ?? obj['statistics']);
+            const comments = firstNumber(stats, ['commentCount', 'comments']);
+            if (comments === null) continue;
+            const caption = firstString(obj, ['desc', 'caption', 'description']);
+            const createTime = firstNumber(obj, ['createTime', 'create_time']);
+            const video = asRecord(obj['video']);
+            result.set(id, {
+                videoId: id,
+                videoUrl: `https://www.tiktok.com/@${username}/video/${id}`,
+                createdAt: safeIsoFromUnix(createTime), createTime, caption,
+                hashtags: extractHashtags(caption),
+                durationSeconds: firstNumber(video, ['duration', 'durationSeconds']),
+                isPinned: firstBoolean(obj, ['isPinnedItem', 'isPinned', 'pinned']),
+                isSlideshow: firstBoolean(obj, ['isPhoto', 'isSlideshow']),
+                isAd: firstBoolean(obj, ['isAd', 'is_ad', 'isSponsored']),
+                plays: firstNumber(stats, ['playCount', 'viewCount', 'plays']),
+                likes: firstNumber(stats, ['diggCount', 'likeCount', 'likes']),
+                comments,
+                shares: firstNumber(stats, ['shareCount', 'shares']),
+                saves: firstNumber(stats, ['collectCount', 'saveCount', 'favoriteCount', 'saves']),
+                soundName: firstString(asRecord(obj['music']), ['title', 'musicName', 'name']),
+                sponsoredSignals: detectSponsoredSignals(caption),
+            });
+        }
+    }
+    return result;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Video parsing                                                              */
 /* -------------------------------------------------------------------------- */
@@ -3392,6 +3432,9 @@ async function processHandle(
         };
     }
 
+    const profileVideoStats = parseProfileVideoStats(username, profileHtml);
+    log.info(`[PROFILE VIDEO STATS] @${username}: ${profileVideoStats.size} videos with comment counts in profile HTML`);
+
     const parsedCandidates:
         ParsedCandidate[] =
         [];
@@ -3409,12 +3452,10 @@ async function processHandle(
             break;
         }
 
-        const parsed =
-            await fetchAndParseVideo(
-                username,
-                profileUrl,
-                candidate,
-            );
+        const embeddedVideo = profileVideoStats.get(candidate.id);
+        const parsed: ParsedCandidate = embeddedVideo
+            ? { candidate, status: 'parsed', video: embeddedVideo, error: null }
+            : await fetchAndParseVideo(username, profileUrl, candidate);
 
         parsedCandidates.push(
             parsed,
