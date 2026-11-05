@@ -104,6 +104,12 @@
         "Free public TikTok methods only",
         "TikHub API (may incur charges)"
       ]
+    },
+    "useResidentialProxy": {
+      "title": "Use residential proxy for browser fallback (may incur Apify charges)",
+      "type": "boolean",
+      "description": "Off by default. Enable only if you accept Apify residential proxy charges. Free-only mode never requires a residential proxy.",
+      "default": false
     }
   },
   "required": [
