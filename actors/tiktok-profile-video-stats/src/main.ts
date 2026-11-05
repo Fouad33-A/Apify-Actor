@@ -1620,6 +1620,21 @@ async function discoverBrowserProfile(
         const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
         try {
             const context = await browser.newContext({ locale: 'en-US' });
+            // Optional operator-owned session, supplied as an Apify secret environment variable.
+            // Do not log or persist the credential in the dataset or diagnostics.
+            const sessionId = process.env.TIKTOK_SESSIONID?.trim();
+            if (sessionId) {
+                await context.addCookies([{
+                    name: 'sessionid',
+                    value: sessionId,
+                    domain: '.tiktok.com',
+                    path: '/',
+                    httpOnly: true,
+                    secure: true,
+                    sameSite: 'None',
+                }]);
+                log.info('Browser session authentication configured (credential redacted).');
+            }
             const page = await context.newPage();
             const feedResponses: string[] = [];
             page.on('response', (response) => {
