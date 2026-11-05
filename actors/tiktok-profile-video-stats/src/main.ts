@@ -24,6 +24,7 @@ interface Input {
     usernames?: string[];
     videosPerProfile?: number;
     retrievalMode?: 'freeOnly' | 'tikhubFallback';
+    useResidentialProxy?: boolean;
     excludePinned?: boolean;
     mode?: Mode;
     minFollowers?: number;
@@ -1613,6 +1614,7 @@ async function discoverCreatorFeed(
 async function discoverBrowserProfile(
     username: string,
     requested: number,
+    useResidentialProxy = false,
 ): Promise<{ candidates: VideoCandidate[]; warning: string | null }> {
     const found = new Map<string, VideoCandidate>();
     let warning: string | null = null;
@@ -1621,7 +1623,7 @@ async function discoverBrowserProfile(
         // Residential proxy smoke test: browser discovery only, one sticky session per profile.
         // Apify manages proxy credentials; never log the proxy URL.
         let browserProxy: { server: string; username: string; password: string } | undefined;
-        try {
+        if (useResidentialProxy) try {
             const proxyConfiguration = await Actor.createProxyConfiguration({
                 groups: ['RESIDENTIAL'],
             });
@@ -3429,6 +3431,7 @@ async function processHandle(
             number | null;
         maxItems: number;
         retrievalMode: 'freeOnly' | 'tikhubFallback';
+        useResidentialProxy: boolean;
     },
 ): Promise<{
     username: string;
@@ -3730,7 +3733,7 @@ async function processHandle(
         if (feed.warning) warnings.push(feed.warning);
     }
     if (candidates.length < options.videosPerProfile) {
-        const browser = await discoverBrowserProfile(username, options.videosPerProfile);
+        const browser = await discoverBrowserProfile(username, options.videosPerProfile, options.useResidentialProxy);
         if (browser.candidates.length > 0) {
             mergeCandidates(browser.candidates);
             discoverySource = 'browser_rendered_profile';
@@ -4116,6 +4119,9 @@ try {
         input.retrievalMode === 'tikhubFallback' ? 'tikhubFallback' : 'freeOnly';
     log.info(`[RETRIEVAL] ${retrievalMode}; TikHub API calls ${retrievalMode === 'freeOnly' ? 'disabled' : 'explicitly enabled'}`);
 
+    const useResidentialProxy = input.useResidentialProxy === true;
+    log.info(`[PROXY] Residential browser proxy ${useResidentialProxy ? 'explicitly enabled (may incur charges)' : 'disabled'}`);
+
     const excludePinned =
         input.excludePinned !==
         false;
@@ -4262,6 +4268,7 @@ try {
 
                             maxItems,
                             retrievalMode,
+                            useResidentialProxy,
                         },
                     );
                 } catch (
