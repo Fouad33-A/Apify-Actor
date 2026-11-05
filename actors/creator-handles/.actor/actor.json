@@ -1,0 +1,9 @@
+{
+  "actorSpecification": 1,
+  "name": "creator-handles",
+  "title": "Creator Handles",
+  "description": "Discover up to 100 TikTok creators with 10k–150k followers and a post in the last 7 days.",
+  "version": "1.0",
+  "input": "./input_schema.json",
+  "dockerfile": "../Dockerfile"
+}
