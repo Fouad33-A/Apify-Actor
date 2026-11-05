@@ -1,13 +1,13 @@
 {
   "title": "TikTok Profile & Video Stats",
-  "description": "Screens public TikTok creators using profile data and recent public videos. No login, cookies, CAPTCHA solving, external paid data provider, or TikTok anti-bot signature reproduction.",
+  "description": "Screens public TikTok creators and attempts to discover up to 30 recent videos using public profile HTML, creator feed, and browser fallback. TikTok access can be blocked or incomplete.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
     "usernames": {
       "title": "TikTok usernames",
       "type": "array",
-      "description": "1\u2013200 TikTok usernames; large batches can require more runtime.",
+      "description": "1–200 TikTok usernames; large batches can require more runtime.",
       "editor": "stringList",
       "minItems": 1,
       "maxItems": 200,
@@ -21,10 +21,10 @@
     "videosPerProfile": {
       "title": "Videos per profile",
       "type": "integer",
-      "description": "Number of recent public videos to analyze per creator. TikTok's public creator embed exposes at most 10 recent candidates in this build, so the accepted range is 1\u201310.",
+      "description": "Number of recent public videos to analyze per creator (1–30). Discovery is best-effort and may return fewer when TikTok blocks access; coverage reports incompleteness.",
       "minimum": 1,
-      "maximum": 10,
-      "default": 10
+      "maximum": 30,
+      "default": 30
     },
     "excludePinned": {
       "title": "Exclude pinned videos",
