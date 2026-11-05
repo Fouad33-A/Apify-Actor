@@ -108,7 +108,7 @@ async function discover(keyword, page) {
                 const body = String(r.body ?? '');
                 let parsed = null;
                 try { parsed = JSON.parse(body); } catch { /* not JSON */ }
-                await Actor.pushData({ recordType: 'ENDPOINT_PROBE', probe: name, host: u.hostname, path: u.pathname, httpStatus: r.statusCode, contentType: String(r.headers['content-type'] ?? ''), bodyLength: body.length, jsonParsed: parsed !== null, jsonKeys: parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 12) : [], tiktokStatusCode: parsed?.status_code ?? null, tiktokStatusMessage: String(parsed?.status_msg ?? '').slice(0, 160), handlesFound: parsed ? extractSearchHandles(parsed).length : 0, htmlTitle: !parsed ? (body.match(/<title[^>]*>([^<]*)<\\/title>/i)?.[1] ?? '').slice(0, 120) : '' });
+                await Actor.pushData({ recordType: 'ENDPOINT_PROBE', probe: name, host: u.hostname, path: u.pathname, httpStatus: r.statusCode, contentType: String(r.headers['content-type'] ?? ''), bodyLength: body.length, jsonParsed: parsed !== null, jsonKeys: parsed && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 12) : [], tiktokStatusCode: parsed?.status_code ?? null, tiktokStatusMessage: String(parsed?.status_msg ?? '').slice(0, 160), handlesFound: parsed ? extractSearchHandles(parsed).length : 0, htmlTitle: !parsed ? (body.match(new RegExp('<title[^>]*>([^<]*)</title>', 'i'))?.[1] ?? '').slice(0, 120) : '' });
             } catch (e) { await Actor.pushData({ recordType: 'ENDPOINT_PROBE', probe: name, error: String(e.message).slice(0, 180) }); }
             await sleep(300);
         }
