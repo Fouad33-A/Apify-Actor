@@ -5,6 +5,7 @@ import { CookieJar } from 'tough-cookie';
 
 await Actor.init();
 const input = (await Actor.getInput()) ?? {};
+const diagnosticOnly = input.diagnosticOnly === true;
 const target = Math.min(100, Math.max(1, Number(input.targetCount) || 100));
 const minFollowers = Number(input.minFollowers ?? 10000);
 const maxFollowers = Number(input.maxFollowers ?? 150000);
@@ -69,6 +70,11 @@ async function discover(keyword, page) {
         url: api.toString(), responseType: 'text',
         headers: { accept: 'application/json, text/plain, */*', referer: 'https://www.tiktok.com/search/user?q=' + encodeURIComponent(keyword) },
     });
+    if (diagnosticOnly) {
+        const body = String(response.body ?? '');
+        const preview = body.slice(0, 300).replace(/(msToken|sessionid|sid_tt|ttwid|csrf_token|token)[=:\\s\"']+[^\\s\"'&<>]+/gi, '$1=[REDACTED]');
+        await Actor.pushData({ recordType: 'HTTP_DIAGNOSTIC', endpoint: api.origin + api.pathname, keyword, httpStatus: response.statusCode, contentType: String(response.headers['content-type'] ?? ''), finalHost: (() => { try { return new URL(response.url).hostname; } catch { return null; } })(), bodyLength: body.length, bodyStartsWith: body.trimStart().slice(0, 1), responsePreview: preview });
+    }
     if (response.statusCode === 429) { diagnostics.searchBlocked++; throw new Error('TikTok search HTTP 429; stopping discovery to avoid further rate limits'); }
     if (response.statusCode !== 200) throw new Error('TikTok search HTTP ' + response.statusCode);
     let json;
@@ -150,8 +156,8 @@ async function verify(handle) {
 try {
     const candidates = [];
     let discoveryRateLimited = false;
-    for (let page = 0; page < 5 && candidates.length < maxCandidates; page++) {
-        for (const keyword of keywords) {
+    for (let page = 0; page < (diagnosticOnly ? 1 : 5) && candidates.length < maxCandidates; page++) {
+        for (const keyword of (diagnosticOnly ? keywords.slice(0, 1) : keywords)) {
             if (candidates.length >= maxCandidates) break;
             diagnostics.searchQueries++;
             try {
@@ -166,7 +172,7 @@ try {
         }
         if (discoveryRateLimited) break;
     }
-    for (const handle of candidates) {
+    for (const handle of (diagnosticOnly ? [] : candidates)) {
         if (results.length >= target) break;
         diagnostics.profilesChecked++;
         try {
