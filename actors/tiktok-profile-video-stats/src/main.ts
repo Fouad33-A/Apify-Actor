@@ -3838,6 +3838,40 @@ async function processHandle(
         const selectedNative = (options.excludePinned
             ? nativeDiscovery.videos.filter(v => v.isPinned !== true)
             : nativeDiscovery.videos).slice(0, options.videosPerProfile);
+        // Probe three video pages before attempting full enrichment; stop if
+        // TikTok does not expose engagement metadata, avoiding 30 blocked requests.
+        if (selectedNative.some(v => v.comments === null)) {
+            let successful = 0;
+            const probeCount = Math.min(3, selectedNative.length);
+            for (let i = 0; i < probeCount; i++) {
+                if (selectedNative[i].comments !== null) { successful++; continue; }
+                const parsed = await fetchAndParseVideo(username, profileUrl, {
+                    id: selectedNative[i].videoId,
+                    createTime: selectedNative[i].createTime,
+                    isPinned: selectedNative[i].isPinned,
+                });
+                if (parsed.video?.comments !== null && parsed.video?.comments !== undefined) {
+                    selectedNative[i] = { ...selectedNative[i], ...parsed.video };
+                    successful++;
+                }
+            }
+            log.info('[ENRICHMENT] @' + username + ': commentCountAvailable=' + successful + '/' + probeCount);
+            if (successful > 0) {
+                for (let i = probeCount; i < selectedNative.length; i++) {
+                    if (selectedNative[i].comments !== null) continue;
+                    const parsed = await fetchAndParseVideo(username, profileUrl, {
+                        id: selectedNative[i].videoId,
+                        createTime: selectedNative[i].createTime,
+                        isPinned: selectedNative[i].isPinned,
+                    });
+                    if (parsed.video?.comments !== null && parsed.video?.comments !== undefined) {
+                        selectedNative[i] = { ...selectedNative[i], ...parsed.video };
+                    }
+                }
+            } else {
+                warnings.push('Individual TikTok video pages did not provide comment counts in the three-video enrichment probe.');
+            }
+        }
         for (let i = 0; i < selectedNative.length; i++) {
             await pushLimited({ rowType: 'video', username, profileUrl, status: 'ok',
                 rankNewest: i + 1, selectionBasis: 'native_discovery_unverified_order', engagementComplete: selectedNative[i].comments !== null, ...selectedNative[i] }, options.maxItems);
