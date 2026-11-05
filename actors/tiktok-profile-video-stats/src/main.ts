@@ -15,6 +15,7 @@ await Actor.init();
 async function discoverGalleryDlVideos(username: string, requested: number): Promise<{ videos: VideoData[]; warning: string | null }> {
     const run = promisify(execFile);
     let stdout = '';
+    let stderr = '';
     let warning: string | null = null;
     try {
         const result = await run('/opt/gallery-venv/bin/gallery-dl', [
@@ -26,9 +27,11 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
             'https://www.tiktok.com/@' + username,
         ], { timeout: 90000, maxBuffer: 12 * 1024 * 1024 });
         stdout = result.stdout;
+        stderr = result.stderr;
     } catch (err: unknown) {
         const e = err as { stdout?: string; stderr?: string; message?: string };
         stdout = e.stdout ?? '';
+        stderr = e.stderr ?? '';
         warning = 'gallery-dl returned an error; ' + String(e.stderr ?? e.message ?? 'unknown').slice(0, 180).replace(/https?:\/\/\S+/g, '[URL]');
     }
     const records = new Map<string, VideoData>();
@@ -77,7 +80,12 @@ async function discoverGalleryDlVideos(username: string, requested: number): Pro
         try { consume(JSON.parse(line)); } catch { /* ignore non-JSON diagnostic lines */ }
     }
     const videos = [...records.values()].sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0));
-    if (!videos.length && !warning) warning = 'gallery-dl returned no parseable video metadata.';
+    if (!videos.length) {
+        const sample = stdout.slice(0, 1200).replace(/https?:\/\/\S+/g, '[URL]');
+        const errSample = stderr.slice(0, 600).replace(/https?:\/\/\S+/g, '[URL]');
+        log.warning('[GALLERY-DL] no parseable videos; stdoutBytes=' + stdout.length + '; stderr=' + errSample + '; stdoutSample=' + sample);
+        warning = [warning, 'gallery-dl no parseable video metadata; stdoutBytes=' + stdout.length + '; stderr=' + errSample + '; sample=' + sample].filter(Boolean).join(' | ').slice(0, 1200);
+    }
     if (videos.length && videos.every(v => v.comments === null)) warning = 'gallery-dl found video URLs but no comment counts; ranking cannot be verified.';
     return { videos, warning };
 }
