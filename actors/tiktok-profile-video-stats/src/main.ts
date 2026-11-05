@@ -1625,7 +1625,7 @@ async function discoverBrowserProfile(
                 groups: ['RESIDENTIAL'],
             });
             if (proxyConfiguration) {
-                const proxyUrl = new URL(await proxyConfiguration.newUrl());
+                const proxyUrl = new URL((await proxyConfiguration.newUrl()) ?? 'http://invalid.local');
                 browserProxy = {
                     server: `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port}`,
                     username: decodeURIComponent(proxyUrl.username),
