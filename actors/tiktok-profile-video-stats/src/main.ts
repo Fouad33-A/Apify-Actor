@@ -23,6 +23,7 @@ type CandidateParseStatus = 'parsed' | 'failed';
 interface Input {
     usernames?: string[];
     videosPerProfile?: number;
+    retrievalMode?: 'freeOnly' | 'tikhubFallback';
     excludePinned?: boolean;
     mode?: Mode;
     minFollowers?: number;
