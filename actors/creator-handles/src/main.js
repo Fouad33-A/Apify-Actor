@@ -50,27 +50,12 @@ async function discover(keyword, page) {
             const handle = getHandle(candidate);
             if (handle) found.add(handle);
         });
-        for (const match of html.matchAll(/(?:https?:\\/\\/|https?%3A%2F%2F)(?:www\\.)?tiktok\\.com(?:\\/|%2F)@([a-zA-Z0-9._]{2,24})/gi)) if (validHandle(match[1])) found.add(match[1].toLowerCase());
+        for (const match of html.matchAll(/tiktok\\.com(?:\\/|%2F)@([a-zA-Z0-9._]{2,24})/gi)) if (validHandle(match[1])) found.add(match[1].toLowerCase());
         if (found.size) return [...found];
         diagnostics.searchEmpty++;
         if (/captcha|unusual traffic|verify you are human|automated queries/i.test(html)) diagnostics.searchBlocked++;
     }
     return [...found];
-}
-/* Old discovery implementation retained below for comparison */
-function unusedLegacyDiscover(keyword, page) {
-    const html = '';
-    const $ = cheerio.load(html);
-    const handles = [];
-    $('a[href]').each((_, a) => {
-        const h = getHandle($(a).attr('href'));
-        if (h) handles.push(h);
-    });
-    // Search engines may wrap URLs inside query parameters.
-    for (const match of html.matchAll(/https?(?:%3A%2F%2F|:\/\/)(?:www\\.)?tiktok\\.com(?:%2F|\/)@([a-zA-Z0-9._]{2,24})/gi)) {
-        if (validHandle(match[1])) handles.push(match[1].toLowerCase());
-    }
-    return [...new Set(handles)];
 }
 function embeddedState(html) {
     const $ = cheerio.load(html);
