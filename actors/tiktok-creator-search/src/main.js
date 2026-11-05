@@ -7,7 +7,7 @@ import { fromCandidateFeed } from './candidate-source.js';
 import { discoverFromCreativeCenter } from './creative-center.js';
 
 const PROFILE_ACTOR = 'fouad_dp/tiktok-profile-video-stats';
-const RUNTIME_FIX_VERSION = '2026-11-05-v16';
+const RUNTIME_FIX_VERSION = '2026-11-05-v17';
 const BATCH = 2;
 const BETWEEN_PROFILE_BATCHES_MS = 20000;
 const MAX_PROFILE_CALLS = 4; // use available runtime to screen more candidates
@@ -354,7 +354,7 @@ export async function runSearch({
         for (let i = 0; i < fresh.length && !outOfTime() && !screeningRateLimited; i += BATCH) {
             // Separate child runs otherwise bypass each other's in-process cooldown.
             if (i > 0) {
-                if (secondsLeft() < 60) break;
+                if (profileCalls >= MAX_PROFILE_CALLS || secondsLeft() < 60) break;
                 log.info(`[${RUNTIME_FIX_VERSION}] Pausing ${BETWEEN_PROFILE_BATCHES_MS / 1000}s between TikTok profile batches.`);
                 await new Promise((resolve) => setTimeout(resolve, BETWEEN_PROFILE_BATCHES_MS));
             }
@@ -435,7 +435,7 @@ export async function runSearch({
         }
     };
 
-    const explicitCandidateFeed = input.candidateFeed.length > 0;
+    const explicitCandidateFeed = input.candidateFeed.length > 0 && !input.resumedPendingQueue;
     const suppliedCandidates = fromCandidateFeed(input.candidateFeed, [...known]);
     if (suppliedCandidates.length) {
         for (const candidate of suppliedCandidates) seen.set(candidate.handle, candidate);
@@ -605,6 +605,7 @@ async function main() {
             const pending = await historyStore.getValue('PENDING_SCREENING_V1').catch(() => null);
             if (Array.isArray(pending) && pending.length) {
                 const queued = pending.filter((h) => typeof h === 'string' && !input.knownHandles.includes(h));
+                input.resumedPendingQueue = true;
                 input.candidateFeed = [...new Set([...queued, ...input.candidateFeed])].slice(0, 500);
                 log.info(`[${RUNTIME_FIX_VERSION}] Resuming ${queued.length} previously unscreened creator(s) before new discovery.`);
             }
