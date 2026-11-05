@@ -75,6 +75,15 @@ async function discover(keyword, page) {
         const preview = body.slice(0, 300).replace(/(msToken|sessionid|sid_tt|ttwid|csrf_token|token)[=:\\s\"']+[^\\s\"'&<>]+/gi, '$1=[REDACTED]');
         await Actor.pushData({ recordType: 'HTTP_DIAGNOSTIC', endpoint: api.origin + api.pathname, keyword, httpStatus: response.statusCode, contentType: String(response.headers['content-type'] ?? ''), finalHost: (() => { try { return new URL(response.url).hostname; } catch { return null; } })(), bodyLength: body.length, bodyStartsWith: body.trimStart().slice(0, 1), responsePreview: preview });
     }
+    if (diagnosticOnly) {
+        const mobile = new URL(api.toString());
+        mobile.hostname = 'm.tiktok.com';
+        try {
+            const mobileResponse = await client({ url: mobile.toString(), responseType: 'text', headers: { accept: 'application/json, text/plain, */*', referer: 'https://m.tiktok.com/search/user?q=' + encodeURIComponent(keyword) } });
+            const mobileBody = String(mobileResponse.body ?? '');
+            await Actor.pushData({ recordType: 'MOBILE_HTTP_DIAGNOSTIC', endpoint: mobile.origin + mobile.pathname, keyword, httpStatus: mobileResponse.statusCode, contentType: String(mobileResponse.headers['content-type'] ?? ''), finalHost: (() => { try { return new URL(mobileResponse.url).hostname; } catch { return null; } })(), bodyLength: mobileBody.length, bodyStartsWith: mobileBody.trimStart().slice(0, 1), locationHeaderHost: (() => { try { return new URL(mobileResponse.headers.location).hostname; } catch { return null; } })() });
+        } catch (error) { await Actor.pushData({ recordType: 'MOBILE_HTTP_DIAGNOSTIC', endpoint: mobile.origin + mobile.pathname, error: String(error.message).slice(0, 250) }); }
+    }
     if (response.statusCode === 429) { diagnostics.searchBlocked++; throw new Error('TikTok search HTTP 429; stopping discovery to avoid further rate limits'); }
     if (response.statusCode !== 200) throw new Error('TikTok search HTTP ' + response.statusCode);
     let json;
