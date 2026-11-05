@@ -137,6 +137,21 @@ async function discover(keyword, page) {
                     const u = new URL(asset);
                     const apiPaths = [...new Set((js.match(new RegExp('[/][a-zA-Z0-9_.-]*(?:api|creator|search|explore)[a-zA-Z0-9_./-]{2,140}', 'gi')) || []).filter(x => /api|search|explore/i.test(x)).map(x => x.slice(0, 160)))].slice(0, 40);
                     const chunkNames = [...new Set((js.match(new RegExp('[a-zA-Z0-9_-]{2,80}\\\\.[a-f0-9]{8}\\\\.js', 'g')) || []))].slice(0, 30);
+                    if (u.pathname.split('/').pop().startsWith('main.')) {
+                        const terms = ['ClientExplorePartners', 'creator-management/creator-search', 'ClientSearchCollabUser', 'ExplorePartners'];
+                        const contexts = [];
+                        for (const term of terms) {
+                            let pos = -1;
+                            let count = 0;
+                            while ((pos = js.indexOf(term, pos + 1)) >= 0 && count < 5) {
+                                const left = Math.max(0, pos - 220);
+                                const right = Math.min(js.length, pos + term.length + 320);
+                                contexts.push({ term, excerpt: js.slice(left, right) });
+                                count++;
+                            }
+                        }
+                        await Actor.pushData({ recordType: 'TIKTOK_ONE_SEARCH_CALL_CONTEXT', contexts });
+                    }
                     await Actor.pushData({ recordType: 'TIKTOK_ONE_ROUTE_HINTS', assetPath: u.pathname.slice(0, 160), apiPaths, chunkNames, hasExploreRoute: js.includes('creator/explore'), hasApiClient: js.includes('axios') || js.includes('fetch(') });
                     await Actor.pushData({ recordType: 'TIKTOK_ONE_JS_PROBE', assetHost: u.hostname, assetPath: u.pathname.slice(0, 160), httpStatus: res.statusCode, bodyLength: js.length, routeCandidates, hasCreatorTerms: /creator|influencer/i.test(js) });
                 } catch (error) { await Actor.pushData({ recordType: 'TIKTOK_ONE_JS_PROBE', error: String(error.message).slice(0, 160) }); }
