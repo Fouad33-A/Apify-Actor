@@ -3833,13 +3833,14 @@ async function processHandle(
 
     const nativeDiscovery = await discoverGalleryDlVideos(username, options.videosPerProfile);
     if (nativeDiscovery.warning) warnings.push(nativeDiscovery.warning);
-    if (nativeDiscovery.videos.length >= options.videosPerProfile && nativeDiscovery.videos.every(v => v.comments !== null)) {
+    if (nativeDiscovery.videos.length > 0) {
+        log.info('[NATIVE] @' + username + ': discovered=' + nativeDiscovery.videos.length + ', withComments=' + nativeDiscovery.videos.filter(v => v.comments !== null).length);
         const selectedNative = (options.excludePinned
             ? nativeDiscovery.videos.filter(v => v.isPinned !== true)
             : nativeDiscovery.videos).slice(0, options.videosPerProfile);
         for (let i = 0; i < selectedNative.length; i++) {
             await pushLimited({ rowType: 'video', username, profileUrl, status: 'ok',
-                rankNewest: i + 1, selectionBasis: 'gallery_dl_recent_create_time', ...selectedNative[i] }, options.maxItems);
+                rankNewest: i + 1, selectionBasis: 'native_discovery_unverified_order', engagementComplete: selectedNative[i].comments !== null, ...selectedNative[i] }, options.maxItems);
         }
         const parsedNative: ParsedCandidate[] = nativeDiscovery.videos.map(video => ({
             candidate: { id: video.videoId, createTime: video.createTime, isPinned: video.isPinned },
@@ -3848,11 +3849,16 @@ async function processHandle(
         const selectionNative = selectVideos(parsedNative, options.videosPerProfile, options.excludePinned);
         const coverageNative = buildCoverage(options.videosPerProfile, nativeDiscovery.videos.length, parsedNative, selectionNative, options.excludePinned);
         coverageNative.officialRecentVideoLimit = 0;
+        coverageNative.completeForRequestedCount = selectedNative.length === options.videosPerProfile && selectedNative.every(v => v.comments !== null && v.createTime !== null);
+        coverageNative.selectionReliable = coverageNative.completeForRequestedCount;
+        if (selectedNative.some(v => v.comments === null)) coverageNative.warnings.push('Comment counts unavailable for some videos: do NOT rank top videos by comments.');
+        if (selectedNative.some(v => v.createTime === null)) coverageNative.warnings.push('Publication dates unavailable for some videos: newest-30 ordering is unverified.');
+        if (selectedNative.length < options.videosPerProfile) coverageNative.warnings.push('Fewer video IDs than requested; coverage incomplete.');
         coverageNative.warnings = coverageNative.warnings.filter(w => !w.includes('public TikTok creator embed'));
         coverageNative.warnings.push(...warnings);
         const summaryNative = buildSummary(profile, selectedNative, analyzeSelling(profile, selectedNative), coverageNative);
         await pushLimited({ rowType: 'summary', username, profileUrl, status: 'ok',
-            discoverySource: 'gallery_dl_native', ...summaryNative }, options.maxItems);
+            discoverySource: 'gallery_dl_or_ytdlp_native', ...summaryNative }, options.maxItems);
         return { username, status: 'ok', videosSaved: selectedNative.length, warnings: coverageNative.warnings };
     }
     // Authenticated API discovery avoids repeated blocked TikTok embed requests.
