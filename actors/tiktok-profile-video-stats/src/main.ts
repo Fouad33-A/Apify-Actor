@@ -3676,7 +3676,7 @@ async function processHandle(
         const selectionApi = selectVideos(parsedApi, options.videosPerProfile, options.excludePinned);
         const coverageApi = buildCoverage(options.videosPerProfile, apiDiscovery.videos.length, parsedApi, selectionApi, options.excludePinned);
         coverageApi.source = 'tikhub_authenticated_api';
-        coverageApi.officialRecentVideoLimit = null;
+        coverageApi.officialRecentVideoLimit = 0; // Not applicable to authenticated API
         coverageApi.warnings = coverageApi.warnings.filter(w => !w.includes('public TikTok creator embed'));
         coverageApi.completeForRequestedCount = selectedApi.length === options.videosPerProfile && !apiDiscovery.warning
             && (!options.excludePinned || selectedApi.every(v => v.isPinned !== null));
