@@ -1,0 +1,61 @@
+{
+  "title": "Creator Handles input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "targetCount": {
+      "title": "Target creators",
+      "type": "integer",
+      "default": 100,
+      "minimum": 1,
+      "maximum": 100
+    },
+    "keywords": {
+      "title": "Search keywords",
+      "type": "array",
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "fitness",
+        "beauty",
+        "food",
+        "travel",
+        "education",
+        "fashion",
+        "gaming",
+        "technology",
+        "lifestyle",
+        "art",
+        "sports",
+        "music"
+      ]
+    },
+    "maxCandidates": {
+      "title": "Maximum profiles to inspect",
+      "type": "integer",
+      "default": 600,
+      "minimum": 10,
+      "maximum": 3000
+    },
+    "minFollowers": {
+      "title": "Minimum followers",
+      "type": "integer",
+      "default": 10000
+    },
+    "maxFollowers": {
+      "title": "Maximum followers",
+      "type": "integer",
+      "default": 150000
+    },
+    "activeWithinDays": {
+      "title": "Posted within days",
+      "type": "integer",
+      "default": 7,
+      "minimum": 1,
+      "maximum": 30
+    }
+  },
+  "required": []
+}
