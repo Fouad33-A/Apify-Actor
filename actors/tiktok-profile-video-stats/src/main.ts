@@ -1,8 +1,86 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
 await Actor.init();
+
+
+/**
+ * Independent, open-source gallery-dl discovery path. Runs inside OUR Actor,
+ * without calling any public Actor, TikHub, or third-party scraping API.
+ * Gallery-dl emits JSON metadata only (-j), not downloaded media.
+ */
+async function discoverGalleryDlVideos(username: string, requested: number): Promise<{ videos: VideoData[]; warning: string | null }> {
+    const run = promisify(execFile);
+    let stdout = '';
+    let warning: string | null = null;
+    try {
+        const result = await run('python3', [
+            '-m', 'gallery_dl', '-j',
+            '-o', 'extractor.tiktok.user.include=posts',
+            '-o', 'extractor.tiktok.videos=false',
+            '-o', 'extractor.tiktok.posts.order-posts=desc',
+            '-o', 'extractor.tiktok.tiktok-range=1-' + Math.min(60, requested + 10),
+            'https://www.tiktok.com/@' + username,
+        ], { timeout: 90000, maxBuffer: 12 * 1024 * 1024 });
+        stdout = result.stdout;
+    } catch (err: unknown) {
+        const e = err as { stdout?: string; stderr?: string; message?: string };
+        stdout = e.stdout ?? '';
+        warning = 'gallery-dl returned an error; ' + String(e.stderr ?? e.message ?? 'unknown').slice(0, 180).replace(/https?:\\/\\/\\S+/g, '[URL]');
+    }
+    const records = new Map<string, VideoData>();
+    const consume = (value: unknown): void => {
+        if (Array.isArray(value)) {
+            // gallery-dl JSON output: [message_type, url, metadata]
+            if (value.length >= 3 && typeof value[0] === 'number') {
+                consume(value[2]);
+                return;
+            }
+            for (const item of value) consume(item);
+            return;
+        }
+        const obj = asRecord(value);
+        if (!obj) return;
+        const aweme = asRecord(obj.aweme_detail) ?? asRecord(obj.aweme) ?? asRecord(obj.item) ?? obj;
+        const rawId = firstString(aweme, ['aweme_id', 'id', 'video_id', 'videoId']) ??
+            firstString(obj, ['aweme_id', 'id', 'video_id', 'videoId']);
+        if (!rawId || !/^\\d{15,25}$/.test(rawId)) return;
+        const stats = asRecord(aweme.statistics) ?? asRecord(aweme.stats) ?? asRecord(obj.statistics) ?? asRecord(obj.stats);
+        const createTime = firstNumber(aweme, ['create_time', 'createTime', 'timestamp']) ??
+            firstNumber(obj, ['create_time', 'createTime', 'timestamp']);
+        const isPinned = firstBoolean(aweme, ['is_top', 'isPinned', 'is_pinned']) ??
+            firstBoolean(obj, ['is_top', 'isPinned', 'is_pinned']);
+        const video: VideoData = {
+            videoId: rawId,
+            videoUrl: 'https://www.tiktok.com/@' + username + '/video/' + rawId,
+            createdAt: safeIsoFromUnix(createTime),
+            createTime,
+            caption: firstString(aweme, ['desc', 'description', 'text', 'caption']),
+            hashtags: [],
+            durationSeconds: firstNumber(asRecord(aweme.video), ['duration']) ?? null,
+            isPinned, isSlideshow: null, isAd: null,
+            plays: firstNumber(stats, ['play_count', 'playCount', 'views']),
+            likes: firstNumber(stats, ['digg_count', 'diggCount', 'likes']),
+            comments: firstNumber(stats, ['comment_count', 'commentCount', 'comments']),
+            shares: firstNumber(stats, ['share_count', 'shareCount', 'shares']),
+            saves: firstNumber(stats, ['collect_count', 'collectCount', 'saves']),
+            soundName: null, sponsoredSignals: [],
+        };
+        const existing = records.get(rawId);
+        if (!existing || (existing.comments === null && video.comments !== null)) records.set(rawId, video);
+    };
+    for (const line of stdout.split('\\n')) {
+        if (!line.trim()) continue;
+        try { consume(JSON.parse(line)); } catch { /* ignore non-JSON diagnostic lines */ }
+    }
+    const videos = [...records.values()].sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0));
+    if (!videos.length && !warning) warning = 'gallery-dl returned no parseable video metadata.';
+    if (videos.length && videos.every(v => v.comments === null)) warning = 'gallery-dl found video URLs but no comment counts; ranking cannot be verified.';
+    return { videos, warning };
+}
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -3722,6 +3800,30 @@ async function processHandle(
         };
     }
 
+    const nativeDiscovery = await discoverGalleryDlVideos(username, options.videosPerProfile);
+    if (nativeDiscovery.warning) warnings.push(nativeDiscovery.warning);
+    if (nativeDiscovery.videos.length >= options.videosPerProfile && nativeDiscovery.videos.every(v => v.comments !== null)) {
+        const selectedNative = (options.excludePinned
+            ? nativeDiscovery.videos.filter(v => v.isPinned !== true)
+            : nativeDiscovery.videos).slice(0, options.videosPerProfile);
+        for (let i = 0; i < selectedNative.length; i++) {
+            await pushLimited({ rowType: 'video', username, profileUrl, status: 'ok',
+                rankNewest: i + 1, selectionBasis: 'gallery_dl_recent_create_time', ...selectedNative[i] }, options.maxItems);
+        }
+        const parsedNative: ParsedCandidate[] = nativeDiscovery.videos.map(video => ({
+            candidate: { id: video.videoId, createTime: video.createTime, isPinned: video.isPinned },
+            status: 'parsed' as const, video, error: null,
+        }));
+        const selectionNative = selectVideos(parsedNative, options.videosPerProfile, options.excludePinned);
+        const coverageNative = buildCoverage(options.videosPerProfile, nativeDiscovery.videos.length, parsedNative, selectionNative, options.excludePinned);
+        coverageNative.officialRecentVideoLimit = 0;
+        coverageNative.warnings = coverageNative.warnings.filter(w => !w.includes('public TikTok creator embed'));
+        coverageNative.warnings.push(...warnings);
+        const summaryNative = buildSummary(profile, selectedNative, analyzeSelling(profile, selectedNative), coverageNative);
+        await pushLimited({ rowType: 'summary', username, profileUrl, status: 'ok',
+            discoverySource: 'gallery_dl_native', ...summaryNative }, options.maxItems);
+        return { username, status: 'ok', videosSaved: selectedNative.length, warnings: coverageNative.warnings };
+    }
     // Authenticated API discovery avoids repeated blocked TikTok embed requests.
     const apiDiscovery = options.retrievalMode === 'tikhubFallback' && process.env.TIKHUB_API_TOKEN
         ? await discoverTikHubVideos(username, profile.secUid, options.videosPerProfile)
