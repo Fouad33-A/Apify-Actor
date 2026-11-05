@@ -1583,7 +1583,7 @@ async function discoverCreatorFeed(
                         errorDetail = ` responseCode=${String(code ?? 'none').slice(0, 60)} responseMessage=${String(message ?? 'none').slice(0, 180)}`;
                     }
                 } catch {
-                    errorDetail = ` responseExcerpt=${rawBody.replace(/https?:\\/\\/\\S+/g, '[URL]').replace(/[\\r\\n]+/g, ' ').slice(0, 180)}`;
+                    errorDetail = ` responseExcerpt=${rawBody.replace(/https?:\/\/\S+/g, '[URL]').replace(/[\r\n]+/g, ' ').slice(0, 180)}`;
                 }
             }
             warning = `Creator feed HTTP ${response.status ?? 'unknown'}: ${response.error ?? 'request rejected'}; bodyLength=${rawBody.length}; finalUrlHost=${(() => { try { return new URL(response.finalUrl ?? url.toString()).host; } catch { return 'unknown'; } })()}${errorDetail}`;
