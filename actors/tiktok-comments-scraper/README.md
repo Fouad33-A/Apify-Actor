@@ -16,6 +16,8 @@ Use `videoUrls` for the standard handoff from TikTok Profile & Video Stats:
 
 `postUrls` remains supported for compatibility and may contain URL strings or `{ "url": "..." }` objects. At least one URL must be supplied. Unknown top-level input fields fail loudly so schema mismatches are visible instead of silently producing no data.
 
+Question clustering is **off by default**. Set `"questionAnalysis": true` to enable legacy repeated-question analysis. With the default `false`, only comment rows and the run summary are emitted; the summary includes `questionAnalysisEnabled: false` and `questionsDetected: null`. Claude can analyze the complete raw comment dataset separately.
+
 ## Output
 
 Each saved comment has `recordType: "comment"`, comment/video IDs, text, username, `isQuestion`, `replyCount` when TikTok exposes it, and `isReply: false`.
