@@ -25,6 +25,10 @@ export function readInput(raw) {
         if (Number.isNaN(t)) throw new Error(`"${name}" must be a date such as 2026-01-31.`);
         return t;
     };
+    if (input.sinceDate && input.dateFrom && input.sinceDate !== input.dateFrom) throw new Error('Use either sinceDate or dateFrom, not conflicting dates.');
+    if (input.sinceDate) input.dateFrom = input.sinceDate;
+    if (!Number.isInteger(input.maxItems ?? 200) || (input.maxItems ?? 200) < 1) throw new Error('maxItems must be a positive integer.');
+    if (input.maxTotalChargeUsd != null && (!Number.isFinite(input.maxTotalChargeUsd) || input.maxTotalChargeUsd <= 0)) throw new Error('maxTotalChargeUsd must be positive.');
     const dateFrom = date('dateFrom');
     const dateToRaw = date('dateTo');
     const dateTo = dateToRaw == null ? null : dateToRaw + 86_400_000 - 1;
@@ -51,12 +55,16 @@ export async function run({
     input, pushData, fetch = fetchFeed, discover = discoverRedditThreads, readArchive = fetchArcticComments,
     shouldStop = () => false, now = () => new Date(), backoffMs = 30_000,
 }) {
-    const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, archiveCommentThreads: 0 };
+    const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, archiveCommentThreads: 0, requestsMade: 0, itemsReturned: 0, itemsBlocked: 0 };
+    const maxItems = input.maxItems ?? 200;
+    let outputCount = 0;
+    const emit = async (row) => { if (outputCount >= maxItems) return false; await pushData({ sourceUrl: row.url ?? row.sourceUrl ?? `https://www.reddit.com/r/${row.subreddit}/`, runLabel: input.runLabel ?? '', ...row }); outputCount++; totals.itemsReturned++; return true; };
     const stamp = () => now().toISOString();
 
     async function ask(url) {
         for (let attempt = 0; ; attempt += 1) {
             await sleep(input.delayBetweenRequestsMs);
+            totals.requestsMade++;
             const res = await fetch(url);
             const verdict = classifyResponse(res.status, res.body);
             if (verdict.status === 'rate_limited' && attempt < 2) { await sleep(backoffMs); continue; }
@@ -126,7 +134,9 @@ export async function run({
                 shouldStop,
                 log: (m) => log.info(m),
             });
+            totals.requestsMade += fallback.attempts.length;
             problems.push(...fallback.attempts.map((a) => ({ source: 'public_search', ...a })));
+            if (fallback.rateLimited) totals.itemsBlocked++;
             for (const p of fallback.threads) {
                 if ((input.dateFromMs != null || input.dateToMs != null) && !p.updated) continue;
                 threads.set(p.id, { ...p, discoverySource: 'public_search' });
@@ -140,7 +150,7 @@ export async function run({
         let withComments = 0;
 
         for (const thread of threads.values()) {
-            if (shouldStop()) break;
+            if (shouldStop() || outputCount >= maxItems) break;
             const own = tagText(`${thread.title}\n${thread.text}`, { themes: input.themes, competitors: input.competitors });
             let comments = [];
             let commentsStatus = input.includeComments ? 'skipped_limit' : 'not_requested';
@@ -195,7 +205,7 @@ export async function run({
             for (const t of all) themeCounts[t] = (themeCounts[t] ?? 0) + 1;
             for (const c of new Set([...own.competitorsMentioned, ...comments.flatMap((c) => c.competitorsMentioned)])) competitorCounts[c] = (competitorCounts[c] ?? 0) + 1;
 
-            await pushData({
+            await emit({
                 recordType: 'thread', subreddit: sub, threadId: thread.id.replace(/^t3_/, ''), title: thread.title,
                 body: thread.text.slice(0, 5000), author: thread.author, createdAt: thread.updated, url: thread.url, score: null,
                 discoverySource: thread.discoverySource, matchedKeywords: thread.matchedKeywords, themes: own.themes,
@@ -208,7 +218,8 @@ export async function run({
         totals.comments += commentsRead;
         if (halted?.status === 'blocked' && !threads.size) totals.blocked += 1;
         const status = threads.size ? 'ok' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_threads';
-        await pushData({
+        if (!threads.size && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status: status === 'blocked' ? 'blocked' : 'no_data', reason: halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
+        await emit({
             recordType: 'subreddit', subreddit: sub, status,
             statusDetail: status === 'ok' || status === 'no_threads' ? null : (halted?.detail ?? problems[0]?.detail ?? null),
             sourceMode, threadsRead: threads.size, threadsWithComments: withComments, commentsRead,
@@ -218,7 +229,7 @@ export async function run({
     }
 
     return {
-        ...totals,
+        ...totals, inputUsed: input, costUsd: null, costStatus: 'unavailable', status: shouldStop() || outputCount >= maxItems ? 'partial' : 'ok',
         note: 'Reddit RSS is tried first for thread discovery and comments. If Reddit blocks thread discovery, Brave Search discovers indexed Reddit threads. If comment RSS is blocked, rate-limited, empty, or the thread came from public search, the actor queries the independent Arctic Shift public archive by Reddit submission ID. Archived comments retain their archived Reddit score and are ranked by that score before the requested limit. Archive coverage can lag or be incomplete. No Reddit login, client impersonation, paid API, or access-control bypass is used.',
     };
 }
@@ -233,6 +244,7 @@ async function main() {
         const proxyUrl = proxy ? await proxy.newUrl() : undefined;
         const summary = await run({ input, pushData: (r) => Actor.pushData(r), fetch: (u) => fetchFeed(u, { proxyUrl }), shouldStop: () => stop });
         await Actor.setValue('OUTPUT', summary);
+        await Actor.setValue('SUMMARY', summary);
         log.info(`Done: ${summary.threads} thread(s), ${summary.comments} comment(s), ${summary.blocked} subreddit(s) blocked, ${summary.searchFallbacks} thread-search fallback(s), ${summary.archiveCommentThreads} thread(s) with archived comments.`);
     } catch (error) {
         log.error(String(error?.message ?? error));
