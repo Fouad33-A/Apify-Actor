@@ -138,7 +138,14 @@ export async function run({
             problems.push(...fallback.attempts.map((a) => ({ source: 'public_search', ...a })));
             if (fallback.rateLimited) totals.itemsBlocked++;
             for (const p of fallback.threads) {
-                if ((input.dateFromMs != null || input.dateToMs != null) && !p.updated) continue;
+                if (input.dateFromMs != null || input.dateToMs != null) {
+                    if (!p.updated) continue;
+                    const published = Date.parse(p.updated);
+                    if (!Number.isFinite(published)) continue;
+                    if (input.dateFromMs != null && published < input.dateFromMs) continue;
+                    if (input.dateToMs != null && published > input.dateToMs) continue;
+                }
+                if (threads.size >= input.maxThreadsPerSubreddit) break;
                 threads.set(p.id, { ...p, discoverySource: 'public_search' });
             }
             if (threads.size) halted = null;
