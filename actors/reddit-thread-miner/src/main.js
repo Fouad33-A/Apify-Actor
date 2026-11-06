@@ -96,6 +96,7 @@ export async function run({
             : [{ keyword: null, url: (after) => subredditFeed(sub, { after }) }];
         let halted = null;
         let sourceMode = 'reddit_rss';
+        let fallbackSucceeded = false;
 
         for (const source of sources) {
             let after;
@@ -135,6 +136,7 @@ export async function run({
                 log: (m) => log.info(m),
             });
             totals.requestsMade += fallback.attempts.length;
+            fallbackSucceeded = fallback.attempts.some((a) => a.status === 200);
             problems.push(...fallback.attempts.map((a) => ({ source: 'public_search', ...a })));
             if (fallback.rateLimited) totals.itemsBlocked++;
             for (const p of fallback.threads) {
@@ -225,8 +227,8 @@ export async function run({
         totals.comments += commentsRead;
         if (halted?.status === 'blocked' && !threads.size) totals.blocked += 1;
         const fallbackRateLimited = problems.some((p) => p.source === 'public_search' && p.status === 429);
-        const status = threads.size ? 'ok' : fallbackRateLimited ? 'rate_limited' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_data';
-        if (!threads.size && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status, reason: fallbackRateLimited ? 'Public search fallback rate-limited (HTTP 429)' : halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
+        const status = threads.size ? 'ok' : fallbackSucceeded ? 'no_data' : fallbackRateLimited ? 'rate_limited' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_data';
+        if (!threads.size && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status, reason: fallbackSucceeded ? 'Public search succeeded but no threads met the date and keyword filters' : fallbackRateLimited ? 'Public search fallback rate-limited (HTTP 429)' : halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
         await emit({
             recordType: 'subreddit', subreddit: sub, status,
             statusDetail: status === 'ok' || status === 'no_data' ? null : (halted?.detail ?? problems[0]?.detail ?? null),
