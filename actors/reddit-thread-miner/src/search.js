@@ -34,15 +34,18 @@ export function redditResultsIn(html, subreddit) {
         if (seen.has(id)) return;
         seen.add(id);
         const box = $(el).closest('div').parent();
-        const title = $(el).text().trim() || box.find('a').first().text().trim();
+        const rawTitle = $(el).text().replace(/\s+/g, ' ').trim() || box.find('a').first().text().trim();
+        const title = rawTitle.replace(/^Reddit\s+reddit\.com\s*›.*?on Reddit:\s*/i, '').replace(/\s*:\s*r\/[^ ]+\s*$/i, '').trim() || m[3]?.replace(/_/g, ' ') || `Reddit thread ${id}`;
         const text = box.text().replace(/\s+/g, ' ').trim();
+        const dateMatch = text.match(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+20\d{2}\b/i);
+        const updated = dateMatch && Number.isFinite(Date.parse(dateMatch[0])) ? new Date(dateMatch[0]).toISOString() : null;
         out.push({
             id: `t3_${id}`,
             title: title || m[3]?.replace(/_/g, ' ') || `Reddit thread ${id}`,
             text: text.slice(0, 2000),
             url: `https://www.reddit.com/r/${m[1]}/comments/${id}/${m[3] ?? ''}`.replace(/\/$/, ''),
             author: null,
-            updated: null,
+            updated,
         });
     });
     return out;
