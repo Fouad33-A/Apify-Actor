@@ -95,6 +95,12 @@
         "type": "string"
       },
       "description": "Optional language codes used to filter detected questions."
+    },
+    "questionAnalysis": {
+      "title": "Enable legacy question clustering",
+      "type": "boolean",
+      "description": "Optional heuristic recurring-question analysis. Disabled by default; raw comments and run summary are always saved. Prefer Claude for semantic analysis.",
+      "default": false
     }
   }
 }
