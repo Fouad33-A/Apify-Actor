@@ -1,0 +1,1 @@
+{"actorSpecification":1,"name":"tiktok-master-orchestrator","title":"TikTok Master Pipeline","version":"0.1","buildTag":"latest","input":"./input_schema.json","dockerfile":"../Dockerfile"}

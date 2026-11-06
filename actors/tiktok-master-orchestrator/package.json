@@ -1,0 +1,1 @@
+{"name":"tiktok-master-orchestrator","version":"0.1.0","private":true,"type":"module","scripts":{"start":"node main.mjs","test":"node test-pipeline.mjs"},"dependencies":{"apify":"^3.7.2"}}

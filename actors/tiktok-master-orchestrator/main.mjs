@@ -1,0 +1,45 @@
+import { Actor, log } from 'apify';
+import { ACTOR_IDS, selectCreators, prepareCommentsInput, summarize } from './pipeline.mjs';
+await Actor.init();
+const input = (await Actor.getInput()) ?? {};
+const childRuns = {};
+let exitCode = 0;
+async function runChild(name, actorId, childInput, timeoutSecs) {
+  log.info('Starting ' + name + ' (' + actorId + ')');
+  const run = await Actor.call(actorId, childInput, { waitSecs: timeoutSecs, timeout: timeoutSecs, maxTotalChargeUsd: 0.25, restartOnError: false });
+  if (run?.status !== 'SUCCEEDED' || !run.defaultDatasetId) throw new Error(name + ' failed: ' + (run?.status ?? 'unknown') + ' (run ' + (run?.id ?? 'unknown') + ')');
+  childRuns[name] = {actorId, runId: run.id, datasetId: run.defaultDatasetId, status: run.status};
+  const data = await Actor.apifyClient.dataset(run.defaultDatasetId).listItems({limit: 5000});
+  if (data.total > 5000) throw new Error(name + ' output too large for safe handoff');
+  return data.items;
+}
+try {
+  const maxCreators = Math.max(1, Math.min(100, Math.floor(Number(input.maxCreators) || 5)));
+  const maxCommentsPerPost = Math.max(1, Math.min(1000, Math.floor(Number(input.maxCommentsPerPost) || 100)));
+  const timeoutSecs = Math.max(60, Math.min(3600, Math.floor(Number(input.childTimeoutSecs) || 900)));
+  const maxVideosPerCreator = Math.max(2, Math.min(10, Math.floor(Number(input.maxVideosPerCreator) || 10)));
+  const searchRows = await runChild('creatorSearch', ACTOR_IDS.creatorSearch, {
+    ...(input.searchInput ?? {}), ...(Array.isArray(input.keywords) ? {keywords: input.keywords} : {}), ...(Array.isArray(input.hashtags) ? {hashtags: input.hashtags} : {}), maxCreators: Math.max(5, maxCreators), onlyPassing: true, enrichProfiles: true, profileActor: ACTOR_IDS.profileStats,
+  }, timeoutSecs);
+  const creators = selectCreators(searchRows, maxCreators);
+  const summary = searchRows.find(r => r?.recordType === 'RUN_SUMMARY');
+  log.info('Creator Search diagnostic: ' + JSON.stringify({found: summary?.handlesFound, processed: summary?.creatorsProcessed, returned: summary?.returned, failures: summary?.failedByReason, stoppedEarly: summary?.stoppedEarly, pending: summary?.pendingCandidateHandles?.length}));
+  // TEMPORARY: question/comment screening is disabled during creator discovery validation.
+  // Restore Profile Stats -> Comments handoff once creator discovery is stable.
+  const result = {
+    recordType: 'PIPELINE_SUMMARY', status: creators.length ? 'completed' : 'no_qualifying_creators',
+    stage: 'creator_discovery_only', questionScreeningEnabled: false,
+    creatorsSelected: creators.length, creators, creatorSearchSummary: summary ?? null,
+    childRuns, note: 'Repeated-question screening temporarily disabled; creator eligibility filters remain unchanged.',
+  };
+  await Actor.pushData(result);
+  await Actor.setValue('OUTPUT', result);
+} catch (error) {
+  exitCode = 1;
+  log.error(error.stack ?? error.message);
+  const result = {recordType: 'PIPELINE_SUMMARY', status: 'failed', error: error.message, childRuns};
+  await Actor.pushData(result);
+  await Actor.setValue('OUTPUT', result);
+} finally {
+  await Actor.exit({exitCode});
+}

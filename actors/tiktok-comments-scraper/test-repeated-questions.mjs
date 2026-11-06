@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { repeatedQuestions, questionKey } from './src/repeated-questions.mjs';
+const c = (asker, video, text) => ({ creator: 'creator1', username: asker, videoId: video, commentText: text });
+const rows = [c('a','v1','Where can I buy this?'),c('b','v1','Where can I buy this?'),c('c','v2','Where can I buy this?')];
+assert.equal(repeatedQuestions(rows).length,1);
+assert.equal(repeatedQuestions(rows)[0].askerCount,3);
+assert.equal(repeatedQuestions(rows.map(x=>({...x,videoId:'v1'}))).length,0);
+assert.equal(repeatedQuestions(rows.map(x=>({...x,username:'a'}))).length,0);
+assert.equal(repeatedQuestions([c('a','v1','How does this work?'),c('b','v2','Where can I buy it?'),c('c','v2','Can you ship it?')]).length,0);
+assert.equal(questionKey('more'),null);
+assert.equal(questionKey('What song is this?'),null);
+assert.throws(()=>repeatedQuestions(rows,{minVideos:1}));
+console.log('PASS: repeated-question detection');

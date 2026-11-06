@@ -1,0 +1,106 @@
+{
+  "title": "TikTok Comments Scraper",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "creatorVideos": {
+      "title": "Videos grouped by creator",
+      "type": "array",
+      "editor": "json",
+      "description": "Preserves creator attribution. Each item: {creator, videoUrls}.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "creator": {
+            "type": "string",
+            "title": "Creator username",
+            "description": "TikTok username without the @ prefix."
+          },
+          "videoUrls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "title": "Creator video URLs",
+            "description": "TikTok video URLs belonging to this creator."
+          }
+        },
+        "required": [
+          "creator",
+          "videoUrls"
+        ]
+      }
+    },
+    "videoUrls": {
+      "title": "Video URLs",
+      "type": "array",
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      },
+      "description": "Direct TikTok video URLs to scrape."
+    },
+    "postUrls": {
+      "title": "Legacy post URLs",
+      "type": "array",
+      "editor": "json",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Post URL",
+            "description": "Direct URL of a TikTok post."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
+      "description": "Legacy TikTok post URLs to scrape."
+    },
+    "maxCommentsPerPost": {
+      "title": "Comments per video",
+      "type": "integer",
+      "default": 100,
+      "minimum": 1,
+      "maximum": 1000,
+      "description": "Maximum top-level comments to collect from each video."
+    },
+    "includeReplies": {
+      "title": "Include replies",
+      "type": "boolean",
+      "default": false,
+      "description": "Whether replies are requested; current public-source scraper does not fetch replies."
+    },
+    "minAskers": {
+      "title": "Minimum distinct askers",
+      "type": "integer",
+      "default": 3,
+      "minimum": 3,
+      "description": "Minimum number of distinct commenters asking the same question."
+    },
+    "minVideos": {
+      "title": "Minimum distinct videos",
+      "type": "integer",
+      "default": 2,
+      "minimum": 2,
+      "description": "Minimum number of distinct videos by the same creator containing the question."
+    },
+    "languages": {
+      "title": "Allowed language codes (optional)",
+      "type": "array",
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional language codes used to filter detected questions."
+    },
+    "questionAnalysis": {
+      "title": "Enable legacy question clustering",
+      "type": "boolean",
+      "description": "Optional heuristic recurring-question analysis. Disabled by default; raw comments and run summary are always saved. Prefer Claude for semantic analysis.",
+      "default": false
+    }
+  }
+}

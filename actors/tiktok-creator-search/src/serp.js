@@ -11,9 +11,11 @@ import { gotScraping } from 'got-scraping';
 
 const enc = encodeURIComponent;
 export const SITE = 'tiktok.com';
-export const QUERY_VARIANTS = 3;
+export const CRITERIA_QUERY = '__criteria_only__';
+export const QUERY_VARIANTS = 6;
 const SEARCH_PARALLEL = 3;
-const TT_NAME = /^[A-Za-z0-9._]{2,24}$/;
+const TT_NAME = /^(?=.{2,24}$)(?=.*[A-Za-z0-9])[A-Za-z0-9._]+$/;
+const validHandle = (value) => TT_NAME.test(value) && !value.startsWith('.') && !value.endsWith('.') && !value.includes('..');
 
 export const googleUrl = (q, page) =>
     `http://www.google.com/search?q=${enc(q)}&hl=en${page ? `&start=${page * 10}` : ''}`;
@@ -21,6 +23,10 @@ export const googleUrl = (q, page) =>
 // Three ways to ask, since Google sometimes ignores the site: operator.
 export function buildQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
+    if (kw === CRITERIA_QUERY) {
+        // Untargeted public index sampling; no creator-topic words are injected.
+        return ['site:tiktok.com/@ "tutorial"', 'site:tiktok.com/@ "creator" "followers"', 'site:tiktok.com/@ "review"', 'site:tiktok.com/@ "tips"', 'site:tiktok.com/@ "how to"', 'site:tiktok.com/@ "daily"'][variant] ?? 'site:tiktok.com/@';
+    }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
         .filter(Boolean)
@@ -80,7 +86,7 @@ export function handleFromUrl(raw) {
     } catch {
         return null;
     }
-    if (!TT_NAME.test(name)) return null;
+    if (!validHandle(name)) return null;
     const isVideo = segs[1] === 'video';
     return {
         handle: name.toLowerCase(),
@@ -92,7 +98,7 @@ export function handleFromUrl(raw) {
 // A result whose address has no account name can name it in the title: "Jane (@jane) | TikTok".
 export function handleFromTitle(text) {
     const m = String(text ?? '').match(/\(@([A-Za-z0-9._]{2,24})\)/);
-    return m ? m[1].toLowerCase() : null;
+    return m && validHandle(m[1]) ? m[1].toLowerCase() : null;
 }
 
 // Google prints a TikTok result's account as "TikTok · handle" above the snippet. A handle is lower case and followed by
@@ -110,7 +116,7 @@ export function handleFromSnippet(text) {
     ) {
         return null;
     }
-    return name;
+    return validHandle(name) ? name : null;
 }
 
 export function accountsInText(text) {
@@ -158,17 +164,6 @@ export function classifySearchPage({ title = '', text = '', anchors = [], exclud
         const url = unwrapSearchUrl(a.href);
         if (!url) continue;
         let found = handleFromUrl(url);
-        if (!found) {
-            let host = '';
-            try {
-                host = new URL(url).hostname.replace(/^(www|m|vm)\./, '');
-            } catch {
-                host = '';
-            }
-            const named =
-                host === SITE ? (handleFromTitle(a.text) ?? handleFromSnippet(`${a.text} ${a.container}`)) : null;
-            if (named) found = { handle: named, kind: 'post', videoId: null };
-        }
         if (found) resultLinks += 1;
         if (!found) continue;
         const snippet = String(a.container || a.text || '').slice(0, 300);
@@ -185,26 +180,6 @@ export function classifySearchPage({ title = '', text = '', anchors = [], exclud
                 ? `https://www.tiktok.com/@${found.handle}/video/${found.videoId}`
                 : null;
         hits.push({ ...found, url, videoUrl, snippet, hint: followerHint(a.container) });
-    }
-    const handled = new Set(hits.map((h) => h.handle));
-    for (const account of accountsInText(text)) {
-        // an account already taken from a link is not counted a second time
-        if (handled.has(account.handle) || skipped.has(account.handle)) continue;
-        if (mentionsExcluded(account.snippet, excludeWords)) {
-            excluded += 1;
-            continue;
-        }
-        handled.add(account.handle);
-        resultLinks += 1;
-        hits.push({
-            handle: account.handle,
-            kind: 'post',
-            videoId: null,
-            url: null,
-            videoUrl: null,
-            snippet: account.snippet,
-            hint: followerHint(account.snippet),
-        });
     }
     if (hits.length) return { status: 'ok', hits, excluded };
     if (excluded) return { status: 'all_excluded', hits: [], excluded };
@@ -285,9 +260,9 @@ export function parseSerpHtml(html) {
 }
 
 // Default page fetcher: one GET through the Google SERP proxy, one more try after a timeout. Replaced in tests.
-export async function fetchSerpPage({ url, proxyUrl, timeoutMs = 40_000 }) {
+export async function fetchSerpPage({ url, proxyUrl, timeoutMs = 12_000 }) {
     const get = () => gotScraping({ url, proxyUrl, timeout: { request: timeoutMs }, throwHttpErrors: false });
-    const response = await get().catch((err) => (/timeout/i.test(String(err?.message)) ? get() : Promise.reject(err)));
+    const response = await get(); // Never retry a timed-out paid search request.
     if (response.statusCode >= 400) throw new Error(`HTTP ${response.statusCode} from the search proxy`);
     return parseSerpHtml(response.body);
 }
@@ -303,6 +278,10 @@ export const braveUrl = (q, page) => `https://search.brave.com/search?q=${enc(q)
 
 export function buildBraveQuery({ keyword, variant = 0, modifiers = [] }) {
     const kw = String(keyword).trim();
+    if (kw === CRITERIA_QUERY) {
+        // No topical seed: a broad public index query, not an unbiased TikTok census.
+        return ['site:tiktok.com/@ "tutorial"', 'site:tiktok.com/@ "creator" "followers"', 'site:tiktok.com/@ "review"', 'site:tiktok.com/@ "tips"', 'site:tiktok.com/@ "how to"', 'site:tiktok.com/@ "daily"'][variant] ?? 'site:tiktok.com/@';
+    }
     const extra = (modifiers ?? [])
         .map((m) => String(m ?? '').trim())
         .filter(Boolean)
@@ -347,32 +326,30 @@ export function makeGate(paceMs) {
 }
 
 export function defaultEngines({ serpProxyUrl, serpFetch = fetchSerpPage, braveFetch = fetchBravePage } = {}) {
-    const engines = [
-        {
-            name: 'brave',
-            urlFor: braveUrl,
-            queryFor: buildBraveQuery,
-            fetch: ({ url }) => braveFetch({ url }),
-            paceMs: 5000,
-            backoffMs: 20_000,
-        },
-    ];
-    if (serpProxyUrl) {
-        engines.push({
-            name: 'google',
-            urlFor: googleUrl,
-            queryFor: buildQuery,
-            fetch: ({ url }) => serpFetch({ url, proxyUrl: serpProxyUrl }),
-            paceMs: 0,
-            backoffMs: 0,
-        });
-    }
+    // Brave has produced the strongest candidate pools; try it before the
+    // frequently empty/slow Google SERP proxy.
+    const engines = [{
+        name: 'brave',
+        urlFor: braveUrl,
+        queryFor: buildBraveQuery,
+        fetch: ({ url }) => braveFetch({ url }),
+        paceMs: 5000,
+        backoffMs: 0,
+    }];
+    if (serpProxyUrl) engines.push({
+        name: 'google',
+        urlFor: googleUrl,
+        queryFor: buildQuery,
+        fetch: ({ url, timeoutMs }) => serpFetch({ url, proxyUrl: serpProxyUrl, timeoutMs }),
+        paceMs: 0,
+        backoffMs: 0,
+    });
     return engines;
 }
 
-const PER_KEYWORD_TARGET = 30; // stop asking more wordings for a keyword once it has this many different handles
-const RATE_LIMIT_RETRIES = 2;
-const RATE_LIMITS_BEFORE_DROP = 2;
+const PER_KEYWORD_TARGET = 60; // stop asking more wordings for a keyword once it has this many different handles
+const RATE_LIMIT_RETRIES = 0; // avoid paid-runtime waste on an engine returning 429
+const RATE_LIMITS_BEFORE_DROP = 1;
 
 /**
  * Runs every keyword (hashtags are keywords written with a leading #). Returns { candidates, report }.
@@ -405,7 +382,7 @@ export async function discoverCreators({
                 name: 'google',
                 urlFor: googleUrl,
                 queryFor: buildQuery,
-                fetch: ({ url }) => serpFetch({ url, proxyUrl: serpProxyUrl }),
+                fetch: ({ url, timeoutMs }) => serpFetch({ url, proxyUrl: serpProxyUrl, timeoutMs }),
                 paceMs: 0,
                 backoffMs: 0,
                 needsProxy: true,
@@ -449,12 +426,22 @@ export async function discoverCreators({
             for (let attempt = 0; attempt <= RATE_LIMIT_RETRIES && timeLeft(); attempt += 1) {
                 try {
                     await engine.gate();
-                    page = await engine.fetch({ url: engine.urlFor(query, p) });
+                    const remainingMs = deadline - Date.now();
+                    if (remainingMs <= 0) break;
+                    let deadlineTimer;
+                    try {
+                        page = await Promise.race([
+                            engine.fetch({ url: engine.urlFor(query, p), timeoutMs: Math.min(12000, remainingMs) }),
+                            new Promise((_, reject) => { deadlineTimer = setTimeout(() => reject(new Error('search deadline exceeded')), remainingMs); }),
+                        ]);
+                    } finally {
+                        clearTimeout(deadlineTimer);
+                    }
                     break;
                 } catch (err) {
                     if (err?.rateLimited) {
                         outcome = 'rate_limited';
-                        detail = `${err.message}; waited ${engine.backoffMs / 1000} s and tried again`;
+                        detail = `${err.message}; retry policy: ${RATE_LIMIT_RETRIES} retry(ies)`;
                         if (attempt < RATE_LIMIT_RETRIES) {
                             await sleep(engine.backoffMs);
                             continue;
@@ -490,8 +477,10 @@ export async function discoverCreators({
 
     async function runKeyword(entry) {
         for (const engine of engines) {
-            if (handlesFor(entry.keyword)) return; // an earlier engine found creators for this keyword
-            for (let variant = 0; variant < QUERY_VARIANTS && timeLeft() && !engine.blocked; variant += 1) {
+            // Avoid Brave's rate-limit path when Google already produced verifiable candidates.
+            if (entry.keyword === CRITERIA_QUERY && engine.name === 'brave' && handlesFor(entry.keyword) > 0) return;
+            if (handlesFor(entry.keyword) >= (entry.keyword === CRITERIA_QUERY ? PER_KEYWORD_TARGET : 15)) return;
+            for (let variant = 0; variant < (entry.keyword === CRITERIA_QUERY ? QUERY_VARIANTS : 3) && timeLeft() && !engine.blocked; variant += 1) {
                 const query = engine.queryFor({ keyword: entry.keyword, variant, modifiers });
                 const startedMs = Date.now();
                 const { got, outcome, detail } = await ask(engine, entry.keyword, query);
@@ -513,7 +502,7 @@ export async function discoverCreators({
                 }
                 if (outcome === 'unavailable') break;
                 if (got) entry.hits += got;
-                if (handlesFor(entry.keyword) >= PER_KEYWORD_TARGET) return;
+                if (handlesFor(entry.keyword) >= (entry.keyword === CRITERIA_QUERY ? PER_KEYWORD_TARGET : 30)) return;
             }
         }
     }

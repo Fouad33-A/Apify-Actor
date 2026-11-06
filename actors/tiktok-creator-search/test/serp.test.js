@@ -6,6 +6,7 @@ import {
     buildBraveQuery,
     buildQuery,
     classifySearchPage,
+    CRITERIA_QUERY,
     discoverCreators,
     followerHint,
     handleFromSnippet,
@@ -31,6 +32,21 @@ describe('buildQuery', () => {
     });
 });
 
+describe('criteria-only discovery queries', () => {
+    it('keeps six topic-neutral variants consistent across Google and Brave', () => {
+        const expected = [
+            'site:tiktok.com/@ "tutorial"',
+            'site:tiktok.com/@ "creator" "followers"',
+            'site:tiktok.com/@ "review"',
+            'site:tiktok.com/@ "tips"',
+            'site:tiktok.com/@ "how to"',
+            'site:tiktok.com/@ "daily"',
+        ];
+        expect(Array.from({ length: 6 }, (_, variant) => buildQuery({ keyword: CRITERIA_QUERY, variant }))).toEqual(expected);
+        expect(Array.from({ length: 6 }, (_, variant) => buildBraveQuery({ keyword: CRITERIA_QUERY, variant }))).toEqual(expected);
+    });
+});
+
 describe('addresses and names', () => {
     it('reads a profile and a video address', () => {
         expect(handleFromUrl('https://www.tiktok.com/@Jane.Doe')).toEqual({
@@ -45,6 +61,11 @@ describe('addresses and names', () => {
         });
         expect(handleFromUrl('https://www.tiktok.com/tag/budgeting')).toBeNull();
         expect(handleFromUrl('https://www.instagram.com/jane')).toBeNull();
+        for (const invalid of ['..........tiktok.com19', '..._______________..._', '.tikk', '._______...____', '...___']) {
+            expect(handleFromUrl(`https://www.tiktok.com/@${invalid}`)).toBeNull();
+            expect(handleFromTitle(`Account (@${invalid}) | TikTok`)).toBeNull();
+        }
+        expect(handleFromUrl('https://www.tiktok.com/@real.creator_19')?.handle).toBe('real.creator_19');
     });
     it('unwraps Google redirects, also with an empty q', () => {
         expect(unwrapSearchUrl('https://www.google.com/url?q=https://www.tiktok.com/@jane&sa=U')).toBe(
@@ -103,6 +124,16 @@ describe('parseSerpHtml + classifySearchPage', () => {
         expect(res.hits[1].videoUrl).toBe('https://www.tiktok.com/@beta/video/7600000000000000002');
         expect(res.excluded).toBe(1);
     });
+    it('rejects snippet-only identities and malformed TikTok URLs', () => {
+        const parsed = parseSerpHtml(page([
+            resultBlock({ href: 'https://www.tiktok.com/tag/example', title: 'Unknown', line: 'TikTok · .tikk 9K followers' }),
+            resultBlock({ href: 'https://www.tiktok.com/@..........tiktok.com19', title: 'Unknown', line: 'TikTok · .... 9K followers' }),
+            resultBlock({ href: 'https://www.tiktok.com/@real_account', title: 'Real', line: 'TikTok · real_account 9K followers' }),
+        ]) + '<p>TikTok · text_only 5K likes</p>');
+        const result = classifySearchPage(parsed);
+        expect(result.hits.map((h) => h.handle)).toEqual(['real_account']);
+    });
+
     it('recognises a bot check, no results, and a page without TikTok results', () => {
         expect(
             classifySearchPage({
@@ -121,7 +152,7 @@ describe('parseSerpHtml + classifySearchPage', () => {
             '<html><head><title>t</title></head><body><script>var u="https:\\/\\/www.tiktok.com\\/@hidden_one";</script><p>TikTok · text_only 5K likes</p></body></html>';
         const parsed = parseSerpHtml(src.replace(/\\\//g, '/'));
         const res = classifySearchPage({ ...parsed });
-        expect(res.hits.map((h) => h.handle).sort()).toEqual(['hidden_one', 'text_only']);
+        expect(res.hits.map((h) => h.handle).sort()).toEqual(['hidden_one']);
     });
 });
 
@@ -258,7 +289,7 @@ describe('Brave Search engine', () => {
         expect(report.queries[0].attempts).toMatchObject([{ engine: 'brave', status: 'ok', results: 32 }]);
     });
 
-    it('waits out a 429 and retries the same page', async () => {
+    it('fails fast on a Brave 429 rather than waiting for retries', async () => {
         let calls = 0;
         const braveFetch = async () => {
             calls += 1;
@@ -270,9 +301,9 @@ describe('Brave Search engine', () => {
             engines: [fast({ braveFetch })],
             maxPages: 1,
         });
-        expect(calls).toBeGreaterThanOrEqual(2);
-        expect(candidates.map((c) => c.handle).sort()).toEqual(['one', 'two']);
-        expect(report.queries[0].attempts[0].status).toBe('ok');
+        expect(calls).toBe(1);
+        expect(candidates).toEqual([]);
+        expect(report.queries[0].attempts[0].status).toBe('rate_limited');
     });
 
     it('drops Brave after repeated limits and falls back to Google', async () => {
@@ -294,10 +325,7 @@ describe('Brave Search engine', () => {
         expect(report.blocked).toBe(false);
         const engineOf = (kw) => report.queries.find((q) => q.keyword === kw).attempts.map((x) => x.engine);
         expect(engineOf('a')).toContain('google');
-        expect(
-            report.queries.flatMap((q) => q.attempts).filter((x) => x.engine === 'brave' && x.status === 'rate_limited')
-                .length,
-        ).toBeGreaterThanOrEqual(2);
+        expect(report.queries.flatMap((q) => q.attempts).filter((x) => x.engine === 'brave' && x.status === 'rate_limited').length).toBeGreaterThanOrEqual(1);
     });
 
     it('reports the run as blocked when every engine is limited', async () => {
@@ -322,6 +350,6 @@ describe('Brave Search engine', () => {
 
     it('uses Google only when a proxy exists', () => {
         expect(defaultEngines({}).map((e) => e.name)).toEqual(['brave']);
-        expect(defaultEngines({ serpProxyUrl: 'http://x' }).map((e) => e.name)).toEqual(['brave', 'google']);
+        expect(defaultEngines({ serpProxyUrl: 'http://x' }).map((e) => e.name)).toEqual(['google', 'brave']);
     });
 });

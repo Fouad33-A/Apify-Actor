@@ -1,0 +1,55 @@
+{
+  "title": "TikTok Master Pipeline",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "maxCreators": {
+      "title": "Maximum qualifying creators",
+      "type": "integer",
+      "editor": "number",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Maximum number of qualifying creators to process. Default five for pilot."
+    },
+    "maxCommentsPerPost": {
+      "title": "Comments per video",
+      "type": "integer",
+      "editor": "number",
+      "default": 100,
+      "minimum": 1,
+      "maximum": 1000,
+      "description": "Maximum top-level comments to request per selected video."
+    },
+    "childTimeoutSecs": {
+      "title": "Timeout per child Actor (seconds)",
+      "type": "integer",
+      "editor": "number",
+      "default": 900,
+      "minimum": 60,
+      "maximum": 3600,
+      "description": "Maximum time to wait for each child Actor run in seconds."
+    },
+    "keywords": {
+      "title": "Search keywords",
+      "type": "array",
+      "description": "Optional keywords passed to Creator Search.",
+      "editor": "stringList"
+    },
+    "hashtags": {
+      "title": "Search hashtags",
+      "type": "array",
+      "description": "Optional hashtags passed to Creator Search.",
+      "editor": "stringList"
+    },
+    "maxVideosPerCreator": {
+      "title": "Videos per qualifying creator",
+      "type": "integer",
+      "editor": "number",
+      "default": 10,
+      "minimum": 2,
+      "maximum": 10,
+      "description": "Analyze up to this many valid recent videos per qualified creator for repeated questions; TikTok public embed currently supports at most 10."
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "tiktok-profile-video-stats",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start:prod": "node dist/main.js"
+  },
+  "dependencies": {
+    "apify": "^3.7.2",
+    "crawlee": "^3.16.0",
+    "got-scraping": "^4.0.0",
+    "tough-cookie": "^5.1.2",
+    "playwright": "^1.56.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "@types/tough-cookie": "^4.0.5"
+  }
+}
