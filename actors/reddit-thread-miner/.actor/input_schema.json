@@ -8,15 +8,24 @@
             "type": "array",
             "description": "Subreddit names, for example igcse, SAT, APStudents, IBO, alevel. A leading r/ is fine.",
             "editor": "stringList",
-            "default": ["igcse"],
-            "prefill": ["igcse", "SAT"]
+            "default": [
+                "igcse"
+            ],
+            "prefill": [
+                "igcse",
+                "SAT"
+            ]
         },
         "keywords": {
             "title": "Keywords",
             "type": "array",
             "description": "Optional. Only threads matching one of these words inside each subreddit are read (Reddit's own subreddit search). Leave empty to read the newest threads.",
             "editor": "stringList",
-            "prefill": ["worth it", "free", "expensive"]
+            "prefill": [
+                "worth it",
+                "free",
+                "expensive"
+            ]
         },
         "dateFrom": {
             "title": "From date",
@@ -109,7 +118,36 @@
             "type": "object",
             "description": "Optional. Reddit sometimes refuses feeds to servers in data centres. If you have a proxy plan you may select it here; the Actor does not try to get around a refusal otherwise.",
             "editor": "proxy"
+        },
+        "sinceDate": {
+            "title": "Since date (inclusive)",
+            "type": "string",
+            "description": "Only threads on or after YYYY-MM-DD. Undated search results are excluded.",
+            "editor": "textfield"
+        },
+        "maxItems": {
+            "title": "Maximum output rows",
+            "type": "integer",
+            "description": "Upper bound on dataset rows, including status rows.",
+            "editor": "number",
+            "default": 200,
+            "minimum": 1
+        },
+        "maxTotalChargeUsd": {
+            "title": "Maximum charge USD (advisory)",
+            "type": "number",
+            "description": "Requested budget; this Actor cannot yet enforce a hard USD limit. Set a run-level budget externally.",
+            "editor": "number",
+            "minimum": 0.01
+        },
+        "runLabel": {
+            "title": "Run label",
+            "type": "string",
+            "description": "Label echoed in every output row and SUMMARY.",
+            "editor": "textfield"
         }
     },
-    "required": ["subreddits"]
+    "required": [
+        "subreddits"
+    ]
 }
