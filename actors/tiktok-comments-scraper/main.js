@@ -4,9 +4,9 @@ import { CookieJar } from 'tough-cookie';
 
 await Actor.init();
 
-const VERSION = '2026-11-05-v5.2';
+const VERSION = '2026-11-06-v5.3';
 const input = (await Actor.getInput()) ?? {};
-const ALLOWED_KEYS = new Set(['postUrls', 'videoUrls', 'maxCommentsPerPost', 'includeReplies', 'minAskers', 'minVideos', 'languages', 'creatorVideos']);
+const ALLOWED_KEYS = new Set(['postUrls', 'videoUrls', 'maxCommentsPerPost', 'includeReplies', 'minAskers', 'minVideos', 'languages', 'creatorVideos', 'questionAnalysis']);
 const unknownKeys = Object.keys(input).filter((key) => !ALLOWED_KEYS.has(key));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,7 +21,7 @@ function normalizeInputUrl(item) {
 
 function collectUrls() {
     if (unknownKeys.length) {
-        throw new Error(`Unknown input field(s): ${unknownKeys.join(', ')}. Supported fields: postUrls, videoUrls, maxCommentsPerPost, includeReplies, minAskers, minVideos, languages, creatorVideos.`);
+        throw new Error(`Unknown input field(s): ${unknownKeys.join(', ')}. Supported fields: postUrls, videoUrls, maxCommentsPerPost, includeReplies, minAskers, minVideos, languages, creatorVideos, questionAnalysis.`);
     }
 
     const rawPostUrls = input.postUrls === undefined ? [] : input.postUrls;
@@ -68,6 +68,7 @@ function collectUrls() {
     return deduped;
 }
 
+const questionAnalysis = input.questionAnalysis === true;
 const minAskers = Math.max(3, Math.floor(Number(input.minAskers) || 3));
 const minVideos = Math.max(2, Math.floor(Number(input.minVideos) || 2));
 const allowedLanguages = Array.isArray(input.languages) ? input.languages.map(x => String(x).toLowerCase()) : [];
@@ -351,7 +352,7 @@ async function scrapeVideo(inputUrl, questionRows) {
             if (seenCommentIds.has(comment.commentId)) { duplicatesThisPage++; continue; }
             seenCommentIds.add(comment.commentId);
 
-            if (comment.isQuestion && (!allowedLanguages.length || allowedLanguages.includes(comment.language))) {
+            if (questionAnalysis && comment.isQuestion && (!allowedLanguages.length || allowedLanguages.includes(comment.language))) {
                 questionRows.push({ commentText: comment.commentText, username: comment.username, userId: comment.userId, videoId, videoUrl: finalUrl, creator: explicitCreatorByVideo.get(videoId) ?? creatorFromVideoUrl(finalUrl) ?? creatorFromVideoUrl(inputUrl) });
             }
 
@@ -421,7 +422,7 @@ try {
         }
     }
 
-    const repeatedQuestions = buildRepeatedQuestions(questionRows, minAskers, minVideos);
+    const repeatedQuestions = questionAnalysis ? buildRepeatedQuestions(questionRows, minAskers, minVideos) : [];
     log.info(`[QUESTION SCREEN] ${repeatedQuestions.length} clusters met ${minAskers} distinct askers on ${minVideos} distinct videos.`);
     for (const cluster of repeatedQuestions) await Actor.pushData(cluster);
 
@@ -445,7 +446,8 @@ try {
             fetched: false,
             note: 'Reply threads are not fetched by this anonymous public-source build. isReply is therefore false for saved rows; replyCount is included when TikTok exposes it on a top-level comment.',
         },
-        questionsDetected: questionRows.length,
+        questionAnalysisEnabled: questionAnalysis,
+        questionsDetected: questionAnalysis ? questionRows.length : null,
         repeatedQuestionCount: repeatedQuestions.length,
         repeatedQuestionRows: repeatedQuestions.map(({creator, questionText, askerCount, videoCount}) => ({creator, questionText, askerCount, videoCount})),
         videoResults,
