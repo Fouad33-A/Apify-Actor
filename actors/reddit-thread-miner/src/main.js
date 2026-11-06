@@ -123,7 +123,7 @@ export async function run({
             if (halted?.status === 'blocked' || halted?.status === 'not_found') break;
         }
 
-        if (!threads.size && halted?.status === 'blocked' && !shouldStop()) {
+        if (!threads.size && ['blocked', 'rate_limited'].includes(halted?.status) && !shouldStop()) {
             sourceMode = 'public_search';
             totals.searchFallbacks += 1;
             const fallback = await discover({
@@ -224,11 +224,12 @@ export async function run({
 
         totals.comments += commentsRead;
         if (halted?.status === 'blocked' && !threads.size) totals.blocked += 1;
-        const status = threads.size ? 'ok' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_threads';
-        if (!threads.size && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status: status === 'blocked' ? 'blocked' : 'no_data', reason: halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
+        const fallbackRateLimited = problems.some((p) => p.source === 'public_search' && p.status === 429);
+        const status = threads.size ? 'ok' : fallbackRateLimited ? 'rate_limited' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_data';
+        if (!threads.size && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status, reason: fallbackRateLimited ? 'Public search fallback rate-limited (HTTP 429)' : halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
         await emit({
             recordType: 'subreddit', subreddit: sub, status,
-            statusDetail: status === 'ok' || status === 'no_threads' ? null : (halted?.detail ?? problems[0]?.detail ?? null),
+            statusDetail: status === 'ok' || status === 'no_data' ? null : (halted?.detail ?? problems[0]?.detail ?? null),
             sourceMode, threadsRead: threads.size, threadsWithComments: withComments, commentsRead,
             themeCounts, competitorCounts, problems, scrapedAt: stamp(),
         });
