@@ -101,6 +101,12 @@
       "type": "boolean",
       "description": "Optional heuristic recurring-question analysis. Disabled by default; raw comments and run summary are always saved. Prefer Claude for semantic analysis.",
       "default": false
+    },
+    "runLabel": {
+      "title": "Run label",
+      "type": "string",
+      "editor": "textfield",
+      "description": "Optional label echoed in comment rows and SUMMARY."
     }
   }
 }
