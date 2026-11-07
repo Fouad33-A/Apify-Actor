@@ -128,3 +128,25 @@ describe('Arctic Shift post discovery', () => {
         expect(result.rateLimited).toBe(true);
     });
 });
+
+describe('Arctic Shift 422 recovery', () => {
+    it('captures the server detail and retries once with smaller limit without changing dates', async () => {
+        const urls = [];
+        const result = await discoverArcticThreads({
+            subreddit: 'igcse', keywords: ['past papers'], maxThreads: 40,
+            dateFromMs: Date.parse('2025-01-01'),
+            fetch: async (url) => {
+                urls.push(new URL(url));
+                return urls.length === 1
+                    ? { status: 422, body: JSON.stringify({ detail: 'Query timed out' }) }
+                    : { status: 200, body: JSON.stringify({ data: [{ id: 'abc', subreddit: 'igcse', title: 'Past papers', created_utc: 1760000000, score: 5 }] }) };
+            },
+        });
+        expect(urls).toHaveLength(2);
+        expect(urls[0].searchParams.get('limit')).toBe('40');
+        expect(urls[1].searchParams.get('limit')).toBe('10');
+        expect(urls[1].searchParams.get('after')).toBe('2025-01-01');
+        expect(result.attempts[0].detail).toBe('Query timed out');
+        expect(result.threads).toHaveLength(1);
+    });
+});
