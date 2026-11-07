@@ -2,7 +2,12 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-03-v2.13';
+const VERSION = '2026-11-03-v2.13-marketing';
+const dateCutoff = (value) => {
+    if (value == null || value === '') return null;
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
+    return Date.parse(value);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const now = () => new Date().toISOString();
 
@@ -90,7 +95,7 @@ async function requestJson(client, url, headers) {
     } catch (e) { return { error: String(e?.message ?? e).slice(0, 220) }; }
 }
 
-async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl) {
+async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs = null) {
     const jar = new CookieJar();
     const client = gotScraping.extend({
         cookieJar: jar, proxyUrl: pUrl || undefined,
@@ -98,11 +103,13 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl) {
         headerGeneratorOptions: { browsers: [{ name: 'chrome', minVersion: 130 }], devices: ['desktop'], locales: ['en-US'] },
     });
     const rows = new Map();
+    let dateExcluded = 0;
     const diag = { bootstrap: null, ssrRows: 0, contracts: [] };
     const add = (list) => {
         for (const r of list) {
             if (!includeReplies && r.isReply) continue;
             if (Number(r.likes ?? 0) < minLikes) continue;
+            if (sinceMs != null && r.createdAt && !Number.isNaN(Date.parse(r.createdAt)) && Date.parse(r.createdAt) < sinceMs) { dateExcluded++; continue; }
             const k = r.commentId || `${r.commenterHandle}|${r.commentText}`;
             if (!rows.has(k) && rows.size < cap) rows.set(k, r);
         }
@@ -150,14 +157,14 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl) {
         }
         diag.contracts.push(cd);
     }
-    return { rows: [...rows.values()].slice(0, cap), diag };
+    return { rows: [...rows.values()].slice(0, cap), diag, dateExcluded };
 }
 
 await Actor.init();
 const started = Date.now();
 try {
     const input = await Actor.getInput() || {};
-    const allowed = new Set(['postUrls','maxCommentsPerPost','includeReplies','minLikes','maxItems','maxVideosPerCreator','useResidentialProxy']);
+    const allowed = new Set(['postUrls','maxCommentsPerPost','includeReplies','minLikes','maxItems','maxVideosPerCreator','useResidentialProxy','runLabel','sinceDate']);
     const unknown = Object.keys(input).filter((k) => !allowed.has(k));
     if (unknown.length) throw new Error(`Unknown input field(s): ${unknown.join(', ')}`);
     if (!Array.isArray(input.postUrls) || !input.postUrls.length) throw new Error('postUrls is required and must be a non-empty array.');
@@ -167,8 +174,10 @@ try {
     const minLikes = Math.max(0, Number(input.minLikes ?? 0));
     const includeReplies = Boolean(input.includeReplies ?? false);
     const useResidentialProxy = Boolean(input.useResidentialProxy ?? true);
+    const runLabel = input.runLabel == null ? null : String(input.runLabel);
+    const sinceMs = dateCutoff(input.sinceDate);
     const urls = [...new Set(input.postUrls.map(normalizeUrl).filter(Boolean))];
-    let skipped = input.postUrls.length - urls.length, returned = 0;
+    let skipped = input.postUrls.length - urls.length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0;
     const errors = [];
     const pUrl = await proxyUrl(useResidentialProxy);
     log.info(`[${VERSION}] browserless got-scraping persistent-session candidate. login=false externalProvider=false proxy=${Boolean(pUrl)}`);
@@ -179,18 +188,28 @@ try {
         processed++;
         const amount = Math.min(maxPer, maxItems - returned);
         try {
-            const { rows, diag } = await scrapePost(postUrl, amount, minLikes, includeReplies, pUrl);
-            for (const row of rows) { await Actor.pushData(row); returned++; }
-            if (!rows.length) errors.push({ url: postUrl, reason: `No public comments returned. diag=${JSON.stringify(diag).slice(0, 4000)}` });
+            const { rows, diag, dateExcluded: excluded } = await scrapePost(postUrl, amount, minLikes, includeReplies, pUrl, sinceMs);
+            dateExcluded += excluded;
+            for (const row of rows) { await Actor.pushData({ ...row, recordType: 'comment', status: 'ok', sourceUrl: postUrl, runLabel, text: row.commentText, author: row.commenterHandle }); returned++; }
+            if (rows.length) postsWithComments++;
+            if (!rows.length) {
+                errors.push({ url: postUrl, reason: `No public comments returned. diag=${JSON.stringify(diag).slice(0, 4000)}` });
+                if (returned < maxItems) { await Actor.pushData({ recordType: 'no_data', status: 'no_data', postUrl, sourceUrl: postUrl, runLabel, scrapedAt: now(), reason: excluded > 0 ? 'no_matching_comments' : 'no_public_comments' }); returned++; noData++; }
+            }
             log.info(`[POST] returned=${rows.length} requestedCap=${amount} diag=${JSON.stringify(diag)}`);
         } catch (e) {
             const reason = String(e?.message ?? e).slice(0, 3000);
             errors.push({ url: postUrl, reason }); log.warning(`[POST ERROR] ${postUrl} ${reason}`);
+            if (returned < maxItems) { await Actor.pushData({ recordType: 'no_data', status: 'error', postUrl, sourceUrl: postUrl, runLabel, scrapedAt: now(), reason: 'request_failed' }); returned++; noData++; }
         }
     }
     await Actor.setValue('errors', errors);
     const summary = {
         version: VERSION, itemsRequested: input.postUrls.length, returned, skipped, errors: errors.length,
+        status: errors.some(e => !e.reason.startsWith('No public comments returned')) || returned >= maxItems && processed < urls.length ? 'partial' : 'completed',
+        stoppedBecause: returned >= maxItems && processed < urls.length ? 'maxItems' : 'completed',
+        itemsEmitted: returned, noData, dateExcluded, postsWithComments, runLabel, sinceDate: input.sinceDate ?? null,
+        exactInput: { ...input, maxItems, maxCommentsPerPost: maxPer, maxVideosPerCreator: maxVPC },
         seconds: Number(((Date.now() - started) / 1000).toFixed(2)), publicDataOnly: true, loginUsed: false,
         externalProviderUsed: false, source: 'instagram_public_got_scraping_v213', residentialProxyRequested: useResidentialProxy,
         residentialProxyUsed: Boolean(pUrl), includeRepliesRequested: includeReplies,
