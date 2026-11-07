@@ -145,6 +145,30 @@
             "type": "string",
             "description": "Label echoed in every output row and SUMMARY.",
             "editor": "textfield"
+        },
+        "maxThreads": {
+            "title": "Maximum thread records",
+            "type": "integer",
+            "description": "Global maximum number of thread records across subreddits.",
+            "editor": "number",
+            "default": 200,
+            "minimum": 1
+        },
+        "topCommentsPerThread": {
+            "title": "Top comments per thread",
+            "type": "integer",
+            "description": "Alias for maxCommentsPerThread; archived comments ranked by archived score.",
+            "editor": "number",
+            "default": 10,
+            "minimum": 0,
+            "maximum": 100
+        },
+        "minScore": {
+            "title": "Minimum thread score",
+            "type": "integer",
+            "description": "Exclude threads below this score. Threads without verifiable score are also excluded when set.",
+            "editor": "number",
+            "minimum": 0
         }
     },
     "required": [
