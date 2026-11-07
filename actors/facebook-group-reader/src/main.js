@@ -123,6 +123,9 @@ export async function run({
         if (input.maxItems != null && emitted >= input.maxItems) return false;
         await pushData({ ...row, sourceUrl: row.sourceUrl ?? row.url ?? row.groupUrl ?? row.input ?? null, runLabel: input.runLabel ?? null });
         emitted++;
+        if (row.recordType === 'post') totals.posts++;
+        if (row.recordType === 'group') totals.groupRows++;
+        if (row.recordType === 'no_data') totals.noData++;
         return true;
     };
     const exhausted = () => input.maxItems != null && emitted >= input.maxItems;
@@ -197,6 +200,7 @@ export async function run({
         }
 
         const discoveredBeforeDate = posts.length;
+        const groupVerified = Boolean(bestMeta.name && bestMeta.name !== 'Facebook') || bestMeta.privacy != null || bestMeta.description != null || discoveredBeforeDate > 0;
         if (input.sinceMs != null) {
             posts = posts.filter((post) => post.createdAt && Date.parse(post.createdAt) >= input.sinceMs);
         }
@@ -228,7 +232,6 @@ export async function run({
                     scrapedAt: stamp(),
                 });
             }
-            totals.posts += Math.min(posts.length, Math.max(0, emitted));
             totals.ok++;
         } else {
             let diagnosticKey = null;
@@ -253,6 +256,8 @@ export async function run({
                         : lastError
                             ? 'http_error'
                             : 'no_posts_visible',
+                verificationStatus: groupVerified ? 'verified_public_metadata' : 'unverified',
+                noDataReason: input.sinceMs != null && discoveredBeforeDate > 0 ? 'no_matching_posts' : !groupVerified ? 'group_unverified' : 'no_posts_exposed',
                 statusDetail: sawLoginWall
                     ? 'Facebook redirected the anonymous public feed to login.'
                     : lastError?.message ?? (input.sinceMs != null && discoveredBeforeDate > 0 ? `No posts matched sinceDate ${input.sinceDate}; ${discoveredBeforeDate} older post(s) excluded.` : 'No parseable public posts were exposed.'),
@@ -267,6 +272,9 @@ export async function run({
     }
 
     if (shouldStop()) { totals.status = 'partial'; totals.stopReason = 'stopped'; }
+    if (totals.posts === 0 && !exhausted()) {
+        await emit({ recordType: 'no_data', status: 'no_data', sourceUrl: input.groups[0]?.url ?? null, scrapedAt: stamp(), reason: totals.groupRows ? 'No matching accessible public posts returned; inspect group statuses and diagnostics.' : 'No public group rows returned.' });
+    }
     totals.itemsEmitted = emitted;
     return {
         ...totals,
@@ -298,20 +306,21 @@ async function main() {
             + 'Facebook authentication is not used.',
         );
 
-        const proxyByAttempt = new Map();
-        const proxyForAttempt = async (attempt) => {
-            if (!proxyByAttempt.has(attempt)) {
+        const proxyByGroupAttempt = new Map();
+        const proxyForGroupAttempt = async (url, attempt) => {
+            const key = `${url}::${attempt}`;
+            if (!proxyByGroupAttempt.has(key)) {
                 const sessionId = `fb_public_${Date.now()}_${attempt}_${Math.random().toString(36).slice(2, 9)}`;
-                proxyByAttempt.set(attempt, await proxy.newUrl(sessionId));
+                proxyByGroupAttempt.set(key, await proxy.newUrl(sessionId));
             }
-            return proxyByAttempt.get(attempt);
+            return proxyByGroupAttempt.get(key);
         };
 
         const summary = await run({
             input,
             pushData: (record) => Actor.pushData(record),
             fetchAttempt: async (url, attempt) => fetchGroup(url, {
-                proxyUrl: await proxyForAttempt(attempt),
+                proxyUrl: await proxyForGroupAttempt(url, attempt),
             }),
             saveDiagnostic: async (group, response, label) => {
                 const suffix = String(label).replace(/[^A-Za-z0-9_-]/g, '_').toUpperCase();
