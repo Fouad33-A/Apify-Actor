@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readInput, run } from '../src/main.js';
+import { discoverRedditThreads } from '../src/search.js';
 
 const thread = (id, updated) => ({ id: `t3_${id}`, title: 'Test discussion', text: 'exam help', url: `https://www.reddit.com/r/igcse/comments/${id}/test`, author: null, updated, matchedKeywords: ['exam'] });
 const blocked = async () => ({ status: 403, body: 'Forbidden' });
@@ -25,5 +26,18 @@ describe('public-search date and status handling', () => {
         const { rows } = await execute({ sinceDate: '2026-10-01', fallbackThreads: [], fallbackStatus: 429 });
         expect(rows.find((r) => r.recordType === 'no_data').status).toBe('rate_limited');
         expect(rows.find((r) => r.recordType === 'subreddit').status).toBe('rate_limited');
+    });
+});
+
+describe('search discovery filters before limiting', () => {
+    it('does not let old search hits displace newer matching threads', async () => {
+        const html = (id, date) => `<div><a href="https://www.reddit.com/r/igcse/comments/${id}/sample">Exam discussion</a><span>${date}</span></div>`;
+        const body = html('old123', 'January 25, 2025') + html('new123', 'October 20, 2026');
+        const result = await discoverRedditThreads({
+            subreddit: 'igcse', keywords: ['exam'], maxThreads: 1, maxPages: 1,
+            dateFromMs: Date.parse('2026-10-01'), paceMs: 0,
+            fetch: async () => ({ status: 200, body }),
+        });
+        expect(result.threads.map((r) => r.id)).toEqual(['t3_new123']);
     });
 });
