@@ -102,7 +102,11 @@ export async function run({
         }) : { urls: [], handles: [], attempts: [], sourceResults: [], discoveryStatus: 'provided_only' };
         // recent videos with the hashtag from the creators the search found (TikTok's public creator embed)
         const embed = { creatorsRead: 0, rateLimited: 0, videosFound: 0 };
-        const byId = new Map([...input.videoUrls, ...found.urls].map((u) => [u.split('/video/')[1], u]));
+        const byId = new Map();
+        for (const u of [...input.videoUrls, ...found.urls]) {
+            const id = u.split('/video/')[1];
+            if (!byId.has(id)) byId.set(id, u);
+        }
         for (const handle of [...new Set([...input.creatorHandles, ...(found.handles ?? [])])].slice(0, input.maxCreatorsToRead)) {
             if (shouldStop()) break;
             let res;
