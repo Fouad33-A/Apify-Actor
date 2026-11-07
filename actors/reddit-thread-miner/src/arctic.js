@@ -10,6 +10,10 @@ export function redditThreadId(value) {
 
 
 const POSTS_API = 'https://arctic-shift.photon-reddit.com/api/posts/search';
+const errorDetail = (body) => {
+    try { const data = JSON.parse(String(body ?? '')); return String(data.detail ?? data.message ?? data.error ?? '').slice(0, 400); }
+    catch { return String(body ?? '').replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 400); }
+};
 
 export async function discoverArcticThreads({
     subreddit, keywords = [], maxThreads = 100, dateFromMs = null, dateToMs = null,
@@ -30,7 +34,21 @@ export async function discoverArcticThreads({
         let res;
         try { res = await fetch(`${POSTS_API}?${params}`); }
         catch (error) { attempts.push({ keyword, status: 'error', detail: String(error?.message ?? error) }); continue; }
-        attempts.push({ keyword, status: res.status });
+        attempts.push({ keyword, status: res.status, ...(res.status !== 200 ? { detail: errorDetail(res.body) } : {}) });
+        if (res.status === 429) { rateLimited = true; break; }
+        if (res.status === 422 && !shouldStop()) {
+            // One bounded retry with a smaller page. Preserve date filters; never silently narrow the user's requested range.
+            params.set('limit', String(Math.min(10, Number(params.get('limit')))));
+            if (beforeRequest()) {
+                try {
+                    res = await fetch(`${POSTS_API}?${params}`);
+                    attempts.push({ keyword, status: res.status, retry: 'smaller_limit', ...(res.status !== 200 ? { detail: errorDetail(res.body) } : {}) });
+                } catch (error) {
+                    attempts.push({ keyword, status: 'error', retry: 'smaller_limit', detail: String(error?.message ?? error) });
+                    continue;
+                }
+            } else break;
+        }
         if (res.status === 429) { rateLimited = true; break; }
         if (res.status !== 200) continue;
         let parsed;
