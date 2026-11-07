@@ -36,6 +36,7 @@ export function readInput(raw) {
     ];
     if (!hashtags.length) throw new Error('Give at least one hashtag in "hashtags" (with or without #).');
     if (input.runLabel != null && typeof input.runLabel !== 'string') throw new Error('runLabel must be a string.');
+    if (input.maxItems != null && (!Number.isInteger(input.maxItems) || input.maxItems < 1)) throw new Error('maxItems must be a positive whole number.');
     for (const k of ['maxVideosPerHashtag', 'recentDays', 'maxSearchPages'])
         if (!Number.isInteger(input[k]) || input[k] < 1)
             throw new Error(`Input "${k}" must be a whole number of 1 or more.`);
@@ -87,9 +88,15 @@ export async function run({
     shouldStop = () => false,
     now = () => Date.now(),
 }) {
-    const totals = { hashtags: 0, videosKept: 0 };
+    const totals = { hashtags: 0, videosKept: 0, maxItems: input.maxItems ?? null, stopReason: null, hashtagsSkippedByLimit: 0 };
     for (const tag of input.hashtags) {
         if (shouldStop()) break;
+        if (input.maxItems != null && totals.videosKept >= input.maxItems) {
+            totals.stopReason = 'max_items_reached';
+            totals.hashtagsSkippedByLimit = input.hashtags.length - totals.hashtags;
+            break;
+        }
+        const remainingGlobal = input.maxItems == null ? Infinity : input.maxItems - totals.videosKept;
         totals.hashtags += 1;
         const found = input.searchDiscovery ? await search({
             tag,
@@ -147,7 +154,7 @@ export async function run({
         const worker = async () => {
             for (
                 let url = queue.shift();
-                url && kept.length < input.maxVideosPerHashtag && !shouldStop();
+                url && kept.length < Math.min(input.maxVideosPerHashtag, remainingGlobal) && !shouldStop();
                 url = queue.shift()
             ) {
                 let parsed;
@@ -169,7 +176,7 @@ export async function run({
                         now: now(),
                     });
                     if (why) dropped[why] += 1;
-                    else if (kept.length < input.maxVideosPerHashtag) kept.push({ ...parsed.video, url });
+                    else if (kept.length < Math.min(input.maxVideosPerHashtag, remainingGlobal)) kept.push({ ...parsed.video, url });
                 }
                 if (input.delayBetweenVideosMs) await sleep(input.delayBetweenVideosMs);
             }
@@ -179,6 +186,7 @@ export async function run({
         if (input.includeVideos)
             for (const v of kept) await pushData({ recordType: 'video', hashtag: tag, status: 'ok', ...v, scrapedAt, runLabel: input.runLabel ?? null, sourceUrl: v.url ?? null });
         totals.videosKept += kept.length;
+        if (input.maxItems != null && totals.videosKept >= input.maxItems) totals.stopReason = 'max_items_reached';
         const stats = summariseVideos(kept);
         const status =
             !kept.length && found.discoveryStatus === 'rate_limited'
@@ -249,7 +257,7 @@ async function main() {
         await Actor.setValue('OUTPUT', summary);
         await Actor.setValue('SUMMARY', {
             recordType: 'run_summary',
-            status: stop ? 'partial' : (summary.videosKept > 0 ? 'ok' : 'no_data'),
+            status: stop || summary.hashtagsSkippedByLimit > 0 ? 'partial' : (summary.videosKept > 0 ? 'ok' : 'no_data'),
             scrapedAt: new Date().toISOString(),
             runLabel: input.runLabel ?? null,
             sourceUrl: null,
