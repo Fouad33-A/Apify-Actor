@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.14-diagnostics';
+const VERSION = '2026-11-07-v2.15-coverage';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -104,7 +104,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     });
     const rows = new Map();
     let dateExcluded = 0;
-    const diag = { bootstrap: null, ssrRows: 0, contracts: [] };
+    const diag = { bootstrap: null, ssrRows: 0, contracts: [], sourceCoverage: 'unknown', paginationVerified: false };
     const add = (list) => {
         for (const r of list) {
             if (!includeReplies && r.isReply) continue;
@@ -122,6 +122,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     let owner = null;
     for (const root of roots) { owner ||= findOwner(root); add(harvest(root, postUrl, owner)); }
     diag.ssrRows = rows.size;
+    diag.sourceCoverage = rows.size >= cap ? 'requested_cap_reached_from_html' : 'embedded_html_only_or_api_unverified';
 
     const mediaId = shortcodeToMediaId(shortcodeFromUrl(postUrl));
     const baseHeaders = {
@@ -149,6 +150,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
             const next = res.json ? cursorFrom(res.json) : null;
             cd.pages.push({ page, status: res.status, type: res.type, harvested: found.length, added, statusField: res.json?.status ?? null, message: res.json?.message ?? null, cursor: Boolean(next), redirect: res.location ? true : false, body: res.json ? null : safeDiagBody(res.body) });
             if (res.status !== 200 || !res.json || res.json?.status === 'fail') break;
+            if (found.length > 0) diag.paginationVerified = true;
             if (!next || next === cursor) break;
             cursor = String(next);
             stagnant = added === 0 ? stagnant + 1 : 0;
@@ -157,6 +159,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
         }
         diag.contracts.push(cd);
     }
+    if (diag.paginationVerified) diag.sourceCoverage = 'api_comments_accessible';
     return { rows: [...rows.values()].slice(0, cap), diag, dateExcluded };
 }
 
@@ -181,6 +184,7 @@ try {
     const urls = [...new Set(input.postUrls.map(normalizeUrl).filter(Boolean))];
     let skipped = input.postUrls.length - urls.length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0, blockedPosts = 0;
     const requestDiagnostics = [];
+    let partialCoveragePosts = 0, verifiedPaginationPosts = 0;
     const errors = [];
     const pUrl = await proxyUrl(useResidentialProxy, proxyMode);
     log.info(`[${VERSION}] browserless got-scraping persistent-session candidate. login=false externalProvider=false proxy=${Boolean(pUrl)}`);
@@ -194,6 +198,8 @@ try {
             const { rows, diag, dateExcluded: excluded } = await scrapePost(postUrl, amount, minLikes, includeReplies, pUrl, sinceMs);
             dateExcluded += excluded;
             requestDiagnostics.push({ postUrl, ...diag });
+            if (diag.paginationVerified) verifiedPaginationPosts++;
+            else if (rows.length > 0 && rows.length < amount) partialCoveragePosts++;
             for (const row of rows) { await Actor.pushData({ ...row, recordType: 'comment', status: 'ok', sourceUrl: postUrl, runLabel, text: row.commentText, author: row.commenterHandle }); returned++; }
             if (rows.length) postsWithComments++;
             if (!rows.length) {
@@ -215,9 +221,9 @@ try {
     await Actor.setValue('REQUEST_DIAGNOSTICS', requestDiagnostics);
     const summary = {
         version: VERSION, itemsRequested: input.postUrls.length, returned, skipped, errors: errors.length,
-        status: blockedPosts > 0 || errors.some(e => e.reason.startsWith('request_failed') || !e.reason.startsWith('no_') && !e.reason.startsWith('comments_access_unavailable')) || returned >= maxItems && processed < urls.length ? 'partial' : 'completed',
+        status: blockedPosts > 0 || partialCoveragePosts > 0 || errors.some(e => e.reason.startsWith('request_failed') || !e.reason.startsWith('no_') && !e.reason.startsWith('comments_access_unavailable')) || returned >= maxItems && processed < urls.length ? 'partial' : 'completed',
         stoppedBecause: returned >= maxItems && processed < urls.length ? 'maxItems' : 'completed',
-        itemsEmitted: returned, noData, blockedPosts, proxyMode, dateExcluded, postsWithComments, runLabel, sinceDate: input.sinceDate ?? null,
+        itemsEmitted: returned, noData, blockedPosts, partialCoveragePosts, verifiedPaginationPosts, proxyMode, dateExcluded, postsWithComments, runLabel, sinceDate: input.sinceDate ?? null,
         exactInput: { ...input, maxItems, maxCommentsPerPost: maxPer, maxVideosPerCreator: maxVPC },
         seconds: Number(((Date.now() - started) / 1000).toFixed(2)), publicDataOnly: true, loginUsed: false,
         externalProviderUsed: false, source: 'instagram_public_got_scraping_v213', residentialProxyRequested: useResidentialProxy,
