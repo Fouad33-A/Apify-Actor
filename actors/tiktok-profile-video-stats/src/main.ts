@@ -144,6 +144,7 @@ interface Input {
     runLabel?: string;
     maxVideosPerProfile?: number;
     sinceDate?: string;
+    emitTopCommentedRows?: boolean;
 }
 
 interface ProfileData {
@@ -3755,6 +3756,7 @@ let maxItemsReached =
 
 let summaryOnlyOutput = false;
 let currentRunLabel = '';
+let emitTopCommentedRows = true;
 
 async function pushLimited(
     item: Record<
@@ -4086,7 +4088,7 @@ async function processHandle(
             .slice(0, 10);
         const commentRankingComplete = selectedNative.length === options.videosPerProfile &&
             selectedNative.every(video => video.comments !== null);
-        for (let i = 0; i < rankedByComments.length; i++) {
+        for (let i = 0; emitTopCommentedRows && i < rankedByComments.length; i++) {
             await pushLimited({
                 rowType: 'top_commented_video', username, profileUrl, status: 'ok',
                 rankByComments: i + 1,
@@ -4541,6 +4543,7 @@ try {
 
     summaryOnlyOutput = input.outputRows === 'summaryOnly';
     currentRunLabel = typeof input.runLabel === 'string' ? input.runLabel : '';
+    emitTopCommentedRows = input.emitTopCommentedRows !== false;
 
     const usernames =
         uniqueStrings(
