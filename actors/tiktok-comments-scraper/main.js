@@ -7,7 +7,7 @@ await Actor.init();
 const VERSION = '2026-11-06-v5.3';
 const input = (await Actor.getInput()) ?? {};
 const runLabel = typeof input.runLabel === 'string' ? input.runLabel : '';
-const ALLOWED_KEYS = new Set(['postUrls', 'videoUrls', 'maxCommentsPerPost', 'includeReplies', 'minAskers', 'minVideos', 'languages', 'creatorVideos', 'questionAnalysis', 'runLabel']);
+const ALLOWED_KEYS = new Set(['postUrls', 'videoUrls', 'maxCommentsPerPost', 'includeReplies', 'minAskers', 'minVideos', 'languages', 'creatorVideos', 'questionAnalysis', 'runLabel', 'maxItems']);
 const unknownKeys = Object.keys(input).filter((key) => !ALLOWED_KEYS.has(key));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -77,6 +77,9 @@ const inputUrls = collectUrls();
 const explicitCreatorByVideo = collectUrls.explicitCreatorByVideo;
 const maxCommentsPerPost = Math.max(1, Math.min(10000, Number(input.maxCommentsPerPost) || 100));
 const includeReplies = input.includeReplies === true;
+if (input.maxItems !== undefined && (!Number.isInteger(input.maxItems) || input.maxItems < 1)) throw new Error('maxItems must be a positive integer.');
+const maxItems = input.maxItems ?? null;
+let globalCommentsSaved = 0;
 
 function getVideoId(url) {
     return String(url).match(/\/video\/(\d+)/)?.[1] ?? null;
@@ -326,7 +329,7 @@ async function scrapeVideo(inputUrl, questionRows) {
     let stopReason = 'unknown';
     const seenCommentIds = new Set();
 
-    while (saved < maxCommentsPerPost && pageNumber < MAX_PAGES_SAFETY) {
+    while (saved < maxCommentsPerPost && (maxItems === null || globalCommentsSaved < maxItems) && pageNumber < MAX_PAGES_SAFETY) {
         pageNumber++;
         log.info(`[COMMENTS] video=${videoId} page=${pageNumber} cursor=${cursor}`);
         let json;
@@ -351,7 +354,7 @@ async function scrapeVideo(inputUrl, questionRows) {
         let rejectedThisPage = 0;
 
         for (const rawComment of comments) {
-            if (saved >= maxCommentsPerPost) break;
+            if (saved >= maxCommentsPerPost || (maxItems !== null && globalCommentsSaved >= maxItems)) break;
             const comment = parseGenuineComment(rawComment);
             if (!comment) { rejectedThisPage++; continue; }
             if (seenCommentIds.has(comment.commentId)) { duplicatesThisPage++; continue; }
@@ -385,10 +388,12 @@ async function scrapeVideo(inputUrl, questionRows) {
                 videoUrl: finalUrl,
             });
             saved++;
+            globalCommentsSaved++;
             acceptedThisPage++;
         }
 
         log.info('[SAVED] ' + JSON.stringify({ videoId, page: pageNumber, acceptedThisPage, duplicatesThisPage, rejectedThisPage, saved, limit: maxCommentsPerPost }));
+        if (maxItems !== null && globalCommentsSaved >= maxItems) { stopReason = 'max_items_reached'; break; }
         if (saved >= maxCommentsPerPost) { stopReason = 'max_comments_per_post'; break; }
         if (!hasMore) { stopReason = 'tiktok_has_more_0'; break; }
         if (!Number.isFinite(nextCursor)) { stopReason = 'invalid_cursor'; break; }
@@ -397,7 +402,7 @@ async function scrapeVideo(inputUrl, questionRows) {
         await sleep(250);
     }
 
-    if (pageNumber >= MAX_PAGES_SAFETY && saved < maxCommentsPerPost) stopReason = 'page_safety_limit';
+    if (pageNumber >= MAX_PAGES_SAFETY && saved < maxCommentsPerPost && (maxItems === null || globalCommentsSaved < maxItems)) stopReason = 'page_safety_limit';
     log.info('[VIDEO COMPLETE] ' + JSON.stringify({ videoId, commentsSaved: saved, reportedTotal, pages: pageNumber, stopReason }));
     return { videoId, commentsSaved: saved, reportedTotal, pages: pageNumber, stopReason };
 }
@@ -419,6 +424,7 @@ try {
     const questionRows = [];
 
     for (let index = 0; index < inputUrls.length; index++) {
+        if (maxItems !== null && globalCommentsSaved >= maxItems) break;
         const inputUrl = inputUrls[index];
         try {
             const result = await scrapeVideo(inputUrl, questionRows);
@@ -445,13 +451,16 @@ try {
         runLabel,
         scrapedAt: new Date().toISOString(),
         sourceUrl: inputUrls[0] ?? null,
-        status: failedVideos === inputUrls.length ? 'failed' : (failedVideos ? 'partial' : 'completed'),
+        status: maxItems !== null && globalCommentsSaved >= maxItems && successfulVideos + failedVideos < inputUrls.length ? 'partial' : (failedVideos === inputUrls.length ? 'failed' : (failedVideos ? 'partial' : 'completed')),
         version: VERSION,
         videosRequested: inputUrls.length,
         successfulVideos,
         failedVideos,
         totalCommentsSaved: totalComments,
         maxCommentsPerPost,
+        maxItems,
+        stopReason: maxItems !== null && globalCommentsSaved >= maxItems ? 'max_items_reached' : null,
+        videosSkippedByLimit: inputUrls.length - successfulVideos - failedVideos,
         coverage: {
             scope: 'top_level_public_comments',
             reportedCommentsTotal: videosWithReportedTotal ? reportedCommentsTotal : null,
