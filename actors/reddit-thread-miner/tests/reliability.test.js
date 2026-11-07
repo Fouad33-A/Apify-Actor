@@ -150,3 +150,21 @@ describe('Arctic Shift 422 recovery', () => {
         expect(result.threads).toHaveLength(1);
     });
 });
+
+describe('requested thread cap completion', () => {
+    it('reports ok when exactly the requested number of threads is collected', async () => {
+        const rows = [];
+        const input = readInput({ subreddits: ['igcse'], keywords: ['exam'], maxThreads: 1, includeComments: false, delayBetweenRequestsMs: 0, maxItems: 10 });
+        const summary = await run({
+            input, pushData: async (row) => rows.push(row),
+            fetch: async () => ({ status: 403, body: 'Forbidden' }),
+            discoverArchive: async () => ({ threads: [thread('one', '2026-10-05T00:00:00Z')], attempts: [{ status: 200 }], rateLimited: false }),
+            discover: async () => { throw new Error('Brave should not be called'); },
+            backoffMs: 0,
+        });
+        expect(summary.threads).toBe(1);
+        expect(summary.status).toBe('ok');
+        expect(summary.reachedRequestedThreadCap).toBe(true);
+        expect(summary.stopReason).toBe(null);
+    });
+});
