@@ -27,6 +27,9 @@ export function readInput(raw) {
     };
     if (input.sinceDate && input.dateFrom && input.sinceDate !== input.dateFrom) throw new Error('Use either sinceDate or dateFrom, not conflicting dates.');
     if (input.sinceDate) input.dateFrom = input.sinceDate;
+    if (input.maxThreads != null && (!Number.isInteger(input.maxThreads) || input.maxThreads < 1)) throw new Error('maxThreads must be a positive integer.');
+    if (input.topCommentsPerThread != null && (!Number.isInteger(input.topCommentsPerThread) || input.topCommentsPerThread < 0)) throw new Error('topCommentsPerThread must be a nonnegative integer.');
+    if (input.topCommentsPerThread != null) input.maxCommentsPerThread = input.topCommentsPerThread;
     if (!Number.isInteger(input.maxItems ?? 200) || (input.maxItems ?? 200) < 1) throw new Error('maxItems must be a positive integer.');
     if (input.maxTotalChargeUsd != null && (!Number.isFinite(input.maxTotalChargeUsd) || input.maxTotalChargeUsd <= 0)) throw new Error('maxTotalChargeUsd must be positive.');
     const dateFrom = date('dateFrom');
@@ -56,7 +59,7 @@ export async function run({
     shouldStop = () => false, now = () => new Date(), backoffMs = 30_000,
 }) {
     const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, archiveCommentThreads: 0, requestsMade: 0, itemsReturned: 0, itemsBlocked: 0 };
-    const maxItems = input.maxItems ?? 200;
+    const maxItems = Math.min(input.maxItems ?? 200, input.maxThreads ?? Number.MAX_SAFE_INTEGER);
     let outputCount = 0;
     const emit = async (row) => { if (outputCount >= maxItems) return false; await pushData({ sourceUrl: row.url ?? row.sourceUrl ?? `https://www.reddit.com/r/${row.subreddit}/`, runLabel: input.runLabel ?? '', ...row }); outputCount++; totals.itemsReturned++; return true; };
     const stamp = () => now().toISOString();
@@ -130,7 +133,7 @@ export async function run({
             const fallback = await discover({
                 subreddit: sub,
                 keywords: input.keywords,
-                maxThreads: input.maxThreadsPerSubreddit,
+                maxThreads: Math.min(input.maxThreadsPerSubreddit, input.maxThreads ?? Number.MAX_SAFE_INTEGER),
                 dateFromMs: input.dateFromMs, dateToMs: input.dateToMs,
                 maxPages: Math.min(3, Math.max(1, Math.ceil(input.maxThreadsPerSubreddit / 20))),
                 shouldStop,
@@ -216,10 +219,10 @@ export async function run({
             for (const c of new Set([...own.competitorsMentioned, ...comments.flatMap((c) => c.competitorsMentioned)])) competitorCounts[c] = (competitorCounts[c] ?? 0) + 1;
 
             await emit({
-                recordType: 'thread', subreddit: sub, threadId: thread.id.replace(/^t3_/, ''), title: thread.title,
-                body: thread.text.slice(0, 5000), author: thread.author, createdAt: thread.updated, url: thread.url, score: null,
+                recordType: 'thread', subreddit: sub, threadId: thread.id.replace(/^t3_/, ''), threadUrl: thread.url, title: thread.title,
+                body: thread.text.slice(0, 5000), author: thread.author, createdAt: thread.updated, url: thread.url, score: thread.score ?? null, numComments: thread.numComments ?? null,
                 discoverySource: thread.discoverySource, matchedKeywords: thread.matchedKeywords, themes: own.themes,
-                competitorsMentioned: own.competitorsMentioned, threadThemes: [...all], commentsStatus, commentsSource, comments,
+                competitorsMentioned: own.competitorsMentioned, mentionsCompetitor: own.competitorsMentioned.length > 0 || comments.some(c => c.competitorsMentioned?.length), competitorNames: [...new Set([...own.competitorsMentioned, ...comments.flatMap(c => c.competitorsMentioned ?? [])])], themeTags: [...all], isRulesAllowPromotion: null, threadThemes: [...all], commentsStatus, commentsSource, comments, topComments: comments.map(c => ({ text: c.text, score: c.score ?? null, author: c.author })),
                 status: 'ok', scrapedAt: stamp(),
             });
             totals.threads += 1;
