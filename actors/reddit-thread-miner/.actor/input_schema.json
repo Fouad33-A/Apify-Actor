@@ -169,6 +169,20 @@
             "description": "Exclude threads below this score. Threads without verifiable score are also excluded when set.",
             "editor": "number",
             "minimum": 0
+        },
+        "maxRequests": {
+            "title": "Maximum counted requests",
+            "type": "integer",
+            "description": "Best-effort safety limit for counted Reddit RSS and public-search attempts. Does not cover all archive requests or guarantee a USD cap.",
+            "editor": "number",
+            "minimum": 1
+        },
+        "maxRuntimeSeconds": {
+            "title": "Maximum runtime (seconds)",
+            "type": "integer",
+            "description": "Cooperative runtime stop checked between operations. Does not interrupt an in-flight request or enforce a billing ceiling.",
+            "editor": "number",
+            "minimum": 1
         }
     },
     "required": [
