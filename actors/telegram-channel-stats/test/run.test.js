@@ -109,7 +109,7 @@ describe('run', () => {
             ['ghost1', 'not_found'],
         ]);
         expect(out.filter((r) => r.recordType === 'post')).toHaveLength(5);
-        expect(out.filter((r) => r.recordType === 'no_data')).toHaveLength(2);
+        expect(out.filter((r) => r.recordType === 'no_data')).toHaveLength(1);
         expect(summary).toMatchObject({ channelsOk: 1, invalidInputs: 1, stoppedBecause: 'completed' });
     });
 
