@@ -146,7 +146,7 @@ describe('run', () => {
             readArchive: async () => ({ status: 'ok', comments: [] }),
         });
         expect(rows.filter((r) => r.recordType === 'subreddit').map((r) => r.status)).toEqual(['blocked', 'blocked']);
-        expect(rows[0].statusDetail).toMatch(/does not give the feed/);
+        expect(rows.find((r) => r.recordType === 'subreddit').statusDetail).toMatch(/does not give the feed/);
         expect(summary.blocked).toBe(2);
     });
 
@@ -161,9 +161,10 @@ describe('run', () => {
                 return { status: 429, body: '' };
             },
             backoffMs: 0,
+            discover: async () => ({ threads: [], attempts: [], rateLimited: true }),
         });
         expect(calls).toBe(3);
-        expect(rows[0]).toMatchObject({ recordType: 'subreddit', status: 'rate_limited' });
+        expect(rows.find((r) => r.recordType === 'subreddit')).toMatchObject({ status: 'rate_limited' });
     });
 
     it('validates input', () => {
