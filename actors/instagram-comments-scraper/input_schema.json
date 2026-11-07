@@ -54,6 +54,18 @@
       "type": "boolean",
       "description": "Use your Apify residential proxy for the anonymous public Instagram web request. No third-party provider.",
       "default": true
+    },
+    "runLabel": {
+      "title": "Run label",
+      "description": "Optional label echoed on every output row and in SUMMARY.",
+      "type": "string",
+      "editor": "textfield"
+    },
+    "sinceDate": {
+      "title": "Comments since date (UTC)",
+      "description": "Optional YYYY-MM-DD; excludes older comments with known dates. Undated comments are retained.",
+      "type": "string",
+      "editor": "textfield"
     }
   },
   "required": [
