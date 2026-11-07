@@ -8,7 +8,7 @@ export function redditThreadId(value) {
     return (match?.[1] ?? s.replace(/^t3_/, '')).toLowerCase();
 }
 
-export async function fetchArcticComments(threadUrlOrId, { limit = 20, fetch = fetchJson } = {}) {
+export async function fetchArcticComments(threadUrlOrId, { limit = 20, fetch = fetchJson, beforeRequest = () => true } = {}) {
     const threadId = redditThreadId(threadUrlOrId);
     if (!threadId) return { status: 'no_thread_id', comments: [] };
 
@@ -17,6 +17,7 @@ export async function fetchArcticComments(threadUrlOrId, { limit = 20, fetch = f
     const size = Math.min(100, Math.max(limit * 5, 25));
     const url = `${API}?link_id=${encodeURIComponent(`t3_${threadId}`)}&limit=${size}`;
 
+    if (!beforeRequest()) return { status: 'limit_reached', comments: [] };
     let res;
     try {
         res = await fetch(url);
