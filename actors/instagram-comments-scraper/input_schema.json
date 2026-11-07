@@ -66,6 +66,18 @@
       "description": "Optional YYYY-MM-DD; excludes older comments with known dates. Undated comments are retained.",
       "type": "string",
       "editor": "textfield"
+    },
+    "proxyMode": {
+      "title": "Proxy mode (diagnostic)",
+      "description": "Compare residential (default), datacenter and none. Datacenter may not be available on every account.",
+      "type": "string",
+      "editor": "select",
+      "enum": [
+        "residential",
+        "datacenter",
+        "none"
+      ],
+      "default": "residential"
     }
   },
   "required": [
