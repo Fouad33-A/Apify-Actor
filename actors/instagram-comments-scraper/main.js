@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.23-final-url-and-coverage';
+const VERSION = '2026-11-07-v2.25-graphql-validated';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -44,7 +44,7 @@ function rowFromNode(n, postUrl, isReply = false, owner = null) {
         commentId: String(n.pk ?? n.id ?? '') || null, commentText: n.text ?? null,
         commenterHandle: u.username ?? u.user_name ?? null,
         likes: n.comment_like_count ?? n.like_count ?? n.likes_count ?? null,
-        replyCount: n.child_comment_count ?? n.reply_count ?? null,
+        replyCount: (typeof n.child_comment_count === 'number' ? n.child_comment_count : null) ?? n.reply_count ?? null,
         isReply: Boolean(isReply), createdAt, scrapedAt: now(),
     };
 }
@@ -95,7 +95,7 @@ async function requestJson(client, url, headers) {
     } catch (e) { return { error: String(e?.message ?? e).slice(0, 220) }; }
 }
 
-async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs = null) {
+async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs = null, graphqlPageSize = 24) {
     const jar = new CookieJar();
     const client = gotScraping.extend({
         cookieJar: jar, proxyUrl: pUrl || undefined,
@@ -125,7 +125,87 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     diag.ssrRows = rows.size;
     diag.sourceCoverage = rows.size >= cap ? 'requested_cap_reached_from_html' : 'embedded_html_only_or_api_unverified';
 
-    const mediaId = shortcodeToMediaId(shortcodeFromUrl(postUrl));
+    // Verified logged-out GraphQL path. Preserve HTML rows as fallback on failure.
+    const sc = shortcodeFromUrl(postUrl);
+    const mediaId = shortcodeToMediaId(sc);
+    const extractToken = (patterns) => {
+        for (const re of patterns) { const match = html.match(re); if (match) return match[1]; }
+        return null;
+    };
+    let csrf = extractToken([/"csrf_token"\\s*:\\s*"([^"]+)"/, /"csrf"\\s*:\\s*"([^"]+)"/]);
+    const lsd = extractToken([/\\["LSD",\\[\\],\\{"token":"([^"]+)"\\}/, /"lsd":"([^"]+)"/]);
+    // The verified probe bootstraps /p/{shortcode}/ even for reels. Retry that canonical path when tokens are absent.
+    if (!csrf || !lsd) {
+        try {
+            const canonical = 'https://www.instagram.com/p/' + sc + '/';
+            const second = await client.get(canonical, { throwHttpErrors: false, timeout: { request: 18000 } });
+            if (second.statusCode === 200) {
+                const canonicalHtml = String(second.body || '');
+                csrf ||= canonicalHtml.match(/"csrf_token"\\s*:\\s*"([^"]+)"/)?.[1] ?? null;
+            }
+        } catch (e) { log.debug('Canonical token bootstrap unavailable: ' + String(e?.message ?? e).slice(0, 100)); }
+    }
+    const graphqlDiag = { name: 'logged_out_graphql', pages: [], hasCsrf: Boolean(csrf), hasLsd: Boolean(lsd) };
+    diag.contracts.push(graphqlDiag);
+    if (lsd && rows.size < cap) {
+        const gqlHeaders = {
+            accept: '*/*', 'accept-language': 'en-US,en;q=0.9',
+            'x-ig-app-id': '936619743392459',
+            'x-requested-with': 'XMLHttpRequest',
+            'referer': 'https://www.instagram.com/p/' + sc + '/',
+            origin: 'https://www.instagram.com',
+            'content-type': 'application/x-www-form-urlencoded',
+            'x-fb-friendly-name': 'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery',
+            'x-root-field-name': 'xig_polaris_media', 'x-asbd-id': '359341',
+            ...(csrf ? { 'x-csrftoken': csrf } : {}), 'x-fb-lsd': lsd,
+        };
+        let after = null, stagnant = 0;
+        const cursors = new Set();
+        for (let page = 1; page <= 40 && rows.size < cap; page++) {
+            const variables = { after, first: Math.min(graphqlPageSize, Math.max(10, cap - rows.size)), media_id: mediaId };
+            const form = new URLSearchParams({
+                av: '0', __d: 'www', __user: '0', __a: '1', __comet_req: '7',
+                fb_api_caller_class: 'RelayModern',
+                fb_api_req_friendly_name: 'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery',
+                variables: JSON.stringify(variables), server_timestamps: 'true',
+                doc_id: '27837656105907150', lsd,
+            });
+            try {
+                const response = await client.post('https://www.instagram.com/api/graphql', {
+                    headers: gqlHeaders, body: form.toString(), throwHttpErrors: false,
+                    followRedirect: false, timeout: { request: 22000 },
+                });
+                const body = JSON.parse(String(response.body).replace(/^for\\s*\\(;;\\);\\s*/, ''));
+                const connection = body?.data?.xig_polaris_media?.comments_connection;
+                if (response.statusCode !== 200 || !connection || !Array.isArray(connection.edges)) {
+                    graphqlDiag.pages.push({ page, status: response.statusCode, error: body?.error ?? body?.errors?.[0]?.code ?? 'missing_connection' });
+                    break;
+                }
+                const before = rows.size;
+                add(connection.edges.map(e => e?.node).filter(isComment).map(n => rowFromNode(n, postUrl, false, owner)));
+                const added = rows.size - before;
+                const info = connection.page_info ?? {};
+                graphqlDiag.pages.push({ page, status: response.statusCode, received: connection.edges.length, added, hasNext: Boolean(info.has_next_page) });
+                diag.paginationVerified = true;
+                diag.sourceCoverage = 'graphql_pagination_accessible';
+                if (!info.has_next_page || !info.end_cursor || rows.size >= cap) break;
+                let next = info.end_cursor;
+                if (typeof next === 'string') { try { next = JSON.parse(next); } catch { graphqlDiag.pages.at(-1).cursorError = 'invalid_cursor'; break; } }
+                if (!next || typeof next !== 'object' || !next.server_cursor) { graphqlDiag.pages.at(-1).cursorError = 'unsupported_cursor'; break; }
+                const cursorKey = JSON.stringify(next);
+                if (cursors.has(cursorKey)) break;
+                cursors.add(cursorKey);
+                after = cursorKey;
+                stagnant = added === 0 ? stagnant + 1 : 0;
+                if (stagnant >= 3) break;
+                await sleep(200);
+            } catch (e) {
+                graphqlDiag.pages.push({ page, error: String(e?.message ?? e).slice(0, 180) });
+                break;
+            }
+        }
+    }
+
     const baseHeaders = {
         accept: '*/*', 'accept-language': 'en-US,en;q=0.9',
         'x-ig-app-id': '936619743392459',
@@ -136,7 +216,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
         { name: 'www_web_comments', host: 'https://www.instagram.com' },
         { name: 'i_web_comments', host: 'https://i.instagram.com' },
     ];
-    for (const contract of contracts) {
+    for (const contract of (diag.paginationVerified ? [] : contracts)) {
         if (rows.size >= cap) break;
         let cursor = null, stagnant = 0;
         const cd = { name: contract.name, pages: [] };
@@ -182,6 +262,7 @@ try {
     const proxyMode = input.proxyMode ?? (useResidentialProxy ? 'residential' : 'none');
     if (!['residential','datacenter','none'].includes(proxyMode)) throw new Error('proxyMode must be residential, datacenter or none');
     const sinceMs = dateCutoff(input.sinceDate);
+    const graphqlPageSize = 24;
     const normalized = input.postUrls.map(raw => ({ raw: String(raw), url: normalizeUrl(raw) }));
     const urls = [...new Set(normalized.map(x => x.url).filter(Boolean))];
     let skipped = normalized.filter(x => !x.url).length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0, blockedPosts = 0;
@@ -204,7 +285,7 @@ try {
         processed++;
         const amount = Math.min(maxPer, maxItems - returned);
         try {
-            const { rows, diag, dateExcluded: excluded } = await scrapePost(postUrl, amount, minLikes, includeReplies, pUrl, sinceMs);
+            const { rows, diag, dateExcluded: excluded } = await scrapePost(postUrl, amount, minLikes, includeReplies, pUrl, sinceMs, graphqlPageSize);
             dateExcluded += excluded;
             requestDiagnostics.push({ postUrl, ...diag });
             if (diag.paginationVerified) verifiedPaginationPosts++;
@@ -235,9 +316,10 @@ try {
         itemsEmitted: returned, noData, blockedPosts, partialCoveragePosts, verifiedPaginationPosts, proxyMode, dateExcluded, postsWithComments, runLabel, sinceDate: input.sinceDate ?? null,
         exactInput: { ...input, maxItems, maxCommentsPerPost: maxPer, maxVideosPerCreator: maxVPC },
         seconds: Number(((Date.now() - started) / 1000).toFixed(2)), publicDataOnly: true, loginUsed: false,
-        externalProviderUsed: false, source: 'instagram_public_got_scraping_v213', residentialProxyRequested: useResidentialProxy,
+        externalProviderUsed: false, source: 'instagram_public_graphql_with_html_fallback', residentialProxyRequested: useResidentialProxy,
         residentialProxyUsed: Boolean(pUrl) && proxyMode === 'residential', includeRepliesRequested: includeReplies,
-        coverageNote: 'Anonymous public HTML sampling; completeness is not guaranteed and pagination is generally unavailable. No Instagram login, cookies, browser, or external provider.',
+        repliesCoverage: includeReplies ? 'top_level_comments_only_replies_not_verified' : 'top_level_comments_only',
+        coverageNote: 'Anonymous public GraphQL pagination with HTML fallback. Cursor exhaustion indicates no more top-level comments exposed by the public endpoint, not a guarantee of all Instagram comments. Nested reply retrieval is not implemented. No Instagram login or external provider.',
     };
     await Actor.setValue('SUMMARY', summary); log.info(`[FINAL] ${JSON.stringify(summary)}`);
 } finally { await Actor.exit(); }
