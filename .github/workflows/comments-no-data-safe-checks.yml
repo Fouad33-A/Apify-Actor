@@ -1,0 +1,23 @@
+name: Comments No Data Safe Checks
+on:
+  push:
+    branches: [fix/comments-no-data-safe-nov7]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and no-data contract
+        working-directory: actors/tiktok-comments-scraper
+        run: |
+          node --check main.js
+          node --input-type=module -e "import fs from 'node:fs'; const s=fs.readFileSync('main.js','utf8'); for(const marker of [\"recordType: 'no_data'\",\"status: 'no_data'\",\"totalComments === 0 && failedVideos === 0\",\"await Actor.pushData(summary)\"]) if(!s.includes(marker)) throw Error('Missing '+marker)"
+      - name: Existing regression tests
+        working-directory: actors/tiktok-comments-scraper
+        run: |
+          npm install --no-audit --no-fund
+          npm test
