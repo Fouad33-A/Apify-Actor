@@ -114,20 +114,23 @@
     "runLabel": {
       "title": "Run label",
       "type": "string",
-      "description": "Optional label echoed in each dataset row and SUMMARY."
+      "description": "Optional label echoed in each dataset row and SUMMARY.",
+      "editor": "textfield"
     },
     "maxVideosPerProfile": {
       "title": "Maximum videos per profile (alias)",
       "type": "integer",
       "minimum": 1,
       "maximum": 30,
-      "description": "Optional alias for videosPerProfile. When supplied, takes precedence."
+      "description": "Optional alias for videosPerProfile. When supplied, takes precedence.",
+      "editor": "number"
     },
     "emitTopCommentedRows": {
       "title": "Emit separate top-commented video rows",
       "type": "boolean",
       "default": true,
-      "description": "True preserves existing output. Set false to avoid duplicate ranked video rows consuming maxItems; rankings remain in creator summary."
+      "description": "True preserves existing output. Set false to avoid duplicate ranked video rows consuming maxItems; rankings remain in creator summary.",
+      "editor": "checkbox"
     }
   },
   "required": [
