@@ -177,7 +177,7 @@ try {
     const runLabel = input.runLabel == null ? null : String(input.runLabel);
     const sinceMs = dateCutoff(input.sinceDate);
     const urls = [...new Set(input.postUrls.map(normalizeUrl).filter(Boolean))];
-    let skipped = input.postUrls.length - urls.length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0;
+    let skipped = input.postUrls.length - urls.length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0, blockedPosts = 0;
     const errors = [];
     const pUrl = await proxyUrl(useResidentialProxy);
     log.info(`[${VERSION}] browserless got-scraping persistent-session candidate. login=false externalProvider=false proxy=${Boolean(pUrl)}`);
@@ -193,8 +193,12 @@ try {
             for (const row of rows) { await Actor.pushData({ ...row, recordType: 'comment', status: 'ok', sourceUrl: postUrl, runLabel, text: row.commentText, author: row.commenterHandle }); returned++; }
             if (rows.length) postsWithComments++;
             if (!rows.length) {
-                errors.push({ url: postUrl, reason: `No public comments returned. diag=${JSON.stringify(diag).slice(0, 4000)}` });
-                if (returned < maxItems) { await Actor.pushData({ recordType: 'no_data', status: 'no_data', postUrl, sourceUrl: postUrl, runLabel, scrapedAt: now(), reason: excluded > 0 ? 'no_matching_comments' : 'no_public_comments' }); returned++; noData++; }
+                const pages = diag.contracts.flatMap(c => c.pages ?? []);
+                const denied = pages.length > 0 && pages.every(p => p.error || p.redirect || p.status !== 200 || p.statusField === 'fail');
+                if (denied) blockedPosts++;
+                const reason = denied ? 'comments_access_unavailable' : excluded > 0 ? 'no_matching_comments' : 'no_public_comments';
+                errors.push({ url: postUrl, reason: `${reason}. diag=${JSON.stringify(diag).slice(0, 4000)}` });
+                if (returned < maxItems) { await Actor.pushData({ recordType: 'no_data', status: denied ? 'blocked' : 'no_data', postUrl, sourceUrl: postUrl, runLabel, scrapedAt: now(), reason }); returned++; noData++; }
             }
             log.info(`[POST] returned=${rows.length} requestedCap=${amount} diag=${JSON.stringify(diag)}`);
         } catch (e) {
@@ -206,9 +210,9 @@ try {
     await Actor.setValue('errors', errors);
     const summary = {
         version: VERSION, itemsRequested: input.postUrls.length, returned, skipped, errors: errors.length,
-        status: errors.some(e => !e.reason.startsWith('No public comments returned')) || returned >= maxItems && processed < urls.length ? 'partial' : 'completed',
+        status: blockedPosts > 0 || errors.some(e => e.reason.startsWith('request_failed') || !e.reason.startsWith('no_') && !e.reason.startsWith('comments_access_unavailable')) || returned >= maxItems && processed < urls.length ? 'partial' : 'completed',
         stoppedBecause: returned >= maxItems && processed < urls.length ? 'maxItems' : 'completed',
-        itemsEmitted: returned, noData, dateExcluded, postsWithComments, runLabel, sinceDate: input.sinceDate ?? null,
+        itemsEmitted: returned, noData, blockedPosts, dateExcluded, postsWithComments, runLabel, sinceDate: input.sinceDate ?? null,
         exactInput: { ...input, maxItems, maxCommentsPerPost: maxPer, maxVideosPerCreator: maxVPC },
         seconds: Number(((Date.now() - started) / 1000).toFixed(2)), publicDataOnly: true, loginUsed: false,
         externalProviderUsed: false, source: 'instagram_public_got_scraping_v213', residentialProxyRequested: useResidentialProxy,
