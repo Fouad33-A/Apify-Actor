@@ -83,6 +83,7 @@ describe('run', () => {
             }),
         });
         expect(rows.map((r) => r.status)).toEqual(['invalid_input', 'login_wall', 'no_data']);
+        expect(summary).toMatchObject({ status: 'partial', stopReason: 'group_errors', groupErrors: 2, noData: 1 });
         expect(rows[1].statusDetail).toMatch(/redirected the anonymous public feed to login/);
         expect(summary).toMatchObject({ groups: 1, loginWall: 1, posts: 0 });
     });
@@ -112,7 +113,7 @@ describe('run', () => {
                     ? { status: 404, html: '', finalUrl: url }
                     : { status: 200, html: page([]), finalUrl: url },
         });
-        expect(rows.map((r) => r.status)).toEqual(['no_posts_visible', 'not_found', 'no_data']);
+        expect(rows.map((r) => r.status)).toEqual(['no_posts_visible', 'no_data', 'not_found', 'no_data']);
     });
     it('enforces global maxItems and keeps accurate emitted post counts', async () => {
         rows.length = 0;
@@ -152,6 +153,32 @@ describe('run', () => {
             recordType: 'group', status: 'no_posts_visible', verificationStatus: 'unverified',
             noDataReason: 'group_unverified',
         });
+    });
+    it('emits one no_data per empty group and marks mixed group errors partial', async () => {
+        rows.length = 0;
+        const summary = await run({
+            input: readInput({ groups: ['g1abc', 'g2abc', 'g3abc'], delayBetweenGroupsMs: 0 }),
+            pushData: push,
+            fetchAttempt: async (url) => {
+                if (url.endsWith('g2abc')) return { status: 503, html: '', finalUrl: url };
+                if (url.endsWith('g3abc')) return { status: 200, html: page([post('3', 'Study SAT math?', 1790000000)]), finalUrl: url };
+                return { status: 200, html: page([]), finalUrl: url };
+            },
+        });
+        expect(rows.filter((r) => r.recordType === 'no_data').map((r) => r.groupId)).toEqual(['g1abc', 'g2abc']);
+        expect(rows.filter((r) => r.recordType === 'post')).toHaveLength(1);
+        expect(summary).toMatchObject({ status: 'partial', stopReason: 'group_errors', groupErrors: 1, noData: 2, posts: 1 });
+        expect(summary.groupFailures).toEqual([{ groupUrl: 'https://www.facebook.com/groups/g2abc', status: 'http_error' }]);
+    });
+    it('does not exceed maxItems when group plus no_data would require two rows', async () => {
+        rows.length = 0;
+        const summary = await run({
+            input: readInput({ groups: ['g1abc', 'g2abc'], maxItems: 3, delayBetweenGroupsMs: 0 }),
+            pushData: push,
+            fetchAttempt: async (url) => ({ status: 200, html: page([]), finalUrl: url }),
+        });
+        expect(rows.map((r) => r.recordType)).toEqual(['group', 'no_data', 'group']);
+        expect(summary).toMatchObject({ status: 'completed', itemsEmitted: 3, noData: 1 });
     });
     it('validates input', () => {
         expect(() => readInput({})).toThrow(/at least one/);
