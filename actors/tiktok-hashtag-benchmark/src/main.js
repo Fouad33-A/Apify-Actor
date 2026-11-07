@@ -37,7 +37,7 @@ export function readInput(raw) {
     if (!hashtags.length) throw new Error('Give at least one hashtag in "hashtags" (with or without #).');
     if (input.runLabel != null && typeof input.runLabel !== 'string') throw new Error('runLabel must be a string.');
     if (input.maxItems != null && (!Number.isInteger(input.maxItems) || input.maxItems < 1)) throw new Error('maxItems must be a positive whole number.');
-    if (input.sinceDate != null && (typeof input.sinceDate !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(input.sinceDate) || !Number.isFinite(Date.parse(input.sinceDate)) || new Date(Date.parse(input.sinceDate)).toISOString().slice(0, 10) !== input.sinceDate)) throw new Error('sinceDate must be a valid YYYY-MM-DD date.');
+    if (input.sinceDate != null && (typeof input.sinceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(input.sinceDate) || !Number.isFinite(Date.parse(input.sinceDate)) || new Date(Date.parse(input.sinceDate)).toISOString().slice(0, 10) !== input.sinceDate)) throw new Error('sinceDate must be a valid YYYY-MM-DD date.');
     for (const k of ['maxVideosPerHashtag', 'recentDays', 'maxSearchPages'])
         if (!Number.isInteger(input[k]) || input[k] < 1)
             throw new Error(`Input "${k}" must be a whole number of 1 or more.`);
