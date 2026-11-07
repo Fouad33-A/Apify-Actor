@@ -41,3 +41,44 @@ describe('search discovery filters before limiting', () => {
         expect(result.threads.map((r) => r.id)).toEqual(['t3_new123']);
     });
 });
+
+describe('request accounting', () => {
+    it('counts each Brave retry and enforces the shared request limit', async () => {
+        const rows = [];
+        let braveCalls = 0;
+        const input = readInput({ subreddits: ['igcse'], keywords: ['exam'], includeComments: false, maxRequests: 3, delayBetweenRequestsMs: 0, maxItems: 10 });
+        const summary = await run({
+            input, pushData: async (row) => rows.push(row),
+            fetch: async () => ({ status: 403, body: 'Forbidden' }),
+            discover: async ({ beforeRequest }) => {
+                for (let i = 0; i < 5; i++) { if (!beforeRequest()) break; braveCalls++; }
+                return { threads: [], attempts: [{ status: 429, page: 0 }], rateLimited: true };
+            },
+            backoffMs: 0,
+        });
+        expect(braveCalls).toBe(2);
+        expect(summary.requestsMade).toBe(3);
+        expect(summary.stopReason).toBe('request_limit');
+        expect(rows.find((r) => r.recordType === 'subreddit').status).toBe('partial');
+    });
+    it('counts archive requests toward the shared limit', async () => {
+        const rows = [];
+        const input = readInput({ subreddits: ['igcse'], keywords: ['exam'], includeComments: true, maxThreadsWithComments: 1, maxCommentsPerThread: 2, maxRequests: 3, delayBetweenRequestsMs: 0, maxItems: 10 });
+        const summary = await run({
+            input, pushData: async (row) => rows.push(row),
+            fetch: async () => ({ status: 403, body: 'Forbidden' }),
+            discover: async ({ beforeRequest }) => {
+                beforeRequest();
+                return { threads: [thread('new', '2026-10-05T00:00:00Z')], attempts: [{ status: 200, page: 0 }], rateLimited: false };
+            },
+            readArchive: async (_id, { beforeRequest }) => {
+                expect(beforeRequest()).toBe(true);
+                return { status: 'ok', comments: [{ text: 'Thanks', author: 'student', score: 2 }] };
+            },
+            backoffMs: 0,
+        });
+        expect(summary.requestsMade).toBe(3);
+        expect(summary.stopReason).toBe('request_limit');
+        expect(rows.find((r) => r.recordType === 'thread').topComments).toHaveLength(1);
+    });
+});
