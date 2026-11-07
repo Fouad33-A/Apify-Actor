@@ -81,7 +81,7 @@ describe('run', () => {
                 finalUrl: 'https://www.facebook.com/login/?next=x',
             }),
         });
-        expect(rows.map((r) => r.status)).toEqual(['invalid_input', 'login_wall']);
+        expect(rows.map((r) => r.status)).toEqual(['invalid_input', 'login_wall', 'no_data']);
         expect(rows[1].statusDetail).toMatch(/redirected the anonymous public feed to login/);
         expect(summary).toMatchObject({ groups: 1, loginWall: 1, posts: 0 });
     });
@@ -111,7 +111,46 @@ describe('run', () => {
                     ? { status: 404, html: '', finalUrl: url }
                     : { status: 200, html: page([]), finalUrl: url },
         });
-        expect(rows.map((r) => r.status)).toEqual(['no_posts_visible', 'not_found']);
+        expect(rows.map((r) => r.status)).toEqual(['no_posts_visible', 'not_found', 'no_data']);
+    });
+    it('enforces global maxItems and keeps accurate emitted post counts', async () => {
+        rows.length = 0;
+        const html = page([post('1', 'First', 1790000000), post('2', 'Second', 1790100000)]);
+        const summary = await run({
+            input: readInput({ groups: ['g1abc', 'g2abc'], maxItems: 2, maxPostsPerGroup: 3, runLabel: 'examrung-weekly', delayBetweenGroupsMs: 0 }),
+            pushData: push,
+            fetchAttempt: async (url) => ({ status: 200, html, finalUrl: url }),
+        });
+        expect(rows.map((r) => r.recordType)).toEqual(['group', 'post']);
+        expect(rows.every((r) => r.runLabel === 'examrung-weekly' && r.sourceUrl)).toBe(true);
+        expect(summary).toMatchObject({
+            status: 'partial', stopReason: 'max_items_reached', posts: 1, groupRows: 1, itemsEmitted: 2,
+        });
+    });
+    it('explains when all exposed posts were excluded by sinceDate', async () => {
+        rows.length = 0;
+        const html = page([post('1', 'Old', 1700000000)]);
+        const summary = await run({
+            input: readInput({ groups: ['g1abc'], sinceDate: '2026-01-01', delayBetweenGroupsMs: 0 }),
+            pushData: push,
+            fetchAttempt: async (url) => ({ status: 200, html, finalUrl: url }),
+        });
+        expect(rows.map((r) => r.recordType)).toEqual(['group', 'no_data']);
+        expect(rows[0].noDataReason).toBe('no_matching_posts');
+        expect(rows[0].statusDetail).toMatch(/2026-01-01/);
+        expect(summary).toMatchObject({ dateExcluded: 1, posts: 0, noData: 1 });
+    });
+    it('marks generic public HTML as unverified without falsely asserting that a group does not exist', async () => {
+        rows.length = 0;
+        await run({
+            input: readInput({ groups: ['g1abc'], delayBetweenGroupsMs: 0 }),
+            pushData: push,
+            fetchAttempt: async (url) => ({ status: 200, html: '<html><title>Facebook</title></html>', finalUrl: url }),
+        });
+        expect(rows[0]).toMatchObject({
+            recordType: 'group', status: 'no_posts_visible', verificationStatus: 'unverified',
+            noDataReason: 'group_unverified',
+        });
     });
     it('validates input', () => {
         expect(() => readInput({})).toThrow(/at least one/);
