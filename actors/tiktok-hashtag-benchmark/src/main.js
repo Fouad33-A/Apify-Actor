@@ -42,7 +42,7 @@ export function readInput(raw) {
     input.concurrency = Math.min(Math.max(1, input.concurrency), 5);
     const regions = (input.regions ?? []).map((r) => String(r).trim().toUpperCase()).filter(Boolean);
     const videoUrls = [...new Set((input.videoUrls ?? []).map((rawUrl) => {
-        const m = String(rawUrl).match(/^https?:\\/\\/(?:www\\.)?tiktok\\.com\\/@([A-Za-z0-9._]{2,24})\\/video\\/(\\d{8,25})(?:[/?#]|$)/i);
+        const m = String(rawUrl).match(/^https?:\/\/(?:www\.)?tiktok\.com\/@([A-Za-z0-9._]{2,24})\/video\/(\d{8,25})(?:[/?#]|$)/i);
         if (!m) throw new Error('Every "videoUrls" entry must be a public TikTok /@handle/video/ID link.');
         return `https://www.tiktok.com/@${m[1].toLowerCase()}/video/${m[2]}`;
     }))];
