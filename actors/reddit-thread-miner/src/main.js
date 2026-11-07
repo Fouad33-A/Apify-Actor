@@ -1,7 +1,7 @@
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 
-import { fetchArcticComments } from './arctic.js';
+import { discoverArcticThreads, fetchArcticComments } from './arctic.js';
 import { classifyResponse, parseAtom, searchFeed, subredditFeed, threadFeed } from './feed.js';
 import { discoverRedditThreads } from './search.js';
 import { DEFAULT_COMPETITORS, mergeThemes, tagText } from './themes.js';
@@ -58,7 +58,7 @@ export async function fetchFeed(url, { proxyUrl } = {}) {
 }
 
 export async function run({
-    input, pushData, fetch = fetchFeed, discover = discoverRedditThreads, readArchive = fetchArcticComments,
+    input, pushData, fetch = fetchFeed, discover = discoverRedditThreads, discoverArchive = discoverArcticThreads, readArchive = fetchArcticComments,
     shouldStop = () => false, now = () => new Date(), backoffMs = 30_000,
 }) {
     const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, archiveCommentThreads: 0, requestsMade: 0, itemsReturned: 0, itemsBlocked: 0 };
@@ -144,6 +144,24 @@ export async function run({
         if (!threads.size && ['blocked', 'rate_limited'].includes(halted?.status) && !budgetStop()) {
             sourceMode = 'public_search';
             totals.searchFallbacks += 1;
+            const archived = await discoverArchive({
+                subreddit: sub, keywords: input.keywords,
+                maxThreads: Math.min(input.maxThreadsPerSubreddit, input.maxThreads ?? Number.MAX_SAFE_INTEGER),
+                dateFromMs: input.dateFromMs, dateToMs: input.dateToMs,
+                beforeRequest: reserveRequest, shouldStop: budgetStop,
+            });
+            problems.push(...archived.attempts.map((a) => ({ source: 'arctic_shift_posts', ...a })));
+            if (archived.rateLimited) totals.itemsBlocked++;
+            for (const p of archived.threads) {
+                if (threads.size >= input.maxThreadsPerSubreddit) break;
+                threads.set(p.id, { ...p, discoverySource: 'arctic_shift_posts' });
+            }
+            if (threads.size) {
+                sourceMode = 'arctic_shift_posts';
+                fallbackSucceeded = true;
+                halted = null;
+            }
+            if (!threads.size && !budgetStop()) {
             const fallback = await discover({
                 subreddit: sub,
                 keywords: input.keywords,
@@ -169,6 +187,7 @@ export async function run({
                 threads.set(p.id, { ...p, discoverySource: 'public_search' });
             }
             if (threads.size) halted = null;
+            }
         }
 
         const themeCounts = {};
@@ -247,9 +266,9 @@ export async function run({
 
         totals.comments += commentsRead;
         if (halted?.status === 'blocked' && !threads.size && !fallbackSucceeded) totals.blocked += 1;
-        const fallbackRateLimited = problems.some((p) => p.source === 'public_search' && p.status === 429);
+        const fallbackRateLimited = problems.some((p) => ['public_search', 'arctic_shift_posts'].includes(p.source) && p.status === 429);
         const status = stopReason ? 'partial' : threads.size ? 'ok' : fallbackRateLimited ? 'rate_limited' : fallbackSucceeded ? 'no_data' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_data';
-        if (!threads.size && !stopReason && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status, reason: fallbackRateLimited ? 'Public search fallback rate-limited (HTTP 429)' : fallbackSucceeded ? 'Public search succeeded but no threads met the date and keyword filters' : halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
+        if (!threads.size && !stopReason && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status, reason: fallbackRateLimited ? 'Public discovery sources rate-limited (HTTP 429)' : fallbackSucceeded ? 'Public search succeeded but no threads met the date and keyword filters' : halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
         await emit({
             recordType: 'subreddit', subreddit: sub, status,
             statusDetail: stopReason ?? (status === 'ok' || status === 'no_data' ? null : (halted?.detail ?? problems[0]?.detail ?? null)),
@@ -262,7 +281,7 @@ export async function run({
     const stoppedAtEnd = budgetStop();
     return {
         ...totals, inputUsed: input, costUsd: null, costStatus: 'unavailable', stopReason, status: stoppedAtEnd || outputCount >= maxItems || totals.threads >= (input.maxThreads ?? Number.MAX_SAFE_INTEGER) ? 'partial' : 'ok',
-        note: 'Reddit RSS is tried first for thread discovery and comments. If Reddit blocks thread discovery, Brave Search discovers indexed Reddit threads. If comment RSS is blocked, rate-limited, empty, or the thread came from public search, the actor queries the independent Arctic Shift public archive by Reddit submission ID. Archived comments retain their archived Reddit score and are ranked by that score before the requested limit. Archive coverage can lag or be incomplete. No Reddit login, client impersonation, paid API, or access-control bypass is used.',
+        note: 'Reddit RSS is tried first for thread discovery and comments. If Reddit blocks thread discovery, Arctic Shift post search is tried first, followed by Brave Search if the archive yields no matching threads. If comment RSS is blocked, rate-limited, empty, or the thread came from public search, the actor queries the independent Arctic Shift public archive by Reddit submission ID. Archived comments retain their archived Reddit score and are ranked by that score before the requested limit. Archive coverage can lag or be incomplete. No Reddit login, client impersonation, paid API, or access-control bypass is used.',
     };
 }
 
