@@ -1,4 +1,4 @@
-FROM apify/actor-node:20
+FROM apify/actor-node-playwright-chrome:20
 COPY package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund --loglevel=error
 COPY . ./
