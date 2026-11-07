@@ -17,6 +17,10 @@ const DEFAULTS = {
     minVideosForBenchmark: 10,
     maxCreatorsToRead: 30,
     delayBetweenCreatorsMs: 1500,
+    videoUrls: [],
+    creatorHandles: [],
+    searchDiscovery: true,
+    maxVideoPageReads: 100,
 };
 const sleep = (ms) =>
     new Promise((resolve) => {
@@ -37,7 +41,20 @@ export function readInput(raw) {
     input.maxVideosPerHashtag = Math.min(input.maxVideosPerHashtag, 200);
     input.concurrency = Math.min(Math.max(1, input.concurrency), 5);
     const regions = (input.regions ?? []).map((r) => String(r).trim().toUpperCase()).filter(Boolean);
-    return { ...input, hashtags, regions };
+    const videoUrls = [...new Set((input.videoUrls ?? []).map((rawUrl) => {
+        const m = String(rawUrl).match(/^https?:\\/\\/(?:www\\.)?tiktok\\.com\\/@([A-Za-z0-9._]{2,24})\\/video\\/(\\d{8,25})(?:[/?#]|$)/i);
+        if (!m) throw new Error('Every "videoUrls" entry must be a public TikTok /@handle/video/ID link.');
+        return `https://www.tiktok.com/@${m[1].toLowerCase()}/video/${m[2]}`;
+    }))];
+    const creatorHandles = [...new Set((input.creatorHandles ?? []).map((h) =>
+        String(h).trim().replace(/^@/, '').toLowerCase()).filter(Boolean))];
+    if (creatorHandles.some((h) => !/^[a-z0-9._]{2,24}$/.test(h))) throw new Error('Invalid creatorHandles entry.');
+    if (!Number.isInteger(input.maxVideoPageReads) || input.maxVideoPageReads < 1 || input.maxVideoPageReads > 500)
+        throw new Error('maxVideoPageReads must be a whole number from 1 to 500.');
+    if (typeof input.searchDiscovery !== 'boolean') throw new Error('searchDiscovery must be true or false.');
+    if (!input.searchDiscovery && !videoUrls.length && !creatorHandles.length)
+        throw new Error('When searchDiscovery is false, supply videoUrls or creatorHandles.');
+    return { ...input, hashtags, regions, videoUrls, creatorHandles };
 }
 
 export async function fetchVideoPage(url) {
@@ -53,7 +70,9 @@ export async function fetchVideoPage(url) {
 export function keepVideo(video, { tag, recentDays, regions, now }) {
     const hasTag = video.hashtags.includes(tag) || new RegExp(`#${tag}(?![\\w])`, 'i').test(video.description);
     if (!hasTag) return 'notTagged';
-    if (video.createdAt && now - Date.parse(video.createdAt) > recentDays * 86_400_000) return 'tooOld';
+    const published = video.createdAt ? Date.parse(video.createdAt) : NaN;
+    if (!Number.isFinite(published)) return 'unknownDate';
+    if (published > now + 86_400_000 || now - published > recentDays * 86_400_000) return 'tooOld';
     if (regions.length && !regions.includes(String(video.region ?? '').toUpperCase())) return 'otherRegion';
     return null;
 }
@@ -71,18 +90,20 @@ export async function run({
     for (const tag of input.hashtags) {
         if (shouldStop()) break;
         totals.hashtags += 1;
-        const found = await search({
+        const found = input.searchDiscovery ? await search({
             tag,
-            want: input.maxVideosPerHashtag * 2,
+            // Search snippets can contain unrelated video URLs. Discover a wider candidate pool
+            // before applying authoritative hashtag checks against each video's own metadata.
+            want: Math.min(200, Math.max(30, input.maxVideosPerHashtag * 4)),
             maxPages: input.maxSearchPages,
             freshness: freshnessFor(input.recentDays),
             shouldStop,
             log: (m) => log.info(m),
-        });
+        }) : { urls: [], handles: [], attempts: [], sourceResults: [], discoveryStatus: 'provided_only' };
         // recent videos with the hashtag from the creators the search found (TikTok's public creator embed)
         const embed = { creatorsRead: 0, rateLimited: 0, videosFound: 0 };
-        const byId = new Map(found.urls.map((u) => [u.split('/video/')[1], u]));
-        for (const handle of (found.handles ?? []).slice(0, input.maxCreatorsToRead)) {
+        const byId = new Map([...input.videoUrls, ...found.urls].map((u) => [u.split('/video/')[1], u]));
+        for (const handle of [...new Set([...input.creatorHandles, ...(found.handles ?? [])])].slice(0, input.maxCreatorsToRead)) {
             if (shouldStop()) break;
             let res;
             try {
@@ -105,10 +126,10 @@ export async function run({
             if (input.delayBetweenCreatorsMs) await sleep(input.delayBetweenCreatorsMs);
         }
         found.urls = [...byId.values()];
-        const dropped = { notTagged: 0, tooOld: 0, otherRegion: 0, unavailable: 0 };
+        const dropped = { notTagged: 0, tooOld: 0, otherRegion: 0, unavailable: 0, unknownDate: 0 };
         const kept = [];
         // the video id carries the post time, so old videos are skipped without reading their pages
-        const queue = found.urls.filter((u) => {
+        const eligible = found.urls.filter((u) => {
             const posted = postedAtFromId(u.split('/video/')[1]);
             if (posted != null && now() - posted > input.recentDays * 86_400_000) {
                 dropped.tooOld += 1;
@@ -116,6 +137,8 @@ export async function run({
             }
             return true;
         });
+        const queue = eligible.slice(0, input.maxVideoPageReads);
+        const candidateLimitReached = eligible.length > queue.length;
         const worker = async () => {
             for (
                 let url = queue.shift();
@@ -141,7 +164,7 @@ export async function run({
                         now: now(),
                     });
                     if (why) dropped[why] += 1;
-                    else kept.push({ ...parsed.video, url });
+                    else if (kept.length < input.maxVideosPerHashtag) kept.push({ ...parsed.video, url });
                 }
                 if (input.delayBetweenVideosMs) await sleep(input.delayBetweenVideosMs);
             }
@@ -183,6 +206,10 @@ export async function run({
             regionsWanted: input.regions,
             recentDays: input.recentDays,
             videoAddressesFound: found.urls.length,
+            videoPageReadLimit: input.maxVideoPageReads,
+            candidateLimitReached,
+            suppliedVideoUrls: input.videoUrls.length,
+            suppliedCreatorHandles: input.creatorHandles.length,
             creatorsRead: embed.creatorsRead,
             videosFromCreators: embed.videosFound,
             creatorEmbedRateLimited: embed.rateLimited,
