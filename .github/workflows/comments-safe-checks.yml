@@ -1,0 +1,21 @@
+name: Comments Safe Checks
+on:
+  push:
+    branches: [fix/comments-acceptance-safe-nov7]
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check JavaScript syntax
+        working-directory: actors/tiktok-comments-scraper
+        run: node --check main.js
+      - name: Install dependencies and run existing tests
+        working-directory: actors/tiktok-comments-scraper
+        run: |
+          npm install --no-audit --no-fund
+          npm test
