@@ -45,6 +45,8 @@ try {
     const jar = new CookieJar();
     const client = gotScraping.extend({cookieJar:jar,proxyUrl:proxy ? await proxy.newUrl() : undefined,retry:{limit:0},timeout:{request:20000},headerGeneratorOptions:{browsers:[{name:'chrome',minVersion:130}],devices:['desktop'],locales:['en-US']}});
     const referer = 'https://www.instagram.com/p/'+sc+'/';
+    let bootstrapStatus = null;
+    try { const boot = await client.get(referer,{throwHttpErrors:false,followRedirect:false}); bootstrapStatus=boot.statusCode; } catch(e) { bootstrapStatus='error:'+String(e.message).slice(0,80); }
     const headers = {'accept':'*/*','accept-language':'en-US,en;q=0.9','x-ig-app-id':'936619743392459','x-requested-with':'XMLHttpRequest','referer':referer,'origin':'https://www.instagram.com','content-type':'application/x-www-form-urlencoded'};
     const variants = [
       {name:'media_id',variables:{media_id:id,first:50}},
@@ -53,7 +55,7 @@ try {
     ];
     for (const docId of docs) for (const variant of variants) {
       const form = new URLSearchParams({doc_id:docId,variables:JSON.stringify(variant.variables)});
-      const row = {sourceUrl:raw,shortcode:sc,mediaId:id,docId,variant:variant.name,proxyMode};
+      const row = {sourceUrl:raw,shortcode:sc,mediaId:id,docId,variant:variant.name,proxyMode,bootstrapStatus};
       try {
         const response = await client.post('https://www.instagram.com/api/graphql',{headers,body:form.toString(),throwHttpErrors:false,followRedirect:false});
         row.httpStatus=response.statusCode;
