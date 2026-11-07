@@ -1,0 +1,23 @@
+name: App Review Miner reliability
+on:
+  push:
+    branches:
+      - fix/app-review-marketing-nov7
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: actors/app-review-miner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: actors/app-review-miner/package-lock.json
+      - run: npm ci
+      - run: node --check src/main.js
+      - run: node -e "JSON.parse(require('node:fs').readFileSync('.actor/input_schema.json','utf8'))"
+      - run: npm test
