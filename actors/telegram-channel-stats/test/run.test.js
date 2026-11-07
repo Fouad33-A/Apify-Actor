@@ -109,7 +109,45 @@ describe('run', () => {
             ['ghost1', 'not_found'],
         ]);
         expect(out.filter((r) => r.recordType === 'post')).toHaveLength(5);
+        expect(out.filter((r) => r.recordType === 'no_data')).toHaveLength(2);
         expect(summary).toMatchObject({ channelsOk: 1, invalidInputs: 1, stoppedBecause: 'completed' });
+    });
+
+    it('filters sampled posts by date and emits per-channel no_data', async () => {
+        const { out, pushData } = collect();
+        const input = readInput({
+            channels: ['alpha', 'ghost1'], sinceDate: '2026-10-27', includePosts: true,
+            delayBetweenRequestsMs: 0, concurrency: 1, runLabel: 'telegram-weekly',
+        });
+        const pages = {
+            ...channelPages('alpha'),
+            'https://t.me/s/ghost1': { status: 200, body: notFoundHtml() },
+            'https://t.me/ghost1': { status: 200, body: notFoundHtml() },
+        };
+        const { summary } = await run({ input, pushData, fetch: fakeFetch(pages), now });
+        expect(out.filter((r) => r.recordType === 'post')).toHaveLength(1);
+        expect(out.filter((r) => r.recordType === 'no_data')).toHaveLength(1);
+        expect(out.every((r) => r.runLabel === 'telegram-weekly' && r.scrapedAt && r.status)).toBe(true);
+        expect(summary).toMatchObject({ dateExcluded: 4, noData: 1, status: 'partial' });
+    });
+    it('enforces a global maxItems cap across channel and post rows', async () => {
+        const { out, pushData } = collect();
+        const input = readInput({
+            channels: ['alpha', 'bravo'], maxItems: 3, includePosts: true,
+            delayBetweenRequestsMs: 0, concurrency: 2,
+        });
+        const { summary } = await run({ input, pushData, fetch: fakeFetch(channelPages('alpha')), now });
+        expect(out).toHaveLength(3);
+        expect(out.map((r) => r.recordType)).toEqual(['channel', 'post', 'post']);
+        expect(summary).toMatchObject({ status: 'partial', stoppedBecause: 'maxItems', itemsEmitted: 3 });
+    });
+    it('returns no_matching_posts when sampled posts are older than sinceDate', async () => {
+        const { out, pushData } = collect();
+        const input = readInput({ channels: ['alpha'], sinceDate: '2026-11-01', delayBetweenRequestsMs: 0 });
+        const { summary } = await run({ input, pushData, fetch: fakeFetch(channelPages('alpha')), now });
+        expect(out.map((r) => r.recordType)).toEqual(['channel', 'no_data']);
+        expect(out[0].status).toBe('no_matching_posts');
+        expect(summary).toMatchObject({ noData: 1, dateExcluded: 5 });
     });
 
     it('follows channels mentioned often enough, one step, and marks where they came from', async () => {
@@ -158,5 +196,7 @@ describe('readInput', () => {
         expect(() => readInput({})).toThrow(/channels/);
         expect(() => readInput({ channels: ['a'], maxPostsPerChannel: 0 })).toThrow(/maxPostsPerChannel/);
         expect(readInput({ channels: ['alpha'] })).toMatchObject({ maxPostsPerChannel: 100, windowDays: 30 });
+        expect(() => readInput({ channels: ['alpha'], sinceDate: '2026-02-30' })).toThrow(/sinceDate/);
+        expect(() => readInput({ channels: ['alpha'], maxItems: 0 })).toThrow(/maxItems/);
     });
 });
