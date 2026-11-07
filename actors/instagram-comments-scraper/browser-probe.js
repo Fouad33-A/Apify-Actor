@@ -5,7 +5,7 @@ await Actor.init();
 const input = await Actor.getInput() || {};
 const urls = (input.postUrls || []).slice(0, 3);
 const maxScrolls = Math.max(1, Math.min(20, Number(input.maxScrolls || 8)));
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const results = [];
 try {
   for (const raw of urls) {
