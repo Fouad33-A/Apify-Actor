@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { keepVideo, readInput, run } from '../src/main.js';
-import { bingUrl, braveUrl, duckDuckGoUrl, findVideoUrls, freshnessFor } from '../src/search.js';
-import { percentile, summariseVideos } from '../src/stats.js';
-import { parseVideoPage, postedAtFromId, videoUrlsIn } from '../src/video.js';
+import { keepVideo, readInput, run } from './src/main.js';
+import { bingUrl, braveUrl, duckDuckGoUrl, findVideoUrls, freshnessFor } from './src/search.js';
+import { percentile, summariseVideos } from './src/stats.js';
+import { parseVideoPage, postedAtFromId, videoUrlsIn } from './src/video.js';
 
 const NOW = Date.parse('2026-10-29T00:00:00Z');
 const page = (item, statusCode = 0) =>
@@ -216,7 +216,7 @@ describe('creator embed', () => {
     const embedPage = (videos) =>
         `<html><script id="__FRONTITY_CONNECT_STATE__" type="application/json">${JSON.stringify({ source: { data: { list: videos } } })}</script><script>var x=1</script></html>`;
     it('reads videos with their id, caption, plays and post time, and keeps tagged recent ones', async () => {
-        const { parseEmbedPage, taggedRecent } = await import('../src/embed.js');
+        const { parseEmbedPage, taggedRecent } = await import('./src/embed.js');
         const recent = idAt('2026-10-10T00:00:00Z');
         const old = idAt('2023-01-01T00:00:00Z');
         const videos = parseEmbedPage(
@@ -261,5 +261,44 @@ describe('creator embed', () => {
         expect(reads).toEqual(['tutor', 'other']);
         const b = rows.find((r) => r.recordType === 'benchmark');
         expect(b).toMatchObject({ creatorsRead: 2, videosFromCreators: 1, videosUsed: 1 });
+    });
+});
+
+describe('supplied video discovery and strict sampling', () => {
+    it('validates supplied URLs and permits provided-only discovery', () => {
+        const raw = 'https://www.tiktok.com/@Tutor1/video/7600000000000000001?lang=en';
+        const input = readInput({ hashtags: ['igcse'], videoUrls: [raw], searchDiscovery: false, maxVideoPageReads: 2 });
+        expect(input.videoUrls).toEqual(['https://www.tiktok.com/@tutor1/video/7600000000000000001']);
+        expect(() => readInput({ hashtags: ['igcse'], videoUrls: ['https://example.com/video/123'] })).toThrow(/TikTok/);
+        expect(() => readInput({ hashtags: ['igcse'], searchDiscovery: false })).toThrow(/supply/);
+    });
+    it('does not use search when video URLs are supplied in provided-only mode', async () => {
+        const rows = [];
+        const url = 'https://www.tiktok.com/@tutor1/video/7600000000000000001';
+        const input = readInput({ hashtags: ['igcse'], videoUrls: [url], searchDiscovery: false, maxCreatorsToRead: 0, minVideosForBenchmark: 1, delayBetweenVideosMs: 0 });
+        await run({
+            input, pushData: async (row) => rows.push(row),
+            search: async () => { throw new Error('Must not search'); },
+            fetchVideo: async () => ({ status: 200, html: page(item()) }), now: () => NOW,
+        });
+        expect(rows.find((r) => r.recordType === 'benchmark')).toMatchObject({
+            status: 'ok', videosUsed: 1, suppliedVideoUrls: 1,
+        });
+    });
+    it('never emits more videos than maxVideosPerHashtag under concurrent workers', async () => {
+        const rows = [];
+        const urls = Array.from({ length: 7 }, (_, i) => `https://www.tiktok.com/@tutor/video/760000000000000000${i}`);
+        const input = readInput({ hashtags: ['igcse'], maxVideosPerHashtag: 2, concurrency: 5, delayBetweenVideosMs: 0, maxCreatorsToRead: 0 });
+        await run({
+            input, pushData: async (row) => rows.push(row),
+            search: async () => ({ urls, handles: [], attempts: [], discoveryStatus: 'ok' }),
+            fetchVideo: async () => ({ status: 200, html: page(item()) }), now: () => NOW,
+        });
+        expect(rows.filter((r) => r.recordType === 'video')).toHaveLength(2);
+        expect(rows.find((r) => r.recordType === 'benchmark').videosUsed).toBe(2);
+    });
+    it('does not treat undated videos as recent', () => {
+        const video = { hashtags: ['igcse'], description: '#igcse', createdAt: null };
+        expect(keepVideo(video, { tag: 'igcse', recentDays: 90, regions: [], now: NOW })).toBe('unknownDate');
     });
 });
