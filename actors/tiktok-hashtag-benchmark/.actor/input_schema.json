@@ -135,6 +135,12 @@
             "editor": "number",
             "minimum": 1,
             "description": "Optional total maximum matching videos across all hashtags. Leave empty for the existing per-hashtag behavior. The benchmark still emits one summary row per processed hashtag."
+        },
+        "sinceDate": {
+            "title": "Earliest publication date (optional)",
+            "type": "string",
+            "editor": "textfield",
+            "description": "YYYY-MM-DD (UTC). Only videos published on or after this date qualify. Both sinceDate and recentDays apply; the stricter cutoff wins. Leave blank for existing behavior."
         }
     },
     "required": [
