@@ -132,11 +132,22 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
         for (const re of patterns) { const match = html.match(re); if (match) return match[1]; }
         return null;
     };
-    const csrf = extractToken([/"csrf_token"\\s*:\\s*"([^"]+)"/, /"csrf"\\s*:\\s*"([^"]+)"/]);
+    let csrf = extractToken([/"csrf_token"\\s*:\\s*"([^"]+)"/, /"csrf"\\s*:\\s*"([^"]+)"/]);
     const lsd = extractToken([/\\["LSD",\\[\\],\\{"token":"([^"]+)"\\}/, /"lsd":"([^"]+)"/]);
+    // The verified probe bootstraps /p/{shortcode}/ even for reels. Retry that canonical path when tokens are absent.
+    if (!csrf || !lsd) {
+        try {
+            const canonical = 'https://www.instagram.com/p/' + sc + '/';
+            const second = await client.get(canonical, { throwHttpErrors: false, timeout: { request: 18000 } });
+            if (second.statusCode === 200) {
+                const canonicalHtml = String(second.body || '');
+                csrf ||= canonicalHtml.match(/"csrf_token"\\s*:\\s*"([^"]+)"/)?.[1] ?? null;
+            }
+        } catch (e) { log.debug('Canonical token bootstrap unavailable: ' + String(e?.message ?? e).slice(0, 100)); }
+    }
     const graphqlDiag = { name: 'logged_out_graphql', pages: [], hasCsrf: Boolean(csrf), hasLsd: Boolean(lsd) };
     diag.contracts.push(graphqlDiag);
-    if (csrf && lsd && rows.size < cap) {
+    if (lsd && rows.size < cap) {
         const gqlHeaders = {
             accept: '*/*', 'accept-language': 'en-US,en;q=0.9',
             'x-ig-app-id': '936619743392459',
@@ -146,7 +157,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
             'content-type': 'application/x-www-form-urlencoded',
             'x-fb-friendly-name': 'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery',
             'x-root-field-name': 'xig_polaris_media', 'x-asbd-id': '359341',
-            'x-csrftoken': csrf, 'x-fb-lsd': lsd,
+            ...(csrf ? { 'x-csrftoken': csrf } : {}), 'x-fb-lsd': lsd,
         };
         let after = null, stagnant = 0;
         const cursors = new Set();
