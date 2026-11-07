@@ -24,6 +24,8 @@ Reads what a **public Facebook group exposes in logged-out public HTML**: group 
 | `includeAuthors` | Off by default so personal names are not collected unless requested. |
 | `maxSessionAttempts` | Fresh anonymous HTTP attempts per group. Default `1`; increase only for login/block resilience. Extra sessions do not guarantee deeper feed results. |
 | `proxyConfiguration` | Optional. By default the Actor uses Apify residential proxies. |
+| `maxItems` | Optional global cap on dataset rows (group, post and no_data). The summary says `partial` when work is unfinished. |
+| `runLabel` | Optional string echoed in every output row and `SUMMARY`. |
 
 ## Output
 
@@ -67,3 +69,16 @@ The default is one anonymous HTTP request per group, using Apify residential pro
 ## FAQ, disclaimers and support
 
 Only public logged-out content is read. Follow Facebook's terms and applicable law, and do not use the data to identify or contact individuals. For problems, provide a public example group and the Actor run status/logs in the Issues tab.
+
+
+## ExamRung Marketing Agent compatibility
+
+The original public HTML extraction remains unchanged. Extra output fields include `groupName`, `groupUrl`, `postUrl`, `postedAt`, `sourceUrl`, `runLabel`, `isQuestion`, `topicTags`, `classificationMethod`, and per-group `verificationStatus`. All posts retain their original text and dates.
+
+Question and topic flags are simple text heuristics, **not confirmed classifications**. `rulesText`, `allowsPromotion`, `postsPerWeek`, `language`, and `authorType` are explicitly `null` when anonymous public HTML cannot substantiate them. Do not treat these missing values as evidence that promotion is allowed.
+
+A group with no posts still receives its group row with legacy status, plus a `no_data` row when the run has no posts and the global cap permits it. `noDataReason` distinguishes `no_matching_posts`, `group_unverified`, and `no_posts_exposed`. This does not imply the group is nonexistent: Facebook sometimes provides a generic page rather than group content.
+
+The key-value store includes `OUTPUT` for older consumers and `SUMMARY` with exact input, emitted counts, date exclusions and completion status. `maxItems` counts dataset rows; it does not limit proxy expenses. A universal hard dollar budget cannot be enforced by this FREE Actor; run-time and infrastructure spending limits must be configured and monitored externally.
+
+This Actor never authenticates to Facebook or reads private groups. Scraping additional pages is not guaranteed by increasing session attempts, and a few exposed posts are not a reliable sample for computing weekly activity.
