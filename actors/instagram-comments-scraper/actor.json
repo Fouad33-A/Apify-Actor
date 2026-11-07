@@ -1,0 +1,1 @@
+{"actorSpecification":1,"name":"instagram-comments-scraper","title":"Instagram Comments Scraper","version":"1.0","buildTag":"latest","input":"./input_schema.json","dockerfile":"./Dockerfile"}
