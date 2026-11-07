@@ -11,9 +11,10 @@ try {
   for (const raw of urls) {
     const context = await browser.newContext({ locale: 'en-US', viewport: { width: 1365, height: 900 } });
     const page = await context.newPage();
-    const seen = new Map(), network = [];
+    const seen = new Map(), network = [], allResponses = [];
     page.on('response', async response => {
       const url = response.url();
+      if (allResponses.length < 100) allResponses.push({ host: (() => { try { return new URL(url).hostname; } catch { return ''; } })(), path: (() => { try { return new URL(url).pathname.slice(0, 120); } catch { return ''; } })(), status: response.status() });
       if (!/instagram\.com\/(?:graphql|api\/v1\/media)/.test(url)) return;
       const item = { path: new URL(url).pathname, status: response.status(), method: response.request().method() };
       try {
@@ -36,17 +37,20 @@ try {
     try { await page.goto(raw, { waitUntil: 'domcontentloaded', timeout: 35000 }); } catch (e) { navigationError = String(e.message).slice(0, 180); }
     await page.waitForTimeout(3000);
     const initial = seen.size;
+    const initialText = (await page.locator('body').innerText().catch(() => '')).slice(0, 1000);
+    const buttonLabels = await page.getByRole('button').allTextContents().catch(() => []);
     const steps = [];
     for (let i = 0; i < maxScrolls; i++) {
       await page.mouse.wheel(0, 650);
       await page.waitForTimeout(1100);
       const buttons = page.getByRole('button', { name: /view (all|more)|load more|more comments|see more/i });
       const count = await buttons.count().catch(() => 0);
-      if (count) await buttons.first().click({ timeout: 2000 }).catch(() => {});
+      let clickError = null;
+      if (count) await buttons.first().click({ timeout: 2000 }).catch(e => { clickError = String(e.message).slice(0, 150); });
       await page.waitForTimeout(700);
-      steps.push({ step: i + 1, networkComments: seen.size, matchingButtons: count });
+      steps.push({ step: i + 1, networkComments: seen.size, matchingButtons: count, clickError });
     }
-    const result = { sourceUrl: raw, navigationError, finalUrl: page.url(), title: await page.title().catch(() => ''), initialNetworkComments: initial, networkComments: seen.size, steps, network, sample: [...seen.values()].slice(0, 5) };
+    const result = { sourceUrl: raw, navigationError, finalUrl: page.url(), title: await page.title().catch(() => ''), initialNetworkComments: initial, networkComments: seen.size, initialText, buttonLabels: buttonLabels.slice(0, 30), allResponses, steps, network, sample: [...seen.values()].slice(0, 5) };
     results.push(result);
     await Actor.pushData(result);
     await context.close();
