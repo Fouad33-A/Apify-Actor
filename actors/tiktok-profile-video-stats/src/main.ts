@@ -141,6 +141,9 @@ interface Input {
     maxItems?: number;
     concurrency?: number;
     outputRows?: "summaryOnly" | "all";
+    runLabel?: string;
+    maxVideosPerProfile?: number;
+    sinceDate?: string;
 }
 
 interface ProfileData {
@@ -3457,6 +3460,17 @@ function buildSummary(
         );
 
     return {
+        medianPlaysLast10: round(median(videos.slice(0, 10).map(v => v.plays)), 1),
+        medianPlaysLast30: round(median(videos.slice(0, 30).map(v => v.plays)), 1),
+        postsPerWeek30d: round(sortedDates.filter(date => date >= Date.now() / 1000 - 30 * 86400).length * 7 / 30, 2),
+        lastPostDate: sortedDates.length ? new Date(sortedDates[0] * 1000).toISOString() : null,
+        engagementRate: totalPlays > 0 && videos.every(v => v.likes !== null && v.comments !== null && v.shares !== null)
+            ? round(videos.reduce((sum, v) => sum + (v.likes ?? 0) + (v.comments ?? 0) + (v.shares ?? 0), 0) * 100 / totalPlays, 2)
+            : null,
+        emailInBio: profile.emails.length > 0,
+        emailAddresses: profile.emails,
+        bioLinks: profile.bioLink ? [profile.bioLink] : [],
+        sellsProducts: selling.selling,
         videosAnalyzed:
             videos.length,
 
@@ -3740,6 +3754,7 @@ let maxItemsReached =
     false;
 
 let summaryOnlyOutput = false;
+let currentRunLabel = '';
 
 async function pushLimited(
     item: Record<
@@ -3759,9 +3774,13 @@ async function pushLimited(
         return false;
     }
 
-    await Actor.pushData(
-        item,
-    );
+    await Actor.pushData({
+        ...item,
+        recordType: item.rowType ?? 'unknown',
+        scrapedAt: new Date().toISOString(),
+        sourceUrl: item.videoUrl ?? item.profileUrl ?? null,
+        runLabel: currentRunLabel,
+    });
 
     datasetItemsWritten +=
         1;
@@ -4521,6 +4540,7 @@ try {
         ) ?? {};
 
     summaryOnlyOutput = input.outputRows === 'summaryOnly';
+    currentRunLabel = typeof input.runLabel === 'string' ? input.runLabel : '';
 
     const usernames =
         uniqueStrings(
@@ -4546,9 +4566,10 @@ try {
         );
     }
 
+    const runLabel = typeof input.runLabel === 'string' ? input.runLabel : '';
     const videosPerProfile =
         clampInt(
-            input.videosPerProfile,
+            input.maxVideosPerProfile ?? input.videosPerProfile,
             10,
             1,
             30,
@@ -4823,9 +4844,8 @@ try {
         rowType:
             'output',
 
-        status:
-            'completed',
-
+        status: maxItemsReached || results.filter(Boolean).length < usernames.length ? 'partial' : 'completed',
+        runLabel,
         stopReason,
 
         creatorsRequested:
@@ -4924,6 +4944,16 @@ try {
         'OUTPUT',
         output,
     );
+    await Actor.setValue('SUMMARY', {
+        ...output,
+        recordType: 'run_summary',
+        input,
+        itemsReturned: datasetItemsWritten,
+        itemsBlocked: failedProfiles,
+        requestsMade: null,
+        costUsd: null,
+        costNote: 'Apify authoritative billing is not exposed within the Actor runtime.',
+    });
 
     log.info(
         '[OUTPUT] ' +
