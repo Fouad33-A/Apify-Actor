@@ -1,0 +1,20 @@
+name: Instagram Comments Scraper reliability
+on:
+  push:
+    branches:
+      - import/instagram-comments-web-ide-nov7
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate Actor source and schemas
+        working-directory: actors/instagram-comments-scraper
+        run: |
+          node --check main.js
+          node -e "for (const p of ['actor.json','input_schema.json','package.json']) JSON.parse(require('node:fs').readFileSync(p,'utf8'))"
+          node --input-type=module -e "import fs from 'node:fs'; import assert from 'node:assert/strict'; const code=fs.readFileSync('main.js','utf8'); const schema=JSON.parse(fs.readFileSync('input_schema.json','utf8')); for (const key of ['postUrls','maxItems','runLabel','sinceDate']) {assert.ok(schema.properties[key],key); assert.ok(code.includes(key),key)} assert.ok(code.includes('recordType: \'no_data\'')); assert.ok(code.includes('recordType: \'comment\''));"
