@@ -8,7 +8,9 @@
             "type": "array",
             "description": "Addresses like https://www.facebook.com/groups/groupname or .../groups/1234567890. Only public groups can be read without a login.",
             "editor": "stringList",
-            "prefill": ["https://www.facebook.com/groups/example"]
+            "prefill": [
+                "https://www.facebook.com/groups/example"
+            ]
         },
         "maxPostsPerGroup": {
             "title": "Posts per group",
@@ -54,7 +56,23 @@
             "type": "object",
             "description": "Optional. By default the Actor uses Apify residential proxies with anonymous public requests. The Actor never logs into Facebook or supplies Facebook account cookies.",
             "editor": "proxy"
+        },
+        "maxItems": {
+            "title": "Maximum dataset rows",
+            "type": "integer",
+            "description": "Optional global cap across group, post, and no_data rows; when reached, run stops and SUMMARY indicates partial if work remains.",
+            "editor": "number",
+            "minimum": 1,
+            "maximum": 100000
+        },
+        "runLabel": {
+            "title": "Run label",
+            "type": "string",
+            "description": "Optional label echoed on all dataset rows and in SUMMARY.",
+            "editor": "textfield"
         }
     },
-    "required": ["groups"]
+    "required": [
+        "groups"
+    ]
 }
