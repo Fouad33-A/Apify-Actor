@@ -1,0 +1,62 @@
+{
+  "title": "Instagram Comments Scraper input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "postUrls": {
+      "title": "Post / reel URLs",
+      "type": "array",
+      "description": "Public Instagram post or reel URLs to scrape. Enter one URL per item.",
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      }
+    },
+    "maxCommentsPerPost": {
+      "title": "Max comments per post",
+      "type": "integer",
+      "default": 300,
+      "minimum": 1,
+      "maximum": 1000,
+      "description": "Maximum number of qualifying top-level comments and replies to save for each post before stopping."
+    },
+    "includeReplies": {
+      "title": "Include replies",
+      "type": "boolean",
+      "default": false,
+      "description": "When enabled, also collect replies that Instagram exposes publicly without login."
+    },
+    "minLikes": {
+      "title": "Minimum comment likes",
+      "type": "integer",
+      "default": 0,
+      "minimum": 0,
+      "description": "Skip comments whose visible like count is below this value."
+    },
+    "maxItems": {
+      "title": "Maximum total rows",
+      "type": "integer",
+      "default": 500,
+      "minimum": 1,
+      "maximum": 5000,
+      "description": "Hard stop for the total number of comment rows saved in one run to control cost."
+    },
+    "maxVideosPerCreator": {
+      "title": "Maximum posts per creator",
+      "type": "integer",
+      "default": 10,
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Hard stop on how many supplied posts or reels from the same creator may be processed in one run."
+    },
+    "useResidentialProxy": {
+      "title": "Use residential proxy",
+      "type": "boolean",
+      "description": "Use your Apify residential proxy for the anonymous public Instagram web request. No third-party provider.",
+      "default": true
+    }
+  },
+  "required": [
+    "postUrls"
+  ]
+}
