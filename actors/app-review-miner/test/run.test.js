@@ -37,6 +37,8 @@ describe('readInput', () => {
         expect(() => readInput({ apps: ['x'], maxRating: 6 })).toThrow(/maxRating/);
         expect(() => readInput({ searchKeywords: ['x'], searchStores: ['other'] })).toThrow(/searchStores/);
         expect(readInput({ apps: ['x'] })).toMatchObject({ countries: ['us'], maxRating: 2 });
+        expect(() => readInput({ apps: ['x'], maxItems: 0 })).toThrow(/maxItems/);
+        expect(() => readInput({ apps: ['x'], sinceDate: '2026-02-30' })).toThrow(/sinceDate/);
     });
 });
 
@@ -50,6 +52,7 @@ describe('makeAccept', () => {
         expect(makeAccept({ ...base, recentDays: 3 }, now)(ok)).toBe(false);
         expect(makeAccept({ ...base, keywords: ['refund'] }, now)(ok)).toBe(false);
         expect(makeAccept({ ...base, keywords: ['crash'] }, now)(ok)).toBe(true);
+        expect(makeAccept({ ...base, sinceMs: Date.parse('2026-10-21') }, now)(ok)).toBe(false);
     });
 });
 
@@ -69,6 +72,32 @@ describe('run', () => {
             [null, 'invalid_input', null, null], ['apple', 'ok', 3, 2], ['google', 'ok', 40, 1],
         ]);
         expect(summary).toMatchObject({ appsRead: 2, reviewRows: 3, stoppedBecause: 'completed' });
+    });
+
+    it('filters by sinceDate and emits no_data for zero matching reviews', async () => {
+        const { out, pushData } = collect();
+        const input = readInput({
+            apps: ['111111'], sinceDate: '2026-11-01', runLabel: 'weekly',
+        });
+        const summary = await run({ input, pushData, apple: appleStub, play: playStub, now });
+        expect(out.map((r) => r.recordType)).toEqual(['app', 'no_data']);
+        expect(out.every((r) => r.runLabel === 'weekly' && r.scrapedAt && r.status)).toBe(true);
+        expect(summary).toMatchObject({ noData: 1, reviewRows: 0, itemsEmitted: 2, status: 'completed' });
+    });
+    it('limits all dataset rows with maxItems', async () => {
+        const { out, pushData } = collect();
+        const input = readInput({ apps: ['111111', '222222'], maxItems: 2 });
+        const summary = await run({ input, pushData, apple: appleStub, play: playStub, now });
+        expect(out).toHaveLength(2);
+        expect(summary).toMatchObject({ itemsEmitted: 2, stoppedBecause: 'maxItems', status: 'partial' });
+    });
+    it('marks failed app lookups partial and continues processing', async () => {
+        const { out, pushData } = collect();
+        const input = readInput({ apps: ['com.gone.app', 'com.rival.notes'] });
+        const failing = { ...playStub, lookupPlayApp: async (id) => { if (id === 'com.gone.app') throw new Error('404'); return playStub.lookupPlayApp(id); } };
+        const summary = await run({ input, pushData, apple: appleStub, play: failing, now });
+        expect(summary).toMatchObject({ status: 'partial', appErrors: 1, noData: 1 });
+        expect(out.some((r) => r.recordType === 'review')).toBe(true);
     });
 
     it('finds apps by keyword and honours maxReviewRows', async () => {
