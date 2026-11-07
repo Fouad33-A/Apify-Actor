@@ -1,0 +1,21 @@
+name: Profile Since Date Checks
+on:
+  push:
+    branches: [fix/profile-sincedate-safe-nov7]
+  workflow_dispatch:
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Schema validation
+        working-directory: actors/tiktok-profile-video-stats
+        run: node -e "const s=require('./.actor/input_schema.json');if(s.properties.sinceDate.type!=='string')process.exit(1)"
+      - name: TypeScript compile
+        working-directory: actors/tiktok-profile-video-stats
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
