@@ -1,0 +1,23 @@
+name: Comments Global Limit Checks
+on:
+  push:
+    branches: [fix/comments-global-maxitems-safe-nov7]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and schema
+        working-directory: actors/tiktok-comments-scraper
+        run: |
+          node --check main.js
+          node -e "const s=require('./input_schema.json'); if(s.properties.maxItems.type!=='integer'||s.properties.maxItems.minimum!==1)process.exit(1)"
+      - name: Existing tests
+        working-directory: actors/tiktok-comments-scraper
+        run: |
+          npm install --no-audit --no-fund
+          npm test
