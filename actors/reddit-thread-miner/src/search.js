@@ -83,25 +83,27 @@ export function redditCommentsIn(html, subreddit, submissionId) {
 
 export async function discoverRedditThreads({
     subreddit, keywords = [], maxThreads = 100, maxPages = 2, dateFromMs = null, dateToMs = null, fetch = fetchBrave,
-    paceMs = 4000, backoffMs = 20_000, shouldStop = () => false, beforeRequest = () => true, log = () => {},
+    paceMs = 4000, backoffMs = 1500, shouldStop = () => false, beforeRequest = () => true, log = () => {},
 }) {
     const terms = keywords.length ? keywords : [''];
     const found = new Map();
     const attempts = [];
     let rateLimited = false;
+    let searchHalted = false;
     for (const keyword of terms) {
         const dateTerms = [dateFromMs != null ? `after:${new Date(dateFromMs - 86400000).toISOString().slice(0, 10)}` : '', dateToMs != null ? `before:${new Date(dateToMs + 86400000).toISOString().slice(0, 10)}` : ''].filter(Boolean).join(' ');
         const query = `site:reddit.com/r/${subreddit}/comments ${keyword} ${dateTerms}`.trim();
-        for (let page = 0; page < maxPages && found.size < maxThreads && !shouldStop(); page += 1) {
+        for (let page = 0; page < maxPages && found.size < maxThreads && !shouldStop() && !searchHalted; page += 1) {
             let res;
-            for (let attempt = 0; attempt <= 2; attempt += 1) {
+            for (let attempt = 0; attempt <= 1; attempt += 1) {
                 if (shouldStop() || !beforeRequest()) break;
                 res = await fetch(braveUrl(query, page));
                 if (res.status !== 429) break;
                 rateLimited = true;
-                if (attempt < 2) await sleep(backoffMs);
+                if (attempt < 1 && !shouldStop()) await sleep(backoffMs);
             }
             if (!res) break;
+            if (res.status === 429) searchHalted = true;
             const rows = res.status === 200 ? redditResultsIn(res.body, subreddit) : [];
             const before = found.size;
             for (const row of rows) {
@@ -119,7 +121,7 @@ export async function discoverRedditThreads({
             if (res.status !== 200 || !rows.length || (page > 0 && found.size === before && rows.length < 5)) break;
             if (paceMs) await sleep(paceMs);
         }
-        if (found.size >= maxThreads) break;
+        if (found.size >= maxThreads || searchHalted || shouldStop()) break;
     }
     return { threads: [...found.values()], attempts, rateLimited };
 }
