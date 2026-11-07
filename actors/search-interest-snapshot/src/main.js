@@ -22,6 +22,9 @@ const DEFAULTS = {
     includeRelatedQueries: true,
     language: 'en-US',
     delayBetweenRequestsMs: 2500,
+    maxItems: null,
+    runLabel: null,
+    sinceDate: null,
 };
 const TIME = /^(now \d+-[Hd]|today \d+-[mdy]|all|\d{4}-\d{2}-\d{2} \d{4}-\d{2}-\d{2})$/;
 const sleep = (ms) =>
@@ -41,7 +44,13 @@ export function readInput(raw) {
         throw new Error(
             '"timeRange" must look like "today 12-m", "today 5-y", "now 7-d", "all" or "2025-01-01 2025-12-31".',
         );
-    return { ...input, keywords, geos };
+    if (input.maxItems != null && (!Number.isInteger(input.maxItems) || input.maxItems < 1))
+        throw new Error('"maxItems" must be a positive whole number.');
+    if (input.sinceDate != null && (!/^\d{4}-\d{2}-\d{2}$/.test(input.sinceDate)
+        || Number.isNaN(Date.parse(input.sinceDate))
+        || new Date(input.sinceDate).toISOString().slice(0, 10) !== input.sinceDate))
+        throw new Error('"sinceDate" must be a valid YYYY-MM-DD date.');
+    return { ...input, keywords, geos, sinceMs: input.sinceDate ? Date.parse(input.sinceDate) : null };
 }
 
 // groups of keywords asked together: alone (own 0-100 scale) or up to 5 together (one shared scale)
@@ -96,17 +105,25 @@ export async function run({
     now = () => new Date(),
     backoffMs = 30_000,
 }) {
-    const counts = { requests: 0, rows: 0, failed: 0 };
+    const counts = { requests: 0, rows: 0, failed: 0, noData: 0, dateExcluded: 0, suppressedRows: 0 };
+    let stoppedBecause = 'completed';
+    let processedJobs = 0;
     const jobs = [];
     for (const geo of input.geos)
         for (const keywords of groupsOf(input.keywords, input.compareTogether)) jobs.push({ geo, keywords });
     const base = { timeRange: input.timeRange, property: input.property || 'web', category: input.category };
+    const atCap = () => input.maxItems != null && counts.rows >= input.maxItems;
     const push = async (row) => {
+        if (atCap()) { counts.suppressedRows++; stoppedBecause = 'maxItems'; return false; }
         counts.rows += 1;
-        await pushData({ ...row, scrapedAt: now().toISOString() });
+        if (row.status === 'no_data') counts.noData++;
+        const sourceUrl = 'https://trends.google.com/trends/explore';
+        await pushData({ ...row, scrapedAt: now().toISOString(), sourceUrl, runLabel: input.runLabel ?? null });
+        return true;
     };
     for (const { geo, keywords } of jobs) {
-        if (shouldStop()) break;
+        if (shouldStop() || atCap()) { stoppedBecause = shouldStop() ? 'aborted' : 'maxItems'; break; }
+        processedJobs++;
         const where = geo || 'worldwide';
         const fail = async (stage, e) => {
             counts.failed += 1;
@@ -150,8 +167,11 @@ export async function run({
             await fail('interest over time', series);
             continue;
         }
-        const timeline = series.json?.default?.timelineData ?? [];
+        const allTimeline = series.json?.default?.timelineData ?? [];
+        const timeline = input.sinceMs == null ? allTimeline : allTimeline.filter((p) => Number(p.time) * 1000 >= input.sinceMs);
+        counts.dateExcluded += allTimeline.length - timeline.length;
         for (const [i, keyword] of keywords.entries()) {
+            if (atCap()) { stoppedBecause = 'maxItems'; break; }
             const s = summarise(timeline, i);
             const { points, ...summary } = s;
             await push({
@@ -164,7 +184,8 @@ export async function run({
                 ...summary,
             });
             if (input.includeTimeline)
-                for (const p of points)
+                for (const p of points) {
+                    if (atCap()) { stoppedBecause = 'maxItems'; break; }
                     await push({
                         recordType: 'timeline',
                         keyword,
@@ -175,8 +196,9 @@ export async function run({
                         isPartial: p.partial,
                         status: 'ok',
                     });
+                }
             const rel = widgets.related[i];
-            if (input.includeRelatedQueries && rel) {
+            if (input.includeRelatedQueries && rel && !atCap()) {
                 await sleep(input.delayBetweenRequestsMs);
                 counts.requests += 1;
                 const related = await ask(
@@ -186,7 +208,8 @@ export async function run({
                 );
                 if (related.error) log.warning(`related queries for "${keyword}" (${where}): ${related.error}`);
                 else
-                    for (const q of relatedFrom(related.json))
+                    for (const q of relatedFrom(related.json)) {
+                        if (atCap()) { stoppedBecause = 'maxItems'; break; }
                         await push({
                             recordType: 'relatedQuery',
                             keyword,
@@ -197,6 +220,7 @@ export async function run({
                             value: q.value,
                             status: 'ok',
                         });
+                    }
             }
         }
         await sleep(input.delayBetweenRequestsMs);
@@ -204,6 +228,11 @@ export async function run({
     return {
         ...counts,
         searches: jobs.length,
+        jobsProcessed: processedJobs,
+        stoppedBecause,
+        status: stoppedBecause !== 'completed' || counts.failed > 0 ? 'partial' : 'completed',
+        runLabel: input.runLabel ?? null,
+        sinceDate: input.sinceDate ?? null,
         note: 'Values are Google Trends\' 0-100 index (100 = the peak for that keyword and place in the period), not search counts. With "compare together" off each keyword has its own scale, so do not compare numbers between keywords.',
     };
 }
@@ -225,6 +254,7 @@ async function main() {
             shouldStop: () => stop,
         });
         await Actor.setValue('OUTPUT', summary);
+        await Actor.setValue('SUMMARY', { ...summary, exactInput: input, scrapedAt: new Date().toISOString() });
         log.info(`Done: ${summary.rows} row(s), ${summary.failed} search(es) failed.`);
     } catch (error) {
         log.error(String(error?.message ?? error));
