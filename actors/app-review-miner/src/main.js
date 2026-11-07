@@ -81,6 +81,7 @@ export async function run({ input, pushData, apple = {}, play = {}, now = Date.n
     let itemsEmitted = 0;
     let noData = 0;
     let suppressedRows = 0;
+    let appErrors = 0;
     const atCap = () => input.maxItems != null && itemsEmitted >= input.maxItems;
     const emit = async (row) => {
         if (atCap()) { suppressedRows++; return false; }
@@ -180,6 +181,7 @@ export async function run({ input, pushData, apple = {}, play = {}, now = Date.n
             statusDetail = message;
         }
 
+        if (status !== 'ok') appErrors++;
         const app = { ...target, name: details?.name };
         const kept = (result?.reviews ?? [])
             .map((review) => ({ review, hits: classify(`${review.title ?? ''} ${review.text ?? ''}`) }))
@@ -200,8 +202,8 @@ export async function run({ input, pushData, apple = {}, play = {}, now = Date.n
 
     if (atCap() && (suppressedRows > 0 || appsRead < targets.length)) stoppedBecause = 'maxItems';
     return {
-        appsRead, reviewRows, problems, stoppedBecause, targets: targets.length, itemsEmitted, noData, suppressedRows,
-        status: stoppedBecause !== 'completed' || problems.length > 0 ? 'partial' : 'completed',
+        appsRead, reviewRows, problems, appErrors, stoppedBecause, targets: targets.length, itemsEmitted, noData, suppressedRows,
+        status: stoppedBecause !== 'completed' || problems.length > 0 || appErrors > 0 ? 'partial' : 'completed',
         runLabel: input.runLabel ?? null, sinceDate: input.sinceDate ?? null,
     };
 }
