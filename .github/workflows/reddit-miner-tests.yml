@@ -1,0 +1,24 @@
+name: Reddit Thread Miner tests
+on:
+  push:
+    branches:
+      - fix/reddit-miner-reliability-nov6
+    paths:
+      - 'actors/reddit-thread-miner/**'
+      - '.github/workflows/reddit-miner-tests.yml'
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: actors/reddit-thread-miner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run reliability tests
+        run: npm test
