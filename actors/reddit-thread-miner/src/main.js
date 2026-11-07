@@ -131,6 +131,7 @@ export async function run({
                 subreddit: sub,
                 keywords: input.keywords,
                 maxThreads: input.maxThreadsPerSubreddit,
+                dateFromMs: input.dateFromMs, dateToMs: input.dateToMs,
                 maxPages: Math.min(3, Math.max(1, Math.ceil(input.maxThreadsPerSubreddit / 20))),
                 shouldStop,
                 log: (m) => log.info(m),
@@ -225,10 +226,10 @@ export async function run({
         }
 
         totals.comments += commentsRead;
-        if (halted?.status === 'blocked' && !threads.size) totals.blocked += 1;
+        if (halted?.status === 'blocked' && !threads.size && !fallbackSucceeded) totals.blocked += 1;
         const fallbackRateLimited = problems.some((p) => p.source === 'public_search' && p.status === 429);
-        const status = threads.size ? 'ok' : fallbackSucceeded ? 'no_data' : fallbackRateLimited ? 'rate_limited' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_data';
-        if (!threads.size && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status, reason: fallbackSucceeded ? 'Public search succeeded but no threads met the date and keyword filters' : fallbackRateLimited ? 'Public search fallback rate-limited (HTTP 429)' : halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
+        const status = threads.size ? 'ok' : fallbackRateLimited ? 'rate_limited' : fallbackSucceeded ? 'no_data' : halted?.status === 'blocked' ? 'blocked' : halted?.status === 'not_found' ? 'not_found' : halted?.status === 'rate_limited' ? 'rate_limited' : problems.length ? 'error' : 'no_data';
+        if (!threads.size && outputCount < maxItems) await emit({ recordType: 'no_data', subreddit: sub, status, reason: fallbackRateLimited ? 'Public search fallback rate-limited (HTTP 429)' : fallbackSucceeded ? 'Public search succeeded but no threads met the date and keyword filters' : halted?.detail ?? problems[0]?.detail ?? 'No matching threads found', scrapedAt: stamp() });
         await emit({
             recordType: 'subreddit', subreddit: sub, status,
             statusDetail: status === 'ok' || status === 'no_data' ? null : (halted?.detail ?? problems[0]?.detail ?? null),
