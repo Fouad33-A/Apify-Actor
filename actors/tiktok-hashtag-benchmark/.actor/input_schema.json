@@ -8,8 +8,13 @@
             "type": "array",
             "description": "Hashtags to benchmark, with or without #, for example igcse, satmath, apcalculus, ibmaths.",
             "editor": "stringList",
-            "default": ["igcse"],
-            "prefill": ["igcse", "satmath"]
+            "default": [
+                "igcse"
+            ],
+            "prefill": [
+                "igcse",
+                "satmath"
+            ]
         },
         "regions": {
             "title": "Countries of the videos",
@@ -89,7 +94,37 @@
             "editor": "number",
             "default": 1500,
             "minimum": 0
+        },
+        "videoUrls": {
+            "title": "Known TikTok video URLs (optional)",
+            "type": "array",
+            "description": "Public TikTok /@handle/video/ID links, for example from TikTok One or the completed TikTok Profile & Video Stats Actor. These videos are individually checked for the requested hashtag, date and country.",
+            "editor": "stringList"
+        },
+        "creatorHandles": {
+            "title": "Known creator handles (optional)",
+            "type": "array",
+            "description": "Optional creator handles to inspect for recent public videos. Enter without or with @. Useful when search engines do not find suitable videos.",
+            "editor": "stringList"
+        },
+        "searchDiscovery": {
+            "title": "Discover additional videos through search",
+            "type": "boolean",
+            "description": "Turn off to benchmark only supplied video URLs and/or creator handles; turn on (default) to add search-engine discoveries.",
+            "editor": "checkbox",
+            "default": true
+        },
+        "maxVideoPageReads": {
+            "title": "Maximum candidate video page reads per hashtag",
+            "type": "integer",
+            "description": "Upper bound on TikTok video-page requests per hashtag, including unrelated candidates. This is a request limit, not a guaranteed USD charge cap.",
+            "editor": "number",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 500
         }
     },
-    "required": ["hashtags"]
+    "required": [
+        "hashtags"
+    ]
 }
