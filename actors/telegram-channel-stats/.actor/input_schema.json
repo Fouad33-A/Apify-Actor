@@ -8,8 +8,12 @@
             "type": "array",
             "description": "Public channels to read: a name (examplechannel), @examplechannel or a link such as https://t.me/examplechannel. Private invite links (t.me/+...) cannot be read.",
             "editor": "stringList",
-            "default": ["telegram"],
-            "prefill": ["telegram"]
+            "default": [
+                "telegram"
+            ],
+            "prefill": [
+                "telegram"
+            ]
         },
         "maxPostsPerChannel": {
             "title": "Posts to read per channel",
@@ -91,7 +95,28 @@
             "type": "object",
             "description": "Optional. Not needed normally; use it only if Telegram starts answering with HTTP 429.",
             "editor": "proxy"
+        },
+        "maxItems": {
+            "title": "Maximum dataset rows",
+            "type": "integer",
+            "description": "Optional global cap across channel, post and no_data rows.",
+            "editor": "number",
+            "minimum": 1
+        },
+        "runLabel": {
+            "title": "Run label",
+            "type": "string",
+            "description": "Optional run label echoed on every dataset row and SUMMARY.",
+            "editor": "textfield"
+        },
+        "sinceDate": {
+            "title": "Only posts on or after date",
+            "type": "string",
+            "description": "Optional UTC YYYY-MM-DD cutoff. Filters sampled post rows and recomputes metrics from matching sampled posts; does not extend historical retrieval.",
+            "editor": "textfield"
         }
     },
-    "required": ["channels"]
+    "required": [
+        "channels"
+    ]
 }
