@@ -128,6 +128,13 @@
             "type": "string",
             "editor": "textfield",
             "description": "Optional label echoed in each video and benchmark row and in the SUMMARY record."
+        },
+        "maxItems": {
+            "title": "Global maximum videos",
+            "type": "integer",
+            "editor": "number",
+            "minimum": 1,
+            "description": "Optional total maximum matching videos across all hashtags. Leave empty for the existing per-hashtag behavior. The benchmark still emits one summary row per processed hashtag."
         }
     },
     "required": [
