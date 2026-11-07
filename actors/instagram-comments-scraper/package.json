@@ -3,7 +3,7 @@
   "version": "2.13.0",
   "type": "module",
   "scripts": {
-    "start": "node guest-graphql-probe.js"
+    "start": "node main.js"
   },
   "dependencies": {
     "apify": "3.7.2",
