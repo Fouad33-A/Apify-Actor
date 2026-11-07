@@ -27,6 +27,8 @@ export function readInput(raw) {
     };
     if (input.sinceDate && input.dateFrom && input.sinceDate !== input.dateFrom) throw new Error('Use either sinceDate or dateFrom, not conflicting dates.');
     if (input.sinceDate) input.dateFrom = input.sinceDate;
+    if (input.maxRequests != null && (!Number.isInteger(input.maxRequests) || input.maxRequests < 1)) throw new Error('maxRequests must be a positive integer.');
+    if (input.maxRuntimeSeconds != null && (!Number.isFinite(input.maxRuntimeSeconds) || input.maxRuntimeSeconds <= 0)) throw new Error('maxRuntimeSeconds must be positive.');
     if (input.minScore != null && !Number.isFinite(input.minScore)) throw new Error('minScore must be a number.');
     if (input.maxThreads != null && (!Number.isInteger(input.maxThreads) || input.maxThreads < 1)) throw new Error('maxThreads must be a positive integer.');
     if (input.topCommentsPerThread != null && (!Number.isInteger(input.topCommentsPerThread) || input.topCommentsPerThread < 0)) throw new Error('topCommentsPerThread must be a nonnegative integer.');
@@ -62,12 +64,22 @@ export async function run({
     const totals = { subreddits: 0, threads: 0, comments: 0, blocked: 0, searchFallbacks: 0, archiveCommentThreads: 0, requestsMade: 0, itemsReturned: 0, itemsBlocked: 0 };
     const maxItems = input.maxItems ?? 200;
     let outputCount = 0;
+    const startedAtMs = Date.now();
+    let stopReason = null;
+    const budgetStop = () => {
+        if (shouldStop()) { stopReason ??= 'external_stop'; return true; }
+        if (input.maxRuntimeSeconds != null && Date.now() - startedAtMs >= input.maxRuntimeSeconds * 1000) { stopReason ??= 'runtime_limit'; return true; }
+        if (input.maxRequests != null && totals.requestsMade >= input.maxRequests) { stopReason ??= 'request_limit'; return true; }
+        return false;
+    };
     const emit = async (row) => { if (outputCount >= maxItems) return false; await pushData({ sourceUrl: row.url ?? row.sourceUrl ?? `https://www.reddit.com/r/${row.subreddit}/`, runLabel: input.runLabel ?? '', ...row }); outputCount++; totals.itemsReturned++; return true; };
     const stamp = () => now().toISOString();
 
     async function ask(url) {
         for (let attempt = 0; ; attempt += 1) {
+            if (budgetStop()) return { status: 'limit_reached', detail: stopReason };
             await sleep(input.delayBetweenRequestsMs);
+            if (budgetStop()) return { status: 'limit_reached', detail: stopReason };
             totals.requestsMade++;
             const res = await fetch(url);
             const verdict = classifyResponse(res.status, res.body);
@@ -91,7 +103,7 @@ export async function run({
     }
 
     for (const sub of input.subreddits) {
-        if (shouldStop() || totals.threads >= (input.maxThreads ?? Number.MAX_SAFE_INTEGER)) break;
+        if (budgetStop() || totals.threads >= (input.maxThreads ?? Number.MAX_SAFE_INTEGER)) break;
         totals.subreddits += 1;
         const threads = new Map();
         const problems = [];
@@ -104,7 +116,7 @@ export async function run({
 
         for (const source of sources) {
             let after;
-            for (let page = 0; page < MAX_PAGES && threads.size < input.maxThreadsPerSubreddit && !shouldStop(); page += 1) {
+            for (let page = 0; page < MAX_PAGES && threads.size < input.maxThreadsPerSubreddit && !budgetStop(); page += 1) {
                 const res = await ask(source.url(after));
                 if (res.status !== 'ok') {
                     problems.push({ source: 'reddit_rss', keyword: source.keyword, page, status: res.status, detail: res.detail });
@@ -128,7 +140,7 @@ export async function run({
             if (halted?.status === 'blocked' || halted?.status === 'not_found') break;
         }
 
-        if (!threads.size && ['blocked', 'rate_limited'].includes(halted?.status) && !shouldStop()) {
+        if (!threads.size && ['blocked', 'rate_limited'].includes(halted?.status) && !budgetStop()) {
             sourceMode = 'public_search';
             totals.searchFallbacks += 1;
             const fallback = await discover({
@@ -137,7 +149,7 @@ export async function run({
                 maxThreads: Math.min(input.maxThreadsPerSubreddit, input.maxThreads ?? Number.MAX_SAFE_INTEGER),
                 dateFromMs: input.dateFromMs, dateToMs: input.dateToMs,
                 maxPages: Math.min(3, Math.max(1, Math.ceil(input.maxThreadsPerSubreddit / 20))),
-                shouldStop,
+                shouldStop: budgetStop,
                 log: (m) => log.info(m),
             });
             totals.requestsMade += fallback.attempts.length;
@@ -164,7 +176,7 @@ export async function run({
         let withComments = 0;
 
         for (const thread of threads.values()) {
-            if (shouldStop() || outputCount >= maxItems || totals.threads >= (input.maxThreads ?? Number.MAX_SAFE_INTEGER)) break;
+            if (budgetStop() || outputCount >= maxItems || totals.threads >= (input.maxThreads ?? Number.MAX_SAFE_INTEGER)) break;
             if (input.minScore != null && (thread.score == null || thread.score < input.minScore)) continue;
             const own = tagText(`${thread.title}\n${thread.text}`, { themes: input.themes, competitors: input.competitors });
             let comments = [];
@@ -245,7 +257,7 @@ export async function run({
     }
 
     return {
-        ...totals, inputUsed: input, costUsd: null, costStatus: 'unavailable', status: shouldStop() || outputCount >= maxItems || totals.threads >= (input.maxThreads ?? Number.MAX_SAFE_INTEGER) ? 'partial' : 'ok',
+        ...totals, inputUsed: input, costUsd: null, costStatus: 'unavailable', stopReason, status: budgetStop() || outputCount >= maxItems || totals.threads >= (input.maxThreads ?? Number.MAX_SAFE_INTEGER) ? 'partial' : 'ok',
         note: 'Reddit RSS is tried first for thread discovery and comments. If Reddit blocks thread discovery, Brave Search discovers indexed Reddit threads. If comment RSS is blocked, rate-limited, empty, or the thread came from public search, the actor queries the independent Arctic Shift public archive by Reddit submission ID. Archived comments retain their archived Reddit score and are ranked by that score before the requested limit. Archive coverage can lag or be incomplete. No Reddit login, client impersonation, paid API, or access-control bypass is used.',
     };
 }
