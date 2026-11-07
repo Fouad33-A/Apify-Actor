@@ -47,14 +47,13 @@ try {
     const referer = 'https://www.instagram.com/p/'+sc+'/';
     let bootstrapStatus = null;
     try { const boot = await client.get(referer,{throwHttpErrors:false,followRedirect:false}); bootstrapStatus=boot.statusCode; } catch(e) { bootstrapStatus='error:'+String(e.message).slice(0,80); }
-    const headers = {'accept':'*/*','accept-language':'en-US,en;q=0.9','x-ig-app-id':'936619743392459','x-requested-with':'XMLHttpRequest','referer':referer,'origin':'https://www.instagram.com','content-type':'application/x-www-form-urlencoded'};
+    const headers = {'accept':'*/*','accept-language':'en-US,en;q=0.9','x-ig-app-id':'936619743392459','x-requested-with':'XMLHttpRequest','referer':referer,'origin':'https://www.instagram.com','content-type':'application/x-www-form-urlencoded','x-fb-friendly-name':'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery','x-root-field-name':'xig_polaris_media','x-asbd-id':'359341'};
     const variants = [
-      {name:'media_id',variables:{media_id:id,first:50}},
-      {name:'shortcode',variables:{shortcode:sc,first:50}},
-      {name:'id',variables:{id,first:50}},
+      {name:'logged_out_exact',variables:{after:null,first:10,media_id:id}},
+      {name:'logged_out_24',variables:{after:null,first:24,media_id:id}},
     ];
     for (const docId of docs) for (const variant of variants) {
-      const form = new URLSearchParams({doc_id:docId,variables:JSON.stringify(variant.variables)});
+      const form = new URLSearchParams({av:'0',__d:'www',__user:'0',__a:'1',__comet_req:'7',fb_api_caller_class:'RelayModern',fb_api_req_friendly_name:'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery',variables:JSON.stringify(variant.variables),server_timestamps:'true',doc_id:docId});
       const row = {sourceUrl:raw,shortcode:sc,mediaId:id,docId,variant:variant.name,proxyMode,bootstrapStatus};
       try {
         const response = await client.post('https://www.instagram.com/api/graphql',{headers,body:form.toString(),throwHttpErrors:false,followRedirect:false});
