@@ -61,10 +61,13 @@ try {
         row.contentType=response.headers['content-type'] || null;
         row.redirect=Boolean(response.headers.location);
         let body;
-        try {body=JSON.parse(response.body);} catch {body=null;}
+        const rawBody=String(response.body).replace(/^for\s*\(;;\);\s*/, '');
+        try {body=JSON.parse(rawBody);} catch {body=null;}
         row.isJson=Boolean(body);
         if (body) {
           row.topKeys=Object.keys(body).slice(0,12);
+          row.apiErrorCode=body.error??null;
+          row.apiErrorSummary=body.errorSummary??null;
           row.dataKeys=Object.keys(body.data||{}).slice(0,12);
           row.errors=JSON.stringify(body.errors||body.error||null).slice(0,500);
           Object.assign(row,inspect(body));
