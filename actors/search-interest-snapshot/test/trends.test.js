@@ -55,6 +55,8 @@ describe('input and run', () => {
         expect(() => readInput({ keywords: ['a'], timeRange: 'last year' })).toThrow(/timeRange/);
         expect(groupsOf(['a', 'b', 'c', 'd', 'e', 'f'], true).map((g) => g.length)).toEqual([5, 1]);
         expect(groupsOf(['a', 'b'], false)).toEqual([['a'], ['b']]);
+        expect(() => readInput({ keywords: ['a'], maxItems: 0 })).toThrow(/maxItems/);
+        expect(() => readInput({ keywords: ['a'], sinceDate: '2026-02-30' })).toThrow(/sinceDate/);
     });
 
     const get =
@@ -102,6 +104,40 @@ describe('input and run', () => {
         expect(rows.filter((r) => r.recordType === 'relatedQuery')).toHaveLength(2);
         expect(rows.every((r) => r.scrapedAt && r.status)).toBe(true);
         expect(summary.failed).toBe(0);
+    });
+
+    it('filters timeline points by sinceDate and recomputes the interest summary', async () => {
+        const rows = [];
+        const input = readInput({
+            keywords: ['igcse'], geos: ['AE'], sinceDate: '2026-01-04',
+            includeTimeline: true, includeRelatedQueries: false, delayBetweenRequestsMs: 0, runLabel: 'weekly',
+        });
+        const summary = await run({ input, pushData: async (r) => void rows.push(r), get: get() });
+        expect(rows.filter((r) => r.recordType === 'timeline')).toHaveLength(3);
+        expect(rows[0]).toMatchObject({ recordType: 'interest', latest: 100, dataPoints: 3, runLabel: 'weekly' });
+        expect(rows.every((r) => r.sourceUrl && r.scrapedAt && r.status)).toBe(true);
+        expect(summary).toMatchObject({ dateExcluded: 3, rows: 4, status: 'completed' });
+    });
+    it('honors maxItems across all row types and stops before another request', async () => {
+        const rows = [];
+        const requests = [];
+        const input = readInput({
+            keywords: ['igcse', 'sat'], geos: ['AE'], includeTimeline: true,
+            includeRelatedQueries: false, maxItems: 2, delayBetweenRequestsMs: 0,
+        });
+        const summary = await run({ input, pushData: async (r) => void rows.push(r), get: get(requests) });
+        expect(rows).toHaveLength(2);
+        expect(summary).toMatchObject({ rows: 2, stoppedBecause: 'maxItems', status: 'partial' });
+        expect(requests).toHaveLength(2);
+    });
+    it('reports no_data when sinceDate excludes all timeline points', async () => {
+        const rows = [];
+        const input = readInput({
+            keywords: ['igcse'], sinceDate: '2026-02-01', includeRelatedQueries: false, delayBetweenRequestsMs: 0,
+        });
+        const summary = await run({ input, pushData: async (r) => void rows.push(r), get: get() });
+        expect(rows[0]).toMatchObject({ recordType: 'interest', status: 'no_data' });
+        expect(summary).toMatchObject({ noData: 1, dateExcluded: 6 });
     });
 
     it('reports a rate limit instead of failing the run', async () => {
