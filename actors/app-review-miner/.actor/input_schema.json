@@ -8,7 +8,10 @@
             "type": "array",
             "description": "Optional when search keywords are provided. Competitor apps: an App Store link or numeric id (https://apps.apple.com/us/app/name/id389801252 or 389801252), or a Google Play link or package name (https://play.google.com/store/apps/details?id=com.spotify.music or com.spotify.music).",
             "editor": "stringList",
-            "prefill": ["https://apps.apple.com/us/app/spotify-music-and-podcasts/id324684580", "com.spotify.music"]
+            "prefill": [
+                "https://apps.apple.com/us/app/spotify-music-and-podcasts/id324684580",
+                "com.spotify.music"
+            ]
         },
         "searchKeywords": {
             "title": "Find competitor apps by keyword",
@@ -21,7 +24,10 @@
             "type": "array",
             "description": "Which stores the keyword search covers: apple, google, or both.",
             "editor": "stringList",
-            "default": ["apple", "google"]
+            "default": [
+                "apple",
+                "google"
+            ]
         },
         "maxAppsPerSearch": {
             "title": "Apps per keyword and store",
@@ -37,7 +43,9 @@
             "type": "array",
             "description": "Two-letter store countries such as us, gb, de. Each app is read once per country.",
             "editor": "stringList",
-            "default": ["us"]
+            "default": [
+                "us"
+            ]
         },
         "language": {
             "title": "Google Play language",
@@ -111,6 +119,25 @@
             "description": "Hard cap on review rows in one run.",
             "default": 5000,
             "minimum": 1
+        },
+        "maxItems": {
+            "title": "Maximum dataset rows",
+            "type": "integer",
+            "editor": "number",
+            "minimum": 1,
+            "description": "Optional global cap across review, app and no_data rows."
+        },
+        "runLabel": {
+            "title": "Run label",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Optional label echoed in each row and SUMMARY."
+        },
+        "sinceDate": {
+            "title": "Review cutoff date",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Optional UTC YYYY-MM-DD; keeps reviews on or after this date. When recentDays is also set, the stricter cutoff applies."
         }
     },
     "required": []
