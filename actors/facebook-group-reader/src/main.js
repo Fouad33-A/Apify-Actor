@@ -115,6 +115,8 @@ export async function run({
         dateExcluded: 0,
         groupRows: 0,
         noData: 0,
+        groupErrors: 0,
+        groupFailures: [],
         status: 'completed',
         stopReason: null,
     };
@@ -133,6 +135,8 @@ export async function run({
 
     for (const bad of input.invalid) {
         if (exhausted()) break;
+        totals.groupErrors++;
+        totals.groupFailures.push({ groupUrl: bad, status: 'invalid_input' });
         await emit({
             recordType: 'group',
             input: bad,
@@ -255,6 +259,20 @@ export async function run({
             }
             if (sawLoginWall) totals.loginWall++;
 
+            const groupStatus = sawLoginWall
+                ? 'login_wall'
+                : bestResponse?.status === 404
+                    ? 'not_found'
+                    : lastError
+                        ? 'http_error'
+                        : 'no_posts_visible';
+            const noDataReason = input.sinceMs != null && discoveredBeforeDate > 0
+                ? 'no_matching_posts'
+                : !groupVerified ? 'group_unverified' : 'no_posts_exposed';
+            if (['login_wall', 'not_found', 'http_error'].includes(groupStatus)) {
+                totals.groupErrors++;
+                totals.groupFailures.push({ groupUrl: group.url, status: groupStatus });
+            }
             await emit({
                 recordType: 'group',
                 ...base,
@@ -267,19 +285,25 @@ export async function run({
                 language: null,
                 postsVisible: 0,
                 sourceSurface: 'public_html',
-                status: sawLoginWall
-                    ? 'login_wall'
-                    : bestResponse?.status === 404
-                        ? 'not_found'
-                        : lastError
-                            ? 'http_error'
-                            : 'no_posts_visible',
+                status: groupStatus,
                 verificationStatus: groupVerified ? 'verified_public_metadata' : 'unverified',
-                noDataReason: input.sinceMs != null && discoveredBeforeDate > 0 ? 'no_matching_posts' : !groupVerified ? 'group_unverified' : 'no_posts_exposed',
+                noDataReason,
                 statusDetail: sawLoginWall
                     ? 'Facebook redirected the anonymous public feed to login.'
                     : lastError?.message ?? (input.sinceMs != null && discoveredBeforeDate > 0 ? `No posts matched sinceDate ${input.sinceDate}; ${discoveredBeforeDate} older post(s) excluded.` : 'No parseable public posts were exposed.'),
                 diagnosticKey,
+                scrapedAt: stamp(),
+            });
+            // A group with zero usable posts gets its own no_data row, unless
+            // the global dataset row cap prevents another emission.
+            await emit({
+                recordType: 'no_data',
+                groupId: group.id,
+                groupUrl: group.url,
+                sourceUrl: group.url,
+                status: 'no_data',
+                reason: noDataReason,
+                groupStatus,
                 scrapedAt: stamp(),
             });
         }
@@ -290,8 +314,9 @@ export async function run({
     }
 
     if (shouldStop()) { totals.status = 'partial'; totals.stopReason = 'stopped'; }
-    if (totals.posts === 0 && !exhausted()) {
-        await emit({ recordType: 'no_data', status: 'no_data', sourceUrl: input.groups[0]?.url ?? null, scrapedAt: stamp(), reason: totals.groupRows ? 'No matching accessible public posts returned; inspect group statuses and diagnostics.' : 'No public group rows returned.' });
+    if (totals.groupErrors > 0) {
+        totals.status = 'partial';
+        totals.stopReason ??= 'group_errors';
     }
     totals.itemsEmitted = emitted;
     return {
