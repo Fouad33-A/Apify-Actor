@@ -82,3 +82,18 @@ describe('request accounting', () => {
         expect(rows.find((r) => r.recordType === 'thread').topComments).toHaveLength(1);
     });
 });
+
+describe('public search rate-limit handling', () => {
+    it('stops other keywords after one short retry on HTTP 429', async () => {
+        let calls = 0;
+        const result = await discoverRedditThreads({
+            subreddit: 'igcse', keywords: ['past papers', 'worth it', 'free'],
+            maxThreads: 10, maxPages: 2, paceMs: 0, backoffMs: 0,
+            fetch: async () => { calls++; return { status: 429, body: '' }; },
+        });
+        expect(calls).toBe(2);
+        expect(result.rateLimited).toBe(true);
+        expect(result.attempts).toHaveLength(1);
+        expect(result.threads).toHaveLength(0);
+    });
+});
