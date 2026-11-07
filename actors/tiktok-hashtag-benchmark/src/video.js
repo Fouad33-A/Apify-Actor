@@ -20,6 +20,10 @@ export function parseVideoPage(html) {
             detail: `TikTok returned no video (status ${detail?.statusCode ?? 'unknown'}${detail?.statusMsg ? `: ${detail.statusMsg}` : ''})`,
         };
     const s = item.stats ?? {};
+    const views = Number(s.playCount);
+    if (s.playCount == null || !Number.isFinite(views) || views < 0)
+        return { status: 'no_data', detail: 'TikTok did not provide a valid view count for this video' };
+    const count = (value) => value == null || !Number.isFinite(Number(value)) ? null : Number(value);
     const tags = [
         ...new Set(
             [...(item.textExtra ?? []).map((t) => t.hashtagName), ...(item.challenges ?? []).map((c) => c.title)]
@@ -34,11 +38,11 @@ export function parseVideoPage(html) {
             author: item.author?.uniqueId ?? null,
             description: String(item.desc ?? '').slice(0, 300),
             createdAt: item.createTime ? new Date(Number(item.createTime) * 1000).toISOString() : null,
-            views: Number(s.playCount ?? 0),
-            likes: Number(s.diggCount ?? 0),
-            comments: Number(s.commentCount ?? 0),
-            shares: Number(s.shareCount ?? 0),
-            saves: Number(s.collectCount ?? 0),
+            views,
+            likes: count(s.diggCount),
+            comments: count(s.commentCount),
+            shares: count(s.shareCount),
+            saves: count(s.collectCount),
             durationSeconds: item.video?.duration ?? null,
             region: item.locationCreated ?? null,
             language: item.textLanguage ?? null,
