@@ -67,3 +67,12 @@ Each keyword and country takes two or three small requests. A run of 10 keywords
 ## FAQ, disclaimers and support
 
 The data comes from the public Google Trends page; follow Google's terms for how you use it. Problems or ideas: open an issue in the Issues tab.
+
+
+## Marketing Agent compatibility
+
+Optional inputs: `maxItems` limits **all dataset rows** (interest, timeline and relatedQuery), `runLabel` labels each row, and `sinceDate` filters time-series points to UTC dates on or after `YYYY-MM-DD` **within the requested `timeRange`**. Metrics are recalculated from retained points. `sinceDate` does not expand the Google Trends query period or guarantee data at finer resolution. Google Trends returns a relative 0–100 index, not search volumes; comparison caveats still apply.
+
+Every emitted row includes `recordType`, `status`, `scrapedAt`, `sourceUrl` and `runLabel`. A missing or entirely filtered series retains its existing `interest` row with `status: no_data`; no extra duplicate row is created. The key-value store preserves legacy `OUTPUT` and adds `SUMMARY` with the effective inputs, request/row/failure counts, filtered timeline points, stop reason, and `completed`/`partial` status. When `maxItems` is reached, later jobs and output are stopped. Related-query failures remain warnings as in the original scraper.
+
+The Actor is FREE-priced but Apify compute/storage can still incur infrastructure usage; `maxTotalChargeUsd` is not a universal hard compute cap. Control usage with keyword/geo counts, `maxItems`, timeouts, and the existing polite request delay.
