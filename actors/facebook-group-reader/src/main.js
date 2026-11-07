@@ -8,6 +8,8 @@ const DEFAULTS = {
     delayBetweenGroupsMs: 3000,
     sinceDate: null,
     maxSessionAttempts: 1,
+    maxItems: null,
+    runLabel: null,
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -44,6 +46,8 @@ export function readInput(raw) {
         sinceMs,
         maxPostsPerGroup: Math.min(Math.max(1, Number(input.maxPostsPerGroup) || 50), 500),
         maxSessionAttempts: Math.min(Math.max(1, Number(input.maxSessionAttempts) || 1), 6),
+        maxItems: input.maxItems == null ? null : Math.max(1, Math.floor(Number(input.maxItems) || 1)),
+        runLabel: input.runLabel == null ? null : String(input.runLabel),
     };
 }
 
@@ -107,11 +111,25 @@ export async function run({
         diagnostics: 0,
         httpAttempts: 0,
         sessionRotations: 0,
+        dateExcluded: 0,
+        groupRows: 0,
+        noData: 0,
+        status: 'completed',
+        stopReason: null,
     };
     const stamp = () => now().toISOString();
+    let emitted = 0;
+    const emit = async (row) => {
+        if (input.maxItems != null && emitted >= input.maxItems) return false;
+        await pushData({ ...row, sourceUrl: row.sourceUrl ?? row.url ?? row.groupUrl ?? row.input ?? null, runLabel: input.runLabel ?? null });
+        emitted++;
+        return true;
+    };
+    const exhausted = () => input.maxItems != null && emitted >= input.maxItems;
 
     for (const bad of input.invalid) {
-        await pushData({
+        if (exhausted()) break;
+        await emit({
             recordType: 'group',
             input: bad,
             status: 'invalid_input',
@@ -121,7 +139,7 @@ export async function run({
     }
 
     for (const [groupIndex, group] of input.groups.entries()) {
-        if (shouldStop()) break;
+        if (shouldStop() || exhausted()) { totals.status = 'partial'; totals.stopReason = shouldStop() ? 'stopped' : 'max_items_reached'; break; }
         totals.groups++;
 
         const base = { groupId: group.id, url: group.url };
@@ -178,13 +196,15 @@ export async function run({
             );
         }
 
+        const discoveredBeforeDate = posts.length;
         if (input.sinceMs != null) {
             posts = posts.filter((post) => post.createdAt && Date.parse(post.createdAt) >= input.sinceMs);
         }
+        totals.dateExcluded += discoveredBeforeDate - posts.length;
         posts = posts.slice(0, input.maxPostsPerGroup);
 
         if (posts.length) {
-            await pushData({
+            await emit({
                 recordType: 'group',
                 ...base,
                 ...bestMeta,
@@ -197,7 +217,8 @@ export async function run({
                 scrapedAt: stamp(),
             });
             for (const post of posts) {
-                await pushData({
+                if (exhausted() || shouldStop()) { totals.status = 'partial'; totals.stopReason = exhausted() ? 'max_items_reached' : 'stopped'; break; }
+                await emit({
                     recordType: 'post',
                     groupId: group.id,
                     groupUrl: group.url,
@@ -207,7 +228,7 @@ export async function run({
                     scrapedAt: stamp(),
                 });
             }
-            totals.posts += posts.length;
+            totals.posts += Math.min(posts.length, Math.max(0, emitted));
             totals.ok++;
         } else {
             let diagnosticKey = null;
@@ -219,7 +240,7 @@ export async function run({
             }
             if (sawLoginWall) totals.loginWall++;
 
-            await pushData({
+            await emit({
                 recordType: 'group',
                 ...base,
                 ...bestMeta,
@@ -234,16 +255,19 @@ export async function run({
                             : 'no_posts_visible',
                 statusDetail: sawLoginWall
                     ? 'Facebook redirected the anonymous public feed to login.'
-                    : lastError?.message ?? 'No parseable public posts were exposed.',
+                    : lastError?.message ?? (input.sinceMs != null && discoveredBeforeDate > 0 ? `No posts matched sinceDate ${input.sinceDate}; ${discoveredBeforeDate} older post(s) excluded.` : 'No parseable public posts were exposed.'),
                 diagnosticKey,
                 scrapedAt: stamp(),
             });
         }
 
         log.info(`group ${group.id} done`);
+        if (exhausted() && groupIndex < input.groups.length - 1) { totals.status = 'partial'; totals.stopReason = 'max_items_reached'; break; }
         if (groupIndex < input.groups.length - 1) await sleep(input.delayBetweenGroupsMs);
     }
 
+    if (shouldStop()) { totals.status = 'partial'; totals.stopReason = 'stopped'; }
+    totals.itemsEmitted = emitted;
     return {
         ...totals,
         note: 'Reads Facebook public logged-out HTML only. Fresh anonymous proxy sessions may be retried when configured. No Facebook account credentials, account cookies, access tokens, CAPTCHA solving, browser automation, or private API pagination are used.',
@@ -299,6 +323,7 @@ async function main() {
         });
 
         await Actor.setValue('OUTPUT', summary);
+        await Actor.setValue('SUMMARY', { ...summary, exactInput: await Actor.getInput(), scrapedAt: new Date().toISOString() });
         log.info(
             `Done: ${summary.groups} group(s), ${summary.posts} post(s), `
             + `${summary.httpAttempts} HTTP attempt(s), ${summary.sessionRotations} session rotation(s), `
