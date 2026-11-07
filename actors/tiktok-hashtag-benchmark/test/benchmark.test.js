@@ -140,10 +140,10 @@ describe('search and run', () => {
         await run({
             input: readInput({ hashtags: ['x1'] }),
             pushData: async (r) => void rows.push(r),
-            search: async () => ({ urls: [], attempts: [], rateLimited: true }),
+            search: async () => ({ urls: [], attempts: [], rateLimited: true, discoveryStatus: 'rate_limited' }),
             fetchVideo: async () => ({ status: 404, html: '' }),
         });
-        expect(rows[0]).toMatchObject({ recordType: 'benchmark', status: 'no_videos' });
+        expect(rows[0]).toMatchObject({ recordType: 'benchmark', status: 'discovery_rate_limited' });
         expect(rows[0].statusDetail).toMatch(/limited/);
     });
 });
