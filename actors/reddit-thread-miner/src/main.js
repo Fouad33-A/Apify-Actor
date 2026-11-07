@@ -279,8 +279,10 @@ export async function run({
     }
 
     const stoppedAtEnd = budgetStop();
+    const reachedRequestedThreadCap = input.maxThreads != null && totals.threads >= input.maxThreads;
+    const reachedOutputCap = outputCount >= maxItems;
     return {
-        ...totals, inputUsed: input, costUsd: null, costStatus: 'unavailable', stopReason, status: stoppedAtEnd || outputCount >= maxItems || totals.threads >= (input.maxThreads ?? Number.MAX_SAFE_INTEGER) ? 'partial' : 'ok',
+        ...totals, inputUsed: input, costUsd: null, costStatus: 'unavailable', stopReason, reachedRequestedThreadCap, reachedOutputCap, status: stoppedAtEnd || reachedOutputCap ? 'partial' : 'ok',
         note: 'Reddit RSS is tried first for thread discovery and comments. If Reddit blocks thread discovery, Arctic Shift post search is tried first, followed by Brave Search if the archive yields no matching threads. If comment RSS is blocked, rate-limited, empty, or the thread came from public search, the actor queries the independent Arctic Shift public archive by Reddit submission ID. Archived comments retain their archived Reddit score and are ranked by that score before the requested limit. Archive coverage can lag or be incomplete. No Reddit login, client impersonation, paid API, or access-control bypass is used.',
     };
 }
