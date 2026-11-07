@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.22-inline-and-resource-discovery';
+const VERSION = '2026-11-07-v2.23-final-url-and-coverage';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -15,7 +15,7 @@ function normalizeUrl(raw) {
     try {
         const u = new URL(String(raw).trim());
         if (!/(^|\.)instagram\.com$/i.test(u.hostname)) return null;
-        const m = u.pathname.match(/^\/(p|reel|reels)\/([A-Za-z0-9_-]+)/i);
+        const m = u.pathname.match(/^\/(?:[A-Za-z0-9._]+\/)?(p|reel|reels)\/([A-Za-z0-9_-]+)(?:\/|$)/i);
         if (!m) return null;
         const kind = m[1].toLowerCase() === 'reels' ? 'reel' : m[1].toLowerCase();
         return `https://www.instagram.com/${kind}/${m[2]}/`;
@@ -104,7 +104,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     });
     const rows = new Map();
     let dateExcluded = 0;
-    const diag = { bootstrap: null, ssrRows: 0, guestQueryDiscovery: null, contracts: [], sourceCoverage: 'unknown', paginationVerified: false };
+    const diag = { bootstrap: null, ssrRows: 0, contracts: [], sourceCoverage: 'unknown', paginationVerified: false };
     const add = (list) => {
         for (const r of list) {
             if (!includeReplies && r.isReply) continue;
@@ -118,93 +118,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     const boot = await client.get(postUrl, { throwHttpErrors: false, timeout: { request: 25000 } });
     diag.bootstrap = { status: boot.statusCode, type: boot.headers['content-type'] ?? null, bytes: boot.body?.length ?? 0 };
     if (boot.statusCode >= 400) throw new Error(`Bootstrap HTTP ${boot.statusCode}`);
-    // Passive discovery only: collect public GraphQL/query hints without
-    // guessing document IDs or submitting undocumented GraphQL mutations.
     const html = boot.body || '';
-    const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(m => m[1]);
-    const queryHints = [...new Set(
-        [...html.matchAll(/(?:doc_id|query_id|query_hash)["'\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)].map(m => m[1])
-    )];
-    diag.guestQueryDiscovery = {
-        scriptCount: scriptSources.length,
-        scriptHostSamples: [...new Set(scriptSources.slice(0, 15).map(src => { try { return new URL(src, postUrl).hostname || '(non-http-scheme)'; } catch { return 'invalid'; } }))].slice(0, 8),
-        scriptSourceSamples: scriptSources.slice(0, 5).map(src => ({ prefix: src.slice(0, 100), length: src.length })),
-        instagramStaticScripts: scriptSources.filter(x => /instagram|cdninstagram|\/static\//i.test(x)).length,
-        candidateQueryIds: queryHints.slice(0, 20),
-        queryHintCount: queryHints.length,
-        note: 'Passive public HTML discovery; query IDs are not verified as comment-pagination operations.',
-    };
-    // Inspect a small bounded sample of first-party public JS bundles. This is
-    // diagnostic discovery, not proof that any candidate query paginates.
-    const bundleUrls = [...new Set(scriptSources.map(src => {
-        try {
-            const u = new URL(src, postUrl);
-            return u.protocol === 'https:' && /(^|\.)(instagram\.com|fbcdn\.net|cdninstagram\.com)$/i.test(u.hostname) && /\.js(?:$|\?)/i.test(u.pathname + u.search) ? u.href : null;
-        } catch { return null; }
-    }).filter(Boolean))].slice(0, 4);
-    const bundleDiagnostics = [];
-    for (const url of bundleUrls) {
-        try {
-            const response = await client.get(url, { throwHttpErrors: false, timeout: { request: 12000 } });
-            const body = String(response.body || '');
-            const markers = [...body.matchAll(/(?:comment(?:s|_list|_connection)?|pagination|page_info)/gi)].slice(0, 40);
-            const ids = [...new Set([...body.matchAll(/(?:doc_id|query_id|query_hash)["'\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)].map(m => m[1]))];
-            bundleDiagnostics.push({
-                status: response.statusCode, bytes: body.length,
-                path: new URL(url).pathname.slice(-100),
-                commentMarkerCountSample: markers.length,
-                markerContexts: markers.slice(0, 5).map(m => body.slice(Math.max(0, m.index - 90), m.index + 120).slice(0, 210)),
-                candidateQueryIds: ids.slice(0, 10),
-            });
-        } catch (error) {
-            bundleDiagnostics.push({ path: new URL(url).pathname.slice(-100), error: String(error?.message ?? error).slice(0, 160) });
-        }
-    }
-    diag.guestQueryDiscovery.bundles = bundleDiagnostics;
-    // Inspect embedded data: JavaScript and external resource hints without
-    // making speculative GraphQL calls. Bound diagnostics and network requests.
-    const inlineScripts = scriptSources.filter(x => x.startsWith('data:application/x-javascript') && x.includes('base64,'));
-    const inlineDiagnostics = { count: inlineScripts.length, decoded: 0, commentMarkers: 0, candidateQueryIds: [], contexts: [] };
-    for (const src of inlineScripts.slice(0, 60)) {
-        try {
-            const body = Buffer.from(src.slice(src.indexOf('base64,') + 7), 'base64').toString('utf8');
-            inlineDiagnostics.decoded++;
-            const markers = [...body.matchAll(/(?:comments?|graphql|pagination|page_info)/gi)];
-            inlineDiagnostics.commentMarkers += markers.length;
-            for (const m of markers.slice(0, 2)) if (inlineDiagnostics.contexts.length < 8) {
-                inlineDiagnostics.contexts.push(body.slice(Math.max(0, m.index - 60), m.index + 100));
-            }
-            for (const m of body.matchAll(/(?:doc_id|query_id|query_hash)["'\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)) {
-                if (inlineDiagnostics.candidateQueryIds.length < 15 && !inlineDiagnostics.candidateQueryIds.includes(m[1])) inlineDiagnostics.candidateQueryIds.push(m[1]);
-            }
-        } catch {}
-    }
-    const resourceCandidates = [...new Set([
-        ...[...html.matchAll(/<(?:link|script)\b[^>]*\b(?:href|src)=["']([^"']+)["']/gi)].map(m => m[1]),
-        ...[...html.matchAll(/https?:\\?\/\\?\/[^"'\s<>]+?\.js(?:\?[^"'\s<>]*)?/gi)].map(m => m[0].replace(/\\\//g, '/')),
-    ].map(src => {
-        try {
-            const u = new URL(src, postUrl);
-            return u.protocol === 'https:' && /(^|\.)(instagram\.com|fbcdn\.net|cdninstagram\.com)$/i.test(u.hostname) && /\.js(?:$|\?)/i.test(u.pathname + u.search) ? u.href : null;
-        } catch { return null; }
-    }).filter(Boolean))];
-    diag.guestQueryDiscovery.inlineScripts = inlineDiagnostics;
-    diag.guestQueryDiscovery.resourceCandidates = resourceCandidates.length;
-    diag.guestQueryDiscovery.resourceHostSamples = [...new Set(resourceCandidates.slice(0, 10).map(u => new URL(u).hostname))];
-    // Inspect only a small number of actual external resources, if present.
-    const extraBundles = [];
-    for (const url of resourceCandidates.slice(0, 3)) {
-        try {
-            const r = await client.get(url, { throwHttpErrors: false, timeout: { request: 10000 } });
-            const body = String(r.body || '');
-            extraBundles.push({
-                host: new URL(url).hostname, status: r.statusCode, bytes: body.length,
-                commentMarkers: [...body.matchAll(/(?:comment(?:s|_list|_connection)?|pagination|page_info)/gi)].length,
-                candidateQueryIds: [...new Set([...body.matchAll(/(?:doc_id|query_id|query_hash)["'\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)].map(m => m[1]))].slice(0, 10),
-            });
-        } catch (e) { extraBundles.push({ host: new URL(url).hostname, error: String(e?.message ?? e).slice(0, 120) }); }
-    }
-    diag.guestQueryDiscovery.externalResources = extraBundles;
     const roots = embeddedJson(html);
     let owner = null;
     for (const root of roots) { owner ||= findOwner(root); add(harvest(root, postUrl, owner)); }
@@ -268,11 +182,19 @@ try {
     const proxyMode = input.proxyMode ?? (useResidentialProxy ? 'residential' : 'none');
     if (!['residential','datacenter','none'].includes(proxyMode)) throw new Error('proxyMode must be residential, datacenter or none');
     const sinceMs = dateCutoff(input.sinceDate);
-    const urls = [...new Set(input.postUrls.map(normalizeUrl).filter(Boolean))];
-    let skipped = input.postUrls.length - urls.length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0, blockedPosts = 0;
+    const normalized = input.postUrls.map(raw => ({ raw: String(raw), url: normalizeUrl(raw) }));
+    const urls = [...new Set(normalized.map(x => x.url).filter(Boolean))];
+    let skipped = normalized.filter(x => !x.url).length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0, blockedPosts = 0;
     const requestDiagnostics = [];
     let partialCoveragePosts = 0, verifiedPaginationPosts = 0;
     const errors = [];
+    for (const invalid of normalized.filter(x => !x.url)) {
+        errors.push({ url: invalid.raw, reason: 'invalid_instagram_post_url' });
+        if (returned < maxItems) {
+            await Actor.pushData({ recordType: 'no_data', status: 'error', sourceUrl: invalid.raw, postUrl: invalid.raw, runLabel, scrapedAt: now(), reason: 'invalid_instagram_post_url' });
+            returned++; noData++;
+        }
+    }
     const pUrl = await proxyUrl(useResidentialProxy, proxyMode);
     log.info(`[${VERSION}] browserless got-scraping persistent-session candidate. login=false externalProvider=false proxy=${Boolean(pUrl)}`);
     let processed = 0;
@@ -287,7 +209,7 @@ try {
             requestDiagnostics.push({ postUrl, ...diag });
             if (diag.paginationVerified) verifiedPaginationPosts++;
             else if (rows.length > 0 && rows.length < amount) partialCoveragePosts++;
-            for (const row of rows) { await Actor.pushData({ ...row, recordType: 'comment', status: 'ok', sourceUrl: postUrl, runLabel, text: row.commentText, author: row.commenterHandle }); returned++; }
+            for (const row of rows) { await Actor.pushData({ ...row, recordType: 'comment', status: 'ok', sourceUrl: postUrl, runLabel, text: row.commentText, author: row.commenterHandle, coverage: diag.paginationVerified ? 'pagination_verified' : 'unverified_partial_possible' }); returned++; }
             if (rows.length) postsWithComments++;
             if (!rows.length) {
                 const pages = diag.contracts.flatMap(c => c.pages ?? []);
@@ -315,7 +237,7 @@ try {
         seconds: Number(((Date.now() - started) / 1000).toFixed(2)), publicDataOnly: true, loginUsed: false,
         externalProviderUsed: false, source: 'instagram_public_got_scraping_v213', residentialProxyRequested: useResidentialProxy,
         residentialProxyUsed: Boolean(pUrl) && proxyMode === 'residential', includeRepliesRequested: includeReplies,
-        coverageNote: 'Public Instagram only; no Instagram credentials, supplied cookies, browser, external scraper/provider, or database.',
+        coverageNote: 'Anonymous public HTML sampling; completeness is not guaranteed and pagination is generally unavailable. No Instagram login, cookies, browser, or external provider.',
     };
     await Actor.setValue('SUMMARY', summary); log.info(`[FINAL] ${JSON.stringify(summary)}`);
 } finally { await Actor.exit(); }
