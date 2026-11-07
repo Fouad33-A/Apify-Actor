@@ -15,7 +15,7 @@ try {
     page.on('response', async response => {
       const url = response.url();
       if (allResponses.length < 100) allResponses.push({ host: (() => { try { return new URL(url).hostname; } catch { return ''; } })(), path: (() => { try { return new URL(url).pathname.slice(0, 120); } catch { return ''; } })(), status: response.status() });
-      if (!/instagram\.com\/(?:graphql|api\/v1\/media)/.test(url)) return;
+      if (!/instagram\.com\/(?:api\/graphql|graphql|api\/v1\/media)/.test(url)) return;
       const item = { path: new URL(url).pathname, status: response.status(), method: response.request().method() };
       try {
         const body = await response.json();
@@ -40,17 +40,18 @@ try {
     const initialText = (await page.locator('body').innerText().catch(() => '')).slice(0, 1000);
     const buttonLabels = await page.getByRole('button').allTextContents().catch(() => []);
     const steps = [];
+    const visibleBefore = (await page.locator('body').innerText().catch(() => '')).length;
     for (let i = 0; i < maxScrolls; i++) {
       await page.mouse.wheel(0, 650);
       await page.waitForTimeout(1100);
       const buttons = page.getByRole('button', { name: /view (all|more)|load more|more comments|see more/i });
       const count = await buttons.count().catch(() => 0);
       let clickError = null;
-      if (count) await buttons.first().click({ timeout: 2000 }).catch(e => { clickError = String(e.message).slice(0, 150); });
+      if (count) await buttons.first().evaluate(el => el.click()).catch(e => { clickError = String(e.message).slice(0, 150); });
       await page.waitForTimeout(700);
-      steps.push({ step: i + 1, networkComments: seen.size, matchingButtons: count, clickError });
+      steps.push({ step: i + 1, networkComments: seen.size, matchingButtons: count, clickError, visibleTextLength: (await page.locator('body').innerText().catch(() => '')).length });
     }
-    const result = { sourceUrl: raw, navigationError, finalUrl: page.url(), title: await page.title().catch(() => ''), initialNetworkComments: initial, networkComments: seen.size, initialText, buttonLabels: buttonLabels.slice(0, 30), allResponses, steps, network, sample: [...seen.values()].slice(0, 5) };
+    const result = { sourceUrl: raw, navigationError, finalUrl: page.url(), title: await page.title().catch(() => ''), initialNetworkComments: initial, networkComments: seen.size, initialText, visibleBefore, buttonLabels: buttonLabels.slice(0, 30), allResponses, steps, network, sample: [...seen.values()].slice(0, 5) };
     results.push(result);
     await Actor.pushData(result);
     await context.close();
