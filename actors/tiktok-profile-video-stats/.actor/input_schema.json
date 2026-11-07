@@ -1,139 +1,145 @@
 {
-  "title": "TikTok Profile & Video Stats",
-  "description": "Retrieves TikTok creator videos. Free-only mode never uses the paid TikHub API but may be blocked by TikTok; optional authenticated TikHub retrieval requires explicit opt-in.",
-  "type": "object",
-  "schemaVersion": 1,
-  "properties": {
-    "usernames": {
-      "title": "TikTok usernames",
-      "type": "array",
-      "description": "1–200 TikTok usernames; large batches can require more runtime.",
-      "editor": "stringList",
-      "minItems": 1,
-      "maxItems": 200,
-      "default": [
-        "allanainaction",
-        "dr.mrs.knits",
-        "adrianmarshofficial",
-        "beautyjuels"
-      ]
+    "title": "TikTok Profile & Video Stats",
+    "description": "Retrieves TikTok creator videos. Free-only mode never uses the paid TikHub API but may be blocked by TikTok; optional authenticated TikHub retrieval requires explicit opt-in.",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "usernames": {
+            "title": "TikTok usernames",
+            "type": "array",
+            "description": "1–200 TikTok usernames; large batches can require more runtime.",
+            "editor": "stringList",
+            "minItems": 1,
+            "maxItems": 200,
+            "default": [
+                "allanainaction",
+                "dr.mrs.knits",
+                "adrianmarshofficial",
+                "beautyjuels"
+            ]
+        },
+        "videosPerProfile": {
+            "title": "Videos per profile",
+            "type": "integer",
+            "description": "Number of recent public videos to analyze per creator (1–30). Discovery is best-effort and may return fewer when TikTok blocks access; coverage reports incompleteness.",
+            "minimum": 1,
+            "maximum": 30,
+            "default": 30
+        },
+        "excludePinned": {
+            "title": "Exclude pinned videos",
+            "type": "boolean",
+            "description": "Exclude videos only when TikTok explicitly identifies them as pinned. Unknown pin status is retained and reported in coverage warnings.",
+            "default": true
+        },
+        "mode": {
+            "title": "Mode",
+            "type": "string",
+            "description": "full returns profile, video, and summary rows. profileOnly stops after profile data.",
+            "editor": "select",
+            "default": "full",
+            "enum": [
+                "full",
+                "profileOnly"
+            ],
+            "enumTitles": [
+                "Full",
+                "Profile only"
+            ]
+        },
+        "minFollowers": {
+            "title": "Minimum followers",
+            "type": "integer",
+            "description": "Optional minimum follower count. Profiles below this are skipped before video loading.",
+            "minimum": 0
+        },
+        "maxFollowers": {
+            "title": "Maximum followers",
+            "type": "integer",
+            "description": "Optional maximum follower count. Profiles above this are skipped before video loading.",
+            "minimum": 0
+        },
+        "maxItems": {
+            "title": "Maximum dataset rows",
+            "type": "integer",
+            "description": "Hard ceiling on dataset rows produced by this Actor.",
+            "minimum": 1,
+            "maximum": 5000,
+            "default": 200
+        },
+        "concurrency": {
+            "title": "Concurrency",
+            "type": "integer",
+            "description": "Maximum creator profiles processed simultaneously. Capped at 2.",
+            "minimum": 1,
+            "maximum": 2,
+            "default": 2
+        },
+        "outputRows": {
+            "title": "Dataset output rows",
+            "description": "Select all rows or summary rows only.",
+            "type": "string",
+            "editor": "select",
+            "default": "all",
+            "enum": [
+                "all",
+                "summaryOnly"
+            ],
+            "enumTitles": [
+                "All rows",
+                "Summary rows only"
+            ]
+        },
+        "retrievalMode": {
+            "title": "Video retrieval mode",
+            "type": "string",
+            "description": "Free only is the default and never calls TikHub, even if a token is configured. TikHub fallback uses a potentially paid external API and requires TIKHUB_API_TOKEN.",
+            "editor": "select",
+            "default": "freeOnly",
+            "enum": [
+                "freeOnly",
+                "tikhubFallback"
+            ],
+            "enumTitles": [
+                "Free public TikTok methods only",
+                "TikHub API (may incur charges)"
+            ]
+        },
+        "useResidentialProxy": {
+            "title": "Use residential proxy for browser fallback (may incur Apify charges)",
+            "type": "boolean",
+            "description": "Off by default. Enable only if you accept Apify residential proxy charges. Free-only mode never requires a residential proxy.",
+            "default": false
+        },
+        "runLabel": {
+            "title": "Run label",
+            "type": "string",
+            "description": "Optional label echoed in each dataset row and SUMMARY.",
+            "editor": "textfield"
+        },
+        "maxVideosPerProfile": {
+            "title": "Maximum videos per profile (alias)",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Optional alias for videosPerProfile. When supplied, takes precedence.",
+            "editor": "number"
+        },
+        "emitTopCommentedRows": {
+            "title": "Emit separate top-commented video rows",
+            "type": "boolean",
+            "default": true,
+            "description": "True preserves existing output. Set false to avoid duplicate ranked video rows consuming maxItems; rankings remain in creator summary.",
+            "editor": "checkbox"
+        },
+        "sinceDate": {
+            "title": "Earliest video publication date (optional)",
+            "type": "string",
+            "editor": "textfield",
+            "description": "UTC YYYY-MM-DD. Excludes older videos from newest-video selection and summary statistics. Leave blank for previous behavior. Videos without verified publication dates may remain and should be reviewed."
+        }
     },
-    "videosPerProfile": {
-      "title": "Videos per profile",
-      "type": "integer",
-      "description": "Number of recent public videos to analyze per creator (1–30). Discovery is best-effort and may return fewer when TikTok blocks access; coverage reports incompleteness.",
-      "minimum": 1,
-      "maximum": 30,
-      "default": 30
-    },
-    "excludePinned": {
-      "title": "Exclude pinned videos",
-      "type": "boolean",
-      "description": "Exclude videos only when TikTok explicitly identifies them as pinned. Unknown pin status is retained and reported in coverage warnings.",
-      "default": true
-    },
-    "mode": {
-      "title": "Mode",
-      "type": "string",
-      "description": "full returns profile, video, and summary rows. profileOnly stops after profile data.",
-      "editor": "select",
-      "default": "full",
-      "enum": [
-        "full",
-        "profileOnly"
-      ],
-      "enumTitles": [
-        "Full",
-        "Profile only"
-      ]
-    },
-    "minFollowers": {
-      "title": "Minimum followers",
-      "type": "integer",
-      "description": "Optional minimum follower count. Profiles below this are skipped before video loading.",
-      "minimum": 0
-    },
-    "maxFollowers": {
-      "title": "Maximum followers",
-      "type": "integer",
-      "description": "Optional maximum follower count. Profiles above this are skipped before video loading.",
-      "minimum": 0
-    },
-    "maxItems": {
-      "title": "Maximum dataset rows",
-      "type": "integer",
-      "description": "Hard ceiling on dataset rows produced by this Actor.",
-      "minimum": 1,
-      "maximum": 5000,
-      "default": 200
-    },
-    "concurrency": {
-      "title": "Concurrency",
-      "type": "integer",
-      "description": "Maximum creator profiles processed simultaneously. Capped at 2.",
-      "minimum": 1,
-      "maximum": 2,
-      "default": 2
-    },
-    "outputRows": {
-      "title": "Dataset output rows",
-      "description": "Select all rows or summary rows only.",
-      "type": "string",
-      "editor": "select",
-      "default": "all",
-      "enum": [
-        "all",
-        "summaryOnly"
-      ],
-      "enumTitles": [
-        "All rows",
-        "Summary rows only"
-      ]
-    },
-    "retrievalMode": {
-      "title": "Video retrieval mode",
-      "type": "string",
-      "description": "Free only is the default and never calls TikHub, even if a token is configured. TikHub fallback uses a potentially paid external API and requires TIKHUB_API_TOKEN.",
-      "editor": "select",
-      "default": "freeOnly",
-      "enum": [
-        "freeOnly",
-        "tikhubFallback"
-      ],
-      "enumTitles": [
-        "Free public TikTok methods only",
-        "TikHub API (may incur charges)"
-      ]
-    },
-    "useResidentialProxy": {
-      "title": "Use residential proxy for browser fallback (may incur Apify charges)",
-      "type": "boolean",
-      "description": "Off by default. Enable only if you accept Apify residential proxy charges. Free-only mode never requires a residential proxy.",
-      "default": false
-    },
-    "runLabel": {
-      "title": "Run label",
-      "type": "string",
-      "description": "Optional label echoed in each dataset row and SUMMARY.",
-      "editor": "textfield"
-    },
-    "maxVideosPerProfile": {
-      "title": "Maximum videos per profile (alias)",
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 30,
-      "description": "Optional alias for videosPerProfile. When supplied, takes precedence.",
-      "editor": "number"
-    },
-    "emitTopCommentedRows": {
-      "title": "Emit separate top-commented video rows",
-      "type": "boolean",
-      "default": true,
-      "description": "True preserves existing output. Set false to avoid duplicate ranked video rows consuming maxItems; rankings remain in creator summary.",
-      "editor": "checkbox"
-    }
-  },
-  "required": [
-    "usernames"
-  ]
+    "required": [
+        "usernames"
+    ]
 }
