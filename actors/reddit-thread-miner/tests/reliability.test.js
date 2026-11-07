@@ -31,7 +31,7 @@ describe('public-search date and status handling', () => {
 
 describe('search discovery filters before limiting', () => {
     it('does not let old search hits displace newer matching threads', async () => {
-        const html = (id, date) => `<section><div><div><a href="https://www.reddit.com/r/igcse/comments/${id}/sample">Exam discussion</a><span>${date}</span></div></div></section>`;
+        const html = (id, date) => `<section><div class="result"><div><a href="https://www.reddit.com/r/igcse/comments/${id}/sample">Exam discussion</a></div><span> ${date} </span></div></section>`;
         const body = html('old123', 'January 25, 2025') + html('new123', 'October 20, 2026');
         const result = await discoverRedditThreads({
             subreddit: 'igcse', keywords: ['exam'], maxThreads: 1, maxPages: 1,
