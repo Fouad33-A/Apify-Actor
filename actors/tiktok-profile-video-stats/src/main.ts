@@ -3807,6 +3807,7 @@ async function processHandle(
         maxItems: number;
         retrievalMode: 'freeOnly' | 'tikhubFallback';
         useResidentialProxy: boolean;
+        sinceDate: string | null;
     },
 ): Promise<{
     username: string;
@@ -4335,9 +4336,15 @@ async function processHandle(
         await sleep(100);
     }
 
+    const eligibleCandidates = options.sinceDate
+        ? parsedCandidates.filter((entry) => entry.status !== 'parsed' || !entry.video?.createdAt || entry.video.createdAt >= `${options.sinceDate}T00:00:00.000Z`)
+        : parsedCandidates;
+    const excludedBySinceDate = parsedCandidates.length - eligibleCandidates.length;
+    if (excludedBySinceDate) warnings.push(`sinceDate excluded ${excludedBySinceDate} older video(s).`);
+
     const selection =
         selectVideos(
-            parsedCandidates,
+            eligibleCandidates,
             options.videosPerProfile,
             options.excludePinned,
         );
@@ -4625,6 +4632,9 @@ try {
                   ),
               );
 
+    const sinceDate = input.sinceDate == null || input.sinceDate === '' ? null : input.sinceDate;
+    if (sinceDate !== null && (typeof sinceDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(sinceDate) || !Number.isFinite(Date.parse(sinceDate)) || new Date(Date.parse(sinceDate)).toISOString().slice(0, 10) !== sinceDate)) throw new Error('sinceDate must be a valid YYYY-MM-DD UTC date.');
+
     const maxItems =
         clampInt(
             input.maxItems,
@@ -4732,6 +4742,7 @@ try {
                             maxItems,
                             retrievalMode,
                             useResidentialProxy,
+                            sinceDate,
                         },
                     );
                 } catch (
