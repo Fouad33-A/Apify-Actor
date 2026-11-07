@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.21-script-source-audit';
+const VERSION = '2026-11-07-v2.22-inline-and-resource-discovery';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -161,6 +161,50 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
         }
     }
     diag.guestQueryDiscovery.bundles = bundleDiagnostics;
+    // Inspect embedded data: JavaScript and external resource hints without
+    // making speculative GraphQL calls. Bound diagnostics and network requests.
+    const inlineScripts = scriptSources.filter(x => x.startsWith('data:application/x-javascript') && x.includes('base64,'));
+    const inlineDiagnostics = { count: inlineScripts.length, decoded: 0, commentMarkers: 0, candidateQueryIds: [], contexts: [] };
+    for (const src of inlineScripts.slice(0, 60)) {
+        try {
+            const body = Buffer.from(src.slice(src.indexOf('base64,') + 7), 'base64').toString('utf8');
+            inlineDiagnostics.decoded++;
+            const markers = [...body.matchAll(/(?:comments?|graphql|pagination|page_info)/gi)];
+            inlineDiagnostics.commentMarkers += markers.length;
+            for (const m of markers.slice(0, 2)) if (inlineDiagnostics.contexts.length < 8) {
+                inlineDiagnostics.contexts.push(body.slice(Math.max(0, m.index - 60), m.index + 100));
+            }
+            for (const m of body.matchAll(/(?:doc_id|query_id|query_hash)["'\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)) {
+                if (inlineDiagnostics.candidateQueryIds.length < 15 && !inlineDiagnostics.candidateQueryIds.includes(m[1])) inlineDiagnostics.candidateQueryIds.push(m[1]);
+            }
+        } catch {}
+    }
+    const resourceCandidates = [...new Set([
+        ...[...html.matchAll(/<(?:link|script)\b[^>]*\b(?:href|src)=["']([^"']+)["']/gi)].map(m => m[1]),
+        ...[...html.matchAll(/https?:\\?\/\\?\/[^"'\s<>]+?\.js(?:\?[^"'\s<>]*)?/gi)].map(m => m[0].replace(/\\\//g, '/')),
+    ].map(src => {
+        try {
+            const u = new URL(src, postUrl);
+            return u.protocol === 'https:' && /(^|\.)(instagram\.com|fbcdn\.net|cdninstagram\.com)$/i.test(u.hostname) && /\.js(?:$|\?)/i.test(u.pathname + u.search) ? u.href : null;
+        } catch { return null; }
+    }).filter(Boolean))];
+    diag.guestQueryDiscovery.inlineScripts = inlineDiagnostics;
+    diag.guestQueryDiscovery.resourceCandidates = resourceCandidates.length;
+    diag.guestQueryDiscovery.resourceHostSamples = [...new Set(resourceCandidates.slice(0, 10).map(u => new URL(u).hostname))];
+    // Inspect only a small number of actual external resources, if present.
+    const extraBundles = [];
+    for (const url of resourceCandidates.slice(0, 3)) {
+        try {
+            const r = await client.get(url, { throwHttpErrors: false, timeout: { request: 10000 } });
+            const body = String(r.body || '');
+            extraBundles.push({
+                host: new URL(url).hostname, status: r.statusCode, bytes: body.length,
+                commentMarkers: [...body.matchAll(/(?:comment(?:s|_list|_connection)?|pagination|page_info)/gi)].length,
+                candidateQueryIds: [...new Set([...body.matchAll(/(?:doc_id|query_id|query_hash)["'\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)].map(m => m[1]))].slice(0, 10),
+            });
+        } catch (e) { extraBundles.push({ host: new URL(url).hostname, error: String(e?.message ?? e).slice(0, 120) }); }
+    }
+    diag.guestQueryDiscovery.externalResources = extraBundles;
     const roots = embeddedJson(html);
     let owner = null;
     for (const root of roots) { owner ||= findOwner(root); add(harvest(root, postUrl, owner)); }
