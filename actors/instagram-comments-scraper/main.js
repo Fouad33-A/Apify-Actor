@@ -121,13 +121,13 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     // Passive discovery only: collect public GraphQL/query hints without
     // guessing document IDs or submitting undocumented GraphQL mutations.
     const html = boot.body || '';
-    const scriptSources = [...html.matchAll(/<script\\b[^>]*\\bsrc=["']([^"']+)["']/gi)].map(m => m[1]);
-    const queryHints = [...new Set([
-        ...[...html.matchAll(/(?:doc_id|query_id|query_hash)["'\\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)].map(m => m[1]),
-    ])];
+    const scriptSources = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(m => m[1]);
+    const queryHints = [...new Set(
+        [...html.matchAll(/(?:doc_id|query_id|query_hash)["'\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)].map(m => m[1])
+    )];
     diag.guestQueryDiscovery = {
         scriptCount: scriptSources.length,
-        instagramStaticScripts: scriptSources.filter(x => /instagram|cdninstagram|\\/static\\//i.test(x)).length,
+        instagramStaticScripts: scriptSources.filter(x => /instagram|cdninstagram|\/static\//i.test(x)).length,
         candidateQueryIds: queryHints.slice(0, 20),
         queryHintCount: queryHints.length,
         note: 'Passive public HTML discovery; query IDs are not verified as comment-pagination operations.',
