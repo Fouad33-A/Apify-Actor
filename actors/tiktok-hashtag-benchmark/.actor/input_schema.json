@@ -122,6 +122,12 @@
             "default": 100,
             "minimum": 1,
             "maximum": 500
+        },
+        "runLabel": {
+            "title": "Run label",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Optional label echoed in each video and benchmark row and in the SUMMARY record."
         }
     },
     "required": [
