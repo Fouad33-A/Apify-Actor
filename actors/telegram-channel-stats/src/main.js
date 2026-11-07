@@ -58,8 +58,9 @@ export async function run({
     let emitted = 0;
     let dateExcluded = 0;
     let noData = 0;
+    let suppressedRows = 0;
     const emit = async (row) => {
-        if (input.maxItems != null && emitted >= input.maxItems) return false;
+        if (input.maxItems != null && emitted >= input.maxItems) { suppressedRows++; return false; }
         const enriched = { ...row, sourceUrl: row.sourceUrl ?? row.url ?? (row.username ? `https://t.me/${row.username}` : null), runLabel: input.runLabel ?? null, scrapedAt: row.scrapedAt ?? new Date(now).toISOString(), status: row.status ?? 'ok' };
         await pushData(enriched);
         emitted++;
@@ -100,6 +101,7 @@ export async function run({
     const mentionedPool = new Map();
 
     const next = () => {
+        if (queue.length === 0) return null;
         if (atCap()) {
             stoppedBecause = 'maxItems';
             return null;
@@ -189,11 +191,11 @@ export async function run({
     };
 
     await Promise.all(Array.from({ length: input.maxItems == null ? input.concurrency : 1 }, worker));
-    if (atCap() && (queue.length || rows.some((r) => r.status === 'ok' && input.includePosts))) stoppedBecause = 'maxItems';
+    if (atCap() && (queue.length || suppressedRows)) stoppedBecause = 'maxItems';
     return {
         started,
         rows,
-        summary: { ...summarise(rows, { started, stoppedBecause, queuedLeft: queue.length, invalid: invalid.length }), status: stoppedBecause !== 'completed' || rows.some((r) => !['ok', 'filtered', 'no_matching_posts'].includes(r.status)) ? 'partial' : 'completed', itemsEmitted: emitted, noData, dateExcluded, runLabel: input.runLabel ?? null, sinceDate: input.sinceDate ?? null },
+        summary: { ...summarise(rows, { started, stoppedBecause, queuedLeft: queue.length, invalid: invalid.length }), status: stoppedBecause !== 'completed' || rows.some((r) => !['ok', 'filtered', 'no_matching_posts'].includes(r.status)) ? 'partial' : 'completed', itemsEmitted: emitted, suppressedRows, noData, dateExcluded, runLabel: input.runLabel ?? null, sinceDate: input.sinceDate ?? null },
     };
 }
 
