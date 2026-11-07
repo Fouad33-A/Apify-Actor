@@ -1,7 +1,13 @@
 {
-  "name":"instagram-comments-scraper",
-  "version":"2.13.0",
-  "type":"module",
-  "scripts":{"start":"node main.js"},
-  "dependencies":{"apify":"3.7.2","got-scraping":"4.2.1","tough-cookie":"6.0.1"}
+  "name": "instagram-comments-scraper",
+  "version": "2.13.0",
+  "type": "module",
+  "scripts": {
+    "start": "node guest-graphql-probe.js"
+  },
+  "dependencies": {
+    "apify": "3.7.2",
+    "got-scraping": "4.2.1",
+    "tough-cookie": "6.0.1"
+  }
 }
