@@ -8,7 +8,8 @@ async function execute({ sinceDate, fallbackThreads, fallbackStatus = 200 }) {
     const rows = [];
     const input = readInput({ subreddits: ['igcse'], keywords: ['exam'], sinceDate, includeComments: false, maxThreadsPerSubreddit: 10, delayBetweenRequestsMs: 0, maxItems: 30 });
     const summary = await run({ input, pushData: async (row) => rows.push(row), fetch: blocked,
-        discover: async () => ({ threads: fallbackThreads, attempts: [{ source: 'public_search', status: fallbackStatus, page: 0, found: fallbackThreads.length, added: fallbackThreads.length }], rateLimited: fallbackStatus === 429 }),
+        discoverArchive: async () => ({ threads: [], attempts: [], rateLimited: false }),
+            discover: async () => ({ threads: fallbackThreads, attempts: [{ source: 'public_search', status: fallbackStatus, page: 0, found: fallbackThreads.length, added: fallbackThreads.length }], rateLimited: fallbackStatus === 429 }),
         backoffMs: 0 });
     return { rows, summary };
 }
@@ -50,6 +51,7 @@ describe('request accounting', () => {
         const summary = await run({
             input, pushData: async (row) => rows.push(row),
             fetch: async () => ({ status: 403, body: 'Forbidden' }),
+            discoverArchive: async () => ({ threads: [], attempts: [], rateLimited: false }),
             discover: async ({ beforeRequest }) => {
                 for (let i = 0; i < 5; i++) { if (!beforeRequest()) break; braveCalls++; }
                 return { threads: [], attempts: [{ status: 429, page: 0 }], rateLimited: true };
@@ -67,6 +69,7 @@ describe('request accounting', () => {
         const summary = await run({
             input, pushData: async (row) => rows.push(row),
             fetch: async () => ({ status: 403, body: 'Forbidden' }),
+            discoverArchive: async () => ({ threads: [], attempts: [], rateLimited: false }),
             discover: async ({ beforeRequest }) => {
                 beforeRequest();
                 return { threads: [thread('new', '2026-10-05T00:00:00Z')], attempts: [{ status: 200, page: 0 }], rateLimited: false };
