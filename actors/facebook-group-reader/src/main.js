@@ -1,6 +1,7 @@
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { isLoginWall, normalizeGroup, parseGroupMeta, parsePosts } from './parse.js';
+import { classifyPost } from './classify.js';
 
 const DEFAULTS = {
     maxPostsPerGroup: 50,
@@ -212,6 +213,13 @@ export async function run({
                 recordType: 'group',
                 ...base,
                 ...bestMeta,
+                groupName: bestMeta.name ?? null,
+                groupUrl: group.url,
+                postsPerWeek: null,
+                rulesText: null,
+                allowsPromotion: null,
+                language: null,
+                verificationStatus: 'verified_public_post',
                 postsVisible: posts.length,
                 sourceSurface: 'public_html',
                 status: 'ok',
@@ -228,6 +236,10 @@ export async function run({
                     groupUrl: group.url,
                     sourceSurface: 'public_html',
                     ...post,
+                    postUrl: post.url ?? null,
+                    postedAt: post.createdAt ?? null,
+                    authorType: null,
+                    ...classifyPost(post.text),
                     status: 'ok',
                     scrapedAt: stamp(),
                 });
@@ -247,6 +259,12 @@ export async function run({
                 recordType: 'group',
                 ...base,
                 ...bestMeta,
+                groupName: groupVerified ? bestMeta.name ?? null : null,
+                groupUrl: group.url,
+                postsPerWeek: null,
+                rulesText: null,
+                allowsPromotion: null,
+                language: null,
                 postsVisible: 0,
                 sourceSurface: 'public_html',
                 status: sawLoginWall
