@@ -35,3 +35,12 @@ App row: `name`, `developer`, `averageRating`, `ratingCount`, `reviewsRead`, `re
 - **Google Play:** read through the `google-play-scraper` library, with Google Play filtering by star rating. Google changes its pages without notice, so this part can break; the app row then says why.
 - Themes are keyword matches in English, not a language model. A review can match several themes. Add words with `customThemes`.
 - Review text is public user content; use it for analysis, not for contacting reviewers.
+
+
+## Marketing Agent integration
+
+Optional inputs: `maxItems` (global dataset-row cap, including reviews, app summaries and no_data), `runLabel` (echoed on each row), and `sinceDate` (UTC YYYY-MM-DD cutoff for review publication dates). If both `recentDays` and `sinceDate` are set, the stricter cutoff applies. These filters only affect reviews exposed by the public store APIs; they do not expand store review-history coverage.
+
+Rows include `recordType`, `status`, `scrapedAt`, `sourceUrl` and `runLabel`. Apps with no matching reviews emit an additional `no_data` record when the global cap permits it. The original app summary is always attempted, but a tight `maxItems` cap may suppress it if earlier review rows consume the budget. For Claude workflows needing every app summary, set `includeReviews: false` or allocate enough `maxItems`.
+
+Legacy `OUTPUT` is preserved, and `SUMMARY` adds effective inputs, output counts, errors, `completed`/`partial` and stop reason. Theme matches remain simple keyword rules, not semantic inference. The Actor is FREE-priced, but Apify infrastructure may still be consumed; `maxTotalChargeUsd` is not a universal hard compute/storage budget.
