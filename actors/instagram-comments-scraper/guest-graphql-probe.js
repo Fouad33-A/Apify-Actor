@@ -45,16 +45,22 @@ try {
     const jar = new CookieJar();
     const client = gotScraping.extend({cookieJar:jar,proxyUrl:proxy ? await proxy.newUrl() : undefined,retry:{limit:0},timeout:{request:20000},headerGeneratorOptions:{browsers:[{name:'chrome',minVersion:130}],devices:['desktop'],locales:['en-US']}});
     const referer = 'https://www.instagram.com/p/'+sc+'/';
-    let bootstrapStatus = null;
-    try { const boot = await client.get(referer,{throwHttpErrors:false,followRedirect:false}); bootstrapStatus=boot.statusCode; } catch(e) { bootstrapStatus='error:'+String(e.message).slice(0,80); }
-    const headers = {'accept':'*/*','accept-language':'en-US,en;q=0.9','x-ig-app-id':'936619743392459','x-requested-with':'XMLHttpRequest','referer':referer,'origin':'https://www.instagram.com','content-type':'application/x-www-form-urlencoded','x-fb-friendly-name':'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery','x-root-field-name':'xig_polaris_media','x-asbd-id':'359341'};
+    let bootstrapStatus = null, pageHtml = '';
+    try { const boot = await client.get(referer,{throwHttpErrors:false,followRedirect:false}); bootstrapStatus=boot.statusCode; pageHtml=String(boot.body||''); } catch(e) { bootstrapStatus='error:'+String(e.message).slice(0,80); }
+    const extract = (patterns) => {for(const re of patterns){const m=pageHtml.match(re);if(m)return m[1];}return null;};
+    const csrf = extract([/"csrf_token"\s*:\s*"([^"]+)"/,/"csrf"\s*:\s*"([^"]+)"/]);
+    const lsd = extract([/\["LSD",\[\],\{"token":"([^"]+)"\}/,/"lsd":"([^"]+)"/]);
+    const appId = extract([/"app_id"\s*:\s*"(\d+)"/]) || '936619743392459';
+    const headers = {'accept':'*/*','accept-language':'en-US,en;q=0.9','x-ig-app-id':appId,'x-requested-with':'XMLHttpRequest','referer':referer,'origin':'https://www.instagram.com','content-type':'application/x-www-form-urlencoded','x-fb-friendly-name':'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery','x-root-field-name':'xig_polaris_media','x-asbd-id':'359341'};
+    if(csrf) headers['x-csrftoken']=csrf;
+    if(lsd) headers['x-fb-lsd']=lsd;
     const variants = [
       {name:'logged_out_exact',variables:{after:null,first:10,media_id:id}},
       {name:'logged_out_24',variables:{after:null,first:24,media_id:id}},
     ];
     for (const docId of docs) for (const variant of variants) {
-      const form = new URLSearchParams({av:'0',__d:'www',__user:'0',__a:'1',__comet_req:'7',fb_api_caller_class:'RelayModern',fb_api_req_friendly_name:'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery',variables:JSON.stringify(variant.variables),server_timestamps:'true',doc_id:docId});
-      const row = {sourceUrl:raw,shortcode:sc,mediaId:id,docId,variant:variant.name,proxyMode,bootstrapStatus};
+      const form = new URLSearchParams({av:'0',__d:'www',__user:'0',__a:'1',__comet_req:'7',fb_api_caller_class:'RelayModern',fb_api_req_friendly_name:'PolarisLoggedOutDesktopWWWPostCommentsPaginationQuery',variables:JSON.stringify(variant.variables),server_timestamps:'true',doc_id:docId,...(lsd?{lsd}:{})});
+      const row = {sourceUrl:raw,shortcode:sc,mediaId:id,docId,variant:variant.name,proxyMode,bootstrapStatus,hasCsrf:Boolean(csrf),hasLsd:Boolean(lsd),appIdSource:appId==='936619743392459'?'default':'page'};
       try {
         const response = await client.post('https://www.instagram.com/api/graphql',{headers,body:form.toString(),throwHttpErrors:false,followRedirect:false});
         row.httpStatus=response.statusCode;
