@@ -4036,10 +4036,12 @@ async function processHandle(
     const nativeDiscovery = await discoverGalleryDlVideos(username, options.videosPerProfile);
     if (nativeDiscovery.warning) warnings.push(nativeDiscovery.warning);
     if (nativeDiscovery.videos.length > 0) {
+        const nativeEligible = options.sinceDate ? nativeDiscovery.videos.filter(v => !v.createdAt || v.createdAt >= `${options.sinceDate}T00:00:00.000Z`) : nativeDiscovery.videos;
+        if (nativeEligible.length < nativeDiscovery.videos.length) warnings.push(`sinceDate excluded ${nativeDiscovery.videos.length - nativeEligible.length} native video(s).`);
         log.info('[NATIVE] @' + username + ': discovered=' + nativeDiscovery.videos.length + ', withComments=' + nativeDiscovery.videos.filter(v => v.comments !== null).length);
         const selectedNative = (options.excludePinned
-            ? nativeDiscovery.videos.filter(v => v.isPinned !== true)
-            : nativeDiscovery.videos).slice(0, options.videosPerProfile);
+            ? nativeEligible.filter(v => v.isPinned !== true)
+            : nativeEligible).slice(0, options.videosPerProfile);
         // Probe three video pages before attempting full enrichment; stop if
         // TikTok does not expose engagement metadata, avoiding 30 blocked requests.
         if (selectedNative.some(v => v.comments === null)) {
@@ -4099,7 +4101,7 @@ async function processHandle(
                 ...rankedByComments[i],
             }, options.maxItems);
         }
-        const parsedNative: ParsedCandidate[] = nativeDiscovery.videos.map(video => ({
+        const parsedNative: ParsedCandidate[] = nativeEligible.map(video => ({
             candidate: { id: video.videoId, createTime: video.createTime, isPinned: video.isPinned },
             status: 'parsed' as const, video, error: null,
         }));
@@ -4126,7 +4128,9 @@ async function processHandle(
     if (apiDiscovery && apiDiscovery.videos.length > 0) {
         log.info(`[TIKHUB] @${username}: ${apiDiscovery.videos.length} unique videos from ${apiDiscovery.pages} page(s)`);
         const sorted = [...apiDiscovery.videos].sort((a, b) => (b.createTime ?? 0) - (a.createTime ?? 0));
-        const unpinned = options.excludePinned ? sorted.filter(v => v.isPinned !== true) : sorted;
+        const dateEligible = options.sinceDate ? sorted.filter(v => !v.createdAt || v.createdAt >= `${options.sinceDate}T00:00:00.000Z`) : sorted;
+        if (dateEligible.length < sorted.length) warnings.push(`sinceDate excluded ${sorted.length - dateEligible.length} API video(s).`);
+        const unpinned = options.excludePinned ? dateEligible.filter(v => v.isPinned !== true) : dateEligible;
         const selectedApi = unpinned.slice(0, options.videosPerProfile);
         for (let i = 0; i < selectedApi.length; i++) {
             await pushLimited({
@@ -4135,7 +4139,7 @@ async function processHandle(
                 ...selectedApi[i],
             }, options.maxItems);
         }
-        const parsedApi: ParsedCandidate[] = apiDiscovery.videos.map(video => ({
+        const parsedApi: ParsedCandidate[] = dateEligible.map(video => ({
             candidate: { id: video.videoId, createTime: video.createTime, isPinned: video.isPinned },
             status: 'parsed' as const, video, error: null,
         }));
