@@ -318,7 +318,8 @@ try {
         seconds: Number(((Date.now() - started) / 1000).toFixed(2)), publicDataOnly: true, loginUsed: false,
         externalProviderUsed: false, source: 'instagram_public_graphql_with_html_fallback', residentialProxyRequested: useResidentialProxy,
         residentialProxyUsed: Boolean(pUrl) && proxyMode === 'residential', includeRepliesRequested: includeReplies,
-        coverageNote: 'Anonymous public GraphQL pagination with HTML fallback. Cursor exhaustion indicates no more comments exposed by the public endpoint, not a guarantee of all Instagram comments. No Instagram login or external provider.',
+        repliesCoverage: includeReplies ? 'top_level_comments_only_replies_not_verified' : 'top_level_comments_only',
+        coverageNote: 'Anonymous public GraphQL pagination with HTML fallback. Cursor exhaustion indicates no more top-level comments exposed by the public endpoint, not a guarantee of all Instagram comments. Nested reply retrieval is not implemented. No Instagram login or external provider.',
     };
     await Actor.setValue('SUMMARY', summary); log.info(`[FINAL] ${JSON.stringify(summary)}`);
 } finally { await Actor.exit(); }
