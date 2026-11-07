@@ -13,7 +13,7 @@ export function summariseVideos(videos) {
     if (!views.length) return null;
     const likes = sortedNums(videos.map((v) => v.likes));
     const comments = sortedNums(videos.map((v) => v.comments));
-    const er = sortedNums(videos.filter((v) => v.views > 0).map((v) => (v.likes + v.comments + v.shares) / v.views));
+    const er = sortedNums(videos.filter((v) => v.views > 0 && [v.likes, v.comments, v.shares].every(Number.isFinite)).map((v) => (v.likes + v.comments + v.shares) / v.views));
     const dates = videos
         .map((v) => v.createdAt)
         .filter(Boolean)
