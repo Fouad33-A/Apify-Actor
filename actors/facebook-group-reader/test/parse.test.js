@@ -178,7 +178,7 @@ describe('run', () => {
             fetchAttempt: async (url) => ({ status: 200, html: page([]), finalUrl: url }),
         });
         expect(rows.map((r) => r.recordType)).toEqual(['group', 'no_data', 'group']);
-        expect(summary).toMatchObject({ status: 'completed', itemsEmitted: 3, noData: 1 });
+        expect(summary).toMatchObject({ status: 'partial', stopReason: 'max_items_reached', itemsEmitted: 3, noData: 1 });
     });
     it('validates input', () => {
         expect(() => readInput({})).toThrow(/at least one/);
