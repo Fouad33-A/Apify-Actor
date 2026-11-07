@@ -52,3 +52,12 @@ Reads **public Telegram channels** through Telegram's own public web pages (`t.m
 - "Members" is the subscriber (channel) or member (group) count shown by Telegram.
 - Telegram may answer HTTP 429 if too many channels are read at once; the row says `blocked`. Lower the concurrency or add a proxy.
 - Read public information only. Respect Telegram's terms and the privacy of channel owners.
+
+
+## Marketing Agent integration
+
+Optional inputs: `maxItems` (global dataset-row cap), `runLabel` (echoed on every row), and `sinceDate` (strict UTC YYYY-MM-DD cutoff). `sinceDate` filters only the public posts sampled by this Actor, recalculating metrics from the matching subset. It does **not** retrieve a longer history or guarantee full coverage. The original public channel extraction, pagination and discovery behavior are unchanged when these inputs are omitted.
+
+Dataset rows now consistently include `recordType`, `status`, `sourceUrl`, `runLabel`, and `scrapedAt`. Each inaccessible or empty channel receives a `no_data` row when the global cap permits it; invalid input retains its existing `invalid_input` channel row. `maxItems` applies across channel, post, and no_data rows. When it suppresses output or leaves queued channels, `SUMMARY.status` is `partial`. `SUMMARY` in the key-value store preserves the existing `OUTPUT` key and adds exact input, row counts, excluded dates, and run status.
+
+`maxTotalChargeUsd` is not offered as a universal hard budget: this FREE Actor still consumes Apify infrastructure, and Apify's per-run dollar cap is not a guaranteed compute/storage ceiling. Keep `maxChannels`, `maxPostsPerChannel`, `maxItems`, and timeouts conservative.
