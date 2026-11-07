@@ -95,7 +95,7 @@ async function requestJson(client, url, headers) {
     } catch (e) { return { error: String(e?.message ?? e).slice(0, 220) }; }
 }
 
-async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs = null) {
+async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs = null, graphqlPageSize = 24) {
     const jar = new CookieJar();
     const client = gotScraping.extend({
         cookieJar: jar, proxyUrl: pUrl || undefined,
@@ -162,7 +162,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
         let after = null, stagnant = 0;
         const cursors = new Set();
         for (let page = 1; page <= 40 && rows.size < cap; page++) {
-            const variables = { after, first: Math.min(24, Math.max(10, cap - rows.size)), media_id: mediaId };
+            const variables = { after, first: Math.min(graphqlPageSize, Math.max(10, cap - rows.size)), media_id: mediaId };
             const form = new URLSearchParams({
                 av: '0', __d: 'www', __user: '0', __a: '1', __comet_req: '7',
                 fb_api_caller_class: 'RelayModern',
@@ -248,7 +248,7 @@ await Actor.init();
 const started = Date.now();
 try {
     const input = await Actor.getInput() || {};
-    const allowed = new Set(['postUrls','maxCommentsPerPost','includeReplies','minLikes','maxItems','maxVideosPerCreator','useResidentialProxy','runLabel','sinceDate','proxyMode']);
+    const allowed = new Set(['postUrls','maxCommentsPerPost','includeReplies','minLikes','maxItems','maxVideosPerCreator','useResidentialProxy','runLabel','sinceDate','proxyMode','debugGraphqlPageSize']);
     const unknown = Object.keys(input).filter((k) => !allowed.has(k));
     if (unknown.length) throw new Error(`Unknown input field(s): ${unknown.join(', ')}`);
     if (!Array.isArray(input.postUrls) || !input.postUrls.length) throw new Error('postUrls is required and must be a non-empty array.');
@@ -262,6 +262,7 @@ try {
     const proxyMode = input.proxyMode ?? (useResidentialProxy ? 'residential' : 'none');
     if (!['residential','datacenter','none'].includes(proxyMode)) throw new Error('proxyMode must be residential, datacenter or none');
     const sinceMs = dateCutoff(input.sinceDate);
+    const graphqlPageSize = input.debugGraphqlPageSize === 10 ? 10 : 24;
     const normalized = input.postUrls.map(raw => ({ raw: String(raw), url: normalizeUrl(raw) }));
     const urls = [...new Set(normalized.map(x => x.url).filter(Boolean))];
     let skipped = normalized.filter(x => !x.url).length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0, blockedPosts = 0;
@@ -284,7 +285,7 @@ try {
         processed++;
         const amount = Math.min(maxPer, maxItems - returned);
         try {
-            const { rows, diag, dateExcluded: excluded } = await scrapePost(postUrl, amount, minLikes, includeReplies, pUrl, sinceMs);
+            const { rows, diag, dateExcluded: excluded } = await scrapePost(postUrl, amount, minLikes, includeReplies, pUrl, sinceMs, graphqlPageSize);
             dateExcluded += excluded;
             requestDiagnostics.push({ postUrl, ...diag });
             if (diag.paginationVerified) verifiedPaginationPosts++;
