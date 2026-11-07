@@ -296,7 +296,7 @@ export async function run({
             });
             // A group with zero usable posts gets its own no_data row, unless
             // the global dataset row cap prevents another emission.
-            await emit({
+            const emittedNoData = await emit({
                 recordType: 'no_data',
                 groupId: group.id,
                 groupUrl: group.url,
@@ -306,6 +306,10 @@ export async function run({
                 groupStatus,
                 scrapedAt: stamp(),
             });
+            if (!emittedNoData) {
+                totals.status = 'partial';
+                totals.stopReason ??= 'max_items_reached';
+            }
         }
 
         log.info(`group ${group.id} done`);
