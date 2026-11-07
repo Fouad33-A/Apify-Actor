@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.19-bundle-inspection';
+const VERSION = '2026-11-07-v2.20-cdn-host-fix';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -127,6 +127,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     )];
     diag.guestQueryDiscovery = {
         scriptCount: scriptSources.length,
+        scriptHostSamples: [...new Set(scriptSources.slice(0, 15).map(src => { try { return new URL(src, postUrl).hostname; } catch { return 'invalid'; } }))].slice(0, 8),
         instagramStaticScripts: scriptSources.filter(x => /instagram|cdninstagram|\/static\//i.test(x)).length,
         candidateQueryIds: queryHints.slice(0, 20),
         queryHintCount: queryHints.length,
@@ -137,7 +138,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     const bundleUrls = [...new Set(scriptSources.map(src => {
         try {
             const u = new URL(src, postUrl);
-            return u.protocol === 'https:' && /(^|\.)((cdn)?instagram\.com|fbcdn\.net)$/i.test(u.hostname) && /\.js(?:$|\?)/i.test(u.pathname + u.search) ? u.href : null;
+            return u.protocol === 'https:' && /(^|\.)(instagram\.com|fbcdn\.net|cdninstagram\.com)$/i.test(u.hostname) && /\.js(?:$|\?)/i.test(u.pathname + u.search) ? u.href : null;
         } catch { return null; }
     }).filter(Boolean))].slice(0, 4);
     const bundleDiagnostics = [];
