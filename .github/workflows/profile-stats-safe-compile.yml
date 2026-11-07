@@ -1,0 +1,18 @@
+name: Profile Stats Safe Compile
+on:
+  push:
+    branches: [fix/profile-stats-acceptance-safe-nov7]
+  workflow_dispatch:
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install and compile (no Actor execution)
+        working-directory: actors/tiktok-profile-video-stats
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
