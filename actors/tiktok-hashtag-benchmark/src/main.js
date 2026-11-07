@@ -244,6 +244,20 @@ async function main() {
         const input = readInput(await Actor.getInput());
         const summary = await run({ input, pushData: (r) => Actor.pushData(r), shouldStop: () => stop });
         await Actor.setValue('OUTPUT', summary);
+        await Actor.setValue('SUMMARY', {
+            recordType: 'run_summary',
+            status: stop ? 'partial' : (summary.videosKept > 0 ? 'ok' : 'no_data'),
+            scrapedAt: new Date().toISOString(),
+            runLabel: input.runLabel ?? null,
+            sourceUrl: null,
+            inputUsed: input,
+            ...summary,
+            itemsReturned: summary.videosKept,
+            requestsMade: null,
+            itemsBlocked: null,
+            costUsd: null,
+            costNote: 'Exact Apify billing and request counts are not available authoritatively inside this Actor.',
+        });
         log.info(`Done: ${summary.hashtags} hashtag(s), ${summary.videosKept} video(s) used.`);
     } catch (error) {
         log.error(String(error?.message ?? error));
