@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readInput, run } from '../src/main.js';
 import { discoverRedditThreads } from '../src/search.js';
+import { discoverArcticThreads } from '../src/arctic.js';
 
 const thread = (id, updated) => ({ id: `t3_${id}`, title: 'Test discussion', text: 'exam help', url: `https://www.reddit.com/r/igcse/comments/${id}/test`, author: null, updated, matchedKeywords: ['exam'] });
 const blocked = async () => ({ status: 403, body: 'Forbidden' });
@@ -98,5 +99,32 @@ describe('public search rate-limit handling', () => {
         expect(result.rateLimited).toBe(true);
         expect(result.attempts).toHaveLength(1);
         expect(result.threads).toHaveLength(0);
+    });
+});
+
+describe('Arctic Shift post discovery', () => {
+    it('returns dated archived threads with real metadata and merged keywords', async () => {
+        let requests = 0;
+        const result = await discoverArcticThreads({
+            subreddit: 'igcse', keywords: ['past papers', 'mock'], maxThreads: 3,
+            dateFromMs: Date.parse('2025-01-01'),
+            beforeRequest: () => { requests++; return true; },
+            fetch: async () => ({ status: 200, body: JSON.stringify({ data: [
+                { id: 'abc123', subreddit: 'igcse', title: 'Past papers help', selftext: 'Need help', author: 'student', created_utc: 1760000000, score: 12, num_comments: 8 },
+                { id: 'old123', subreddit: 'igcse', title: 'Old', created_utc: 1600000000, score: 2 },
+            ] }) }),
+        });
+        expect(requests).toBe(2);
+        expect(result.threads).toHaveLength(1);
+        expect(result.threads[0]).toMatchObject({ id: 't3_abc123', score: 12, numComments: 8, matchedKeywords: ['past papers', 'mock'] });
+    });
+    it('stops on 429 without retrying further keywords', async () => {
+        let requests = 0;
+        const result = await discoverArcticThreads({
+            subreddit: 'SAT', keywords: ['one', 'two'],
+            fetch: async () => { requests++; return { status: 429, body: '' }; },
+        });
+        expect(requests).toBe(1);
+        expect(result.rateLimited).toBe(true);
     });
 });
