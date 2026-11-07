@@ -8,16 +8,27 @@
             "type": "array",
             "description": "Search terms to look up, for example igcse, sat prep, ib maths tutor.",
             "editor": "stringList",
-            "default": ["igcse", "sat prep"],
-            "prefill": ["igcse", "sat prep"]
+            "default": [
+                "igcse",
+                "sat prep"
+            ],
+            "prefill": [
+                "igcse",
+                "sat prep"
+            ]
         },
         "geos": {
             "title": "Countries",
             "type": "array",
             "description": "Two-letter country codes such as AE, SA, QA, GB, US. Leave the list empty or use an empty entry for worldwide.",
             "editor": "stringList",
-            "default": ["AE"],
-            "prefill": ["AE", "SA"]
+            "default": [
+                "AE"
+            ],
+            "prefill": [
+                "AE",
+                "SA"
+            ]
         },
         "timeRange": {
             "title": "Time range",
@@ -39,8 +50,20 @@
             "description": "Where the searches happened.",
             "editor": "select",
             "default": "",
-            "enum": ["", "youtube", "news", "images", "froogle"],
-            "enumTitles": ["Web search", "YouTube", "News", "Image search", "Google Shopping"]
+            "enum": [
+                "",
+                "youtube",
+                "news",
+                "images",
+                "froogle"
+            ],
+            "enumTitles": [
+                "Web search",
+                "YouTube",
+                "News",
+                "Image search",
+                "Google Shopping"
+            ]
         },
         "category": {
             "title": "Category id",
@@ -78,7 +101,28 @@
             "editor": "number",
             "default": 2500,
             "minimum": 0
+        },
+        "maxItems": {
+            "title": "Maximum dataset rows",
+            "type": "integer",
+            "editor": "number",
+            "minimum": 1,
+            "description": "Optional global cap across interest, timeline and relatedQuery rows."
+        },
+        "runLabel": {
+            "title": "Run label",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Optional label echoed on each row and SUMMARY."
+        },
+        "sinceDate": {
+            "title": "Timeline cutoff date",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Optional UTC YYYY-MM-DD. Filter Trends timeline points to this date or later within the selected timeRange; recalculates interest metrics. Does not retrieve data outside timeRange."
         }
     },
-    "required": ["keywords"]
+    "required": [
+        "keywords"
+    ]
 }
