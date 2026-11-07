@@ -6,7 +6,8 @@ await Actor.init();
 
 const VERSION = '2026-11-06-v5.3';
 const input = (await Actor.getInput()) ?? {};
-const ALLOWED_KEYS = new Set(['postUrls', 'videoUrls', 'maxCommentsPerPost', 'includeReplies', 'minAskers', 'minVideos', 'languages', 'creatorVideos', 'questionAnalysis']);
+const runLabel = typeof input.runLabel === 'string' ? input.runLabel : '';
+const ALLOWED_KEYS = new Set(['postUrls', 'videoUrls', 'maxCommentsPerPost', 'includeReplies', 'minAskers', 'minVideos', 'languages', 'creatorVideos', 'questionAnalysis', 'runLabel']);
 const unknownKeys = Object.keys(input).filter((key) => !ALLOWED_KEYS.has(key));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -255,6 +256,9 @@ function parseGenuineComment(comment) {
         questionType: isQuestionText(text) ? questionType(text) : null,
         language: detectLanguage(text),
         replyCount: Number.isFinite(Number(comment.reply_comment_total)) ? Number(comment.reply_comment_total) : null,
+        likes: comment.digg_count == null && comment.like_count == null ? null : (Number.isFinite(Number(comment.digg_count ?? comment.like_count)) ? Number(comment.digg_count ?? comment.like_count) : null),
+        createdAt: Number.isFinite(Number(comment.create_time)) && Number(comment.create_time) > 0 ? new Date(Number(comment.create_time) * 1000).toISOString() : null,
+        isCreatorReply: false,
     };
 }
 
@@ -360,7 +364,16 @@ async function scrapeVideo(inputUrl, questionRows) {
                 recordType: 'comment',
                 commentId: comment.commentId,
                 commentText: comment.commentText,
+                text: comment.commentText,
                 username: comment.username,
+                author: comment.username,
+                likes: comment.likes,
+                createdAt: comment.createdAt,
+                isCreatorReply: comment.isCreatorReply,
+                status: 'ok',
+                scrapedAt: new Date().toISOString(),
+                sourceUrl: finalUrl,
+                runLabel,
                 userId: comment.userId,
                 isQuestion: comment.isQuestion,
                 questionType: comment.questionType,
@@ -428,6 +441,9 @@ try {
 
     const summary = {
         recordType: 'RUN_SUMMARY',
+        runLabel,
+        scrapedAt: new Date().toISOString(),
+        sourceUrl: inputUrls[0] ?? null,
         status: failedVideos === inputUrls.length ? 'failed' : (failedVideos ? 'partial' : 'completed'),
         version: VERSION,
         videosRequested: inputUrls.length,
@@ -458,6 +474,7 @@ try {
 
     await Actor.pushData(summary);
     await Actor.setValue('OUTPUT', summary);
+    await Actor.setValue('SUMMARY', { ...summary, input, requestsMade: null, itemsReturned: totalComments, costUsd: null });
     log.info('[FINAL] ' + JSON.stringify({ videosRequested: inputUrls.length, successfulVideos, failedVideos, totalComments, repeatedQuestions: repeatedQuestions.length }));
 } catch (error) {
     exitCode = 1;
