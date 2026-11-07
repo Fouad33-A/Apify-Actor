@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { readInput, run } from '../src/main.js';
+import { classifyPost } from '../src/classify.js';
 import { isLoginWall, normalizeGroup, parseGroupMeta, parsePosts } from '../src/parse.js';
 
 // A page built to the structure this reader looks for (meta tags + embedded JSON with message text and creation time).
@@ -155,5 +156,19 @@ describe('run', () => {
     it('validates input', () => {
         expect(() => readInput({})).toThrow(/at least one/);
         expect(() => readInput({ groups: ['g1abc'], sinceDate: 'x' })).toThrow(/sinceDate/);
+    });
+});
+
+describe('marketing analysis helpers', () => {
+    it('identifies explicit student questions and exam/subject keywords without modifying source text', () => {
+        expect(classifyPost('How do I revise IGCSE math?')).toEqual({
+            isQuestion: true, topicTags: ['exam:igcse', 'subject:math'], classificationMethod: 'keyword_heuristic',
+        });
+        expect(classifyPost('هل عندك أسئلة رياضيات؟')).toMatchObject({
+            isQuestion: true, topicTags: ['subject:math'],
+        });
+        expect(classifyPost('Revision resources available for GCSE biology')).toMatchObject({
+            isQuestion: false, topicTags: ['exam:gcse', 'subject:biology'],
+        });
     });
 });
