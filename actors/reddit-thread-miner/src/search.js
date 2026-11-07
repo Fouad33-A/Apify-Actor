@@ -82,7 +82,7 @@ export function redditCommentsIn(html, subreddit, submissionId) {
 }
 
 export async function discoverRedditThreads({
-    subreddit, keywords = [], maxThreads = 100, maxPages = 2, fetch = fetchBrave,
+    subreddit, keywords = [], maxThreads = 100, maxPages = 2, dateFromMs = null, dateToMs = null, fetch = fetchBrave,
     paceMs = 4000, backoffMs = 20_000, shouldStop = () => false, log = () => {},
 }) {
     const terms = keywords.length ? keywords : [''];
@@ -90,7 +90,8 @@ export async function discoverRedditThreads({
     const attempts = [];
     let rateLimited = false;
     for (const keyword of terms) {
-        const query = `site:reddit.com/r/${subreddit}/comments ${keyword}`.trim();
+        const dateTerms = [dateFromMs != null ? `after:${new Date(dateFromMs - 86400000).toISOString().slice(0, 10)}` : '', dateToMs != null ? `before:${new Date(dateToMs + 86400000).toISOString().slice(0, 10)}` : ''].filter(Boolean).join(' ');
+        const query = `site:reddit.com/r/${subreddit}/comments ${keyword} ${dateTerms}`.trim();
         for (let page = 0; page < maxPages && found.size < maxThreads && !shouldStop(); page += 1) {
             let res;
             for (let attempt = 0; attempt <= 2; attempt += 1) {
@@ -102,6 +103,10 @@ export async function discoverRedditThreads({
             const rows = res.status === 200 ? redditResultsIn(res.body, subreddit) : [];
             const before = found.size;
             for (const row of rows) {
+                if (dateFromMs != null || dateToMs != null) {
+                    const timestamp = Date.parse(row.updated);
+                    if (!Number.isFinite(timestamp) || (dateFromMs != null && timestamp < dateFromMs) || (dateToMs != null && timestamp > dateToMs)) continue;
+                }
                 const known = found.get(row.id);
                 if (known) {
                     if (keyword && !known.matchedKeywords.includes(keyword)) known.matchedKeywords.push(keyword);
@@ -109,7 +114,7 @@ export async function discoverRedditThreads({
             }
             attempts.push({ query, page, status: res.status, found: rows.length, added: found.size - before });
             log(`Search "${query}" page ${page + 1}: HTTP ${res.status}, ${rows.length} Reddit thread(s), ${found.size - before} new`);
-            if (res.status !== 200 || (page > 0 && found.size === before)) break;
+            if (res.status !== 200 || !rows.length || (page > 0 && found.size === before && rows.length < 5)) break;
             if (paceMs) await sleep(paceMs);
         }
         if (found.size >= maxThreads) break;
