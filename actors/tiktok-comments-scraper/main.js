@@ -258,7 +258,8 @@ function parseGenuineComment(comment) {
         replyCount: Number.isFinite(Number(comment.reply_comment_total)) ? Number(comment.reply_comment_total) : null,
         likes: comment.digg_count == null && comment.like_count == null ? null : (Number.isFinite(Number(comment.digg_count ?? comment.like_count)) ? Number(comment.digg_count ?? comment.like_count) : null),
         createdAt: Number.isFinite(Number(comment.create_time)) && Number(comment.create_time) > 0 ? new Date(Number(comment.create_time) * 1000).toISOString() : null,
-        isCreatorReply: false,
+        // Anonymous comment payload does not reliably establish creator identity.
+        isCreatorReply: null,
     };
 }
 
