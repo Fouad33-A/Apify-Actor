@@ -107,6 +107,13 @@
       "type": "string",
       "editor": "textfield",
       "description": "Optional label echoed in comment rows and SUMMARY."
+    },
+    "maxItems": {
+      "title": "Maximum comments per run",
+      "type": "integer",
+      "editor": "number",
+      "minimum": 1,
+      "description": "Optional global cap on comment records across all video URLs. Existing per-video maxCommentsPerPost remains in effect. Run-summary row is additional."
     }
   }
 }
