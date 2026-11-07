@@ -72,6 +72,7 @@ export async function run({
         if (input.maxRequests != null && totals.requestsMade >= input.maxRequests) { stopReason ??= 'request_limit'; return true; }
         return false;
     };
+    const reserveRequest = () => { if (budgetStop()) return false; totals.requestsMade++; return true; };
     const emit = async (row) => { if (outputCount >= maxItems) return false; await pushData({ sourceUrl: row.url ?? row.sourceUrl ?? `https://www.reddit.com/r/${row.subreddit}/`, runLabel: input.runLabel ?? '', ...row }); outputCount++; totals.itemsReturned++; return true; };
     const stamp = () => now().toISOString();
 
@@ -80,7 +81,7 @@ export async function run({
             if (budgetStop()) return { status: 'limit_reached', detail: stopReason };
             await sleep(input.delayBetweenRequestsMs);
             if (budgetStop()) return { status: 'limit_reached', detail: stopReason };
-            totals.requestsMade++;
+            if (!reserveRequest()) return { status: 'limit_reached', detail: stopReason };
             const res = await fetch(url);
             const verdict = classifyResponse(res.status, res.body);
             if (verdict.status === 'rate_limited' && attempt < 2) { await sleep(backoffMs); continue; }
@@ -90,7 +91,7 @@ export async function run({
 
     async function archiveComments(thread) {
         try {
-            const archived = await readArchive(thread.url || thread.id, { limit: input.maxCommentsPerThread });
+            const archived = await readArchive(thread.url || thread.id, { limit: input.maxCommentsPerThread, beforeRequest: reserveRequest });
             const comments = (archived.comments ?? []).map((c) => ({
                 ...c,
                 ...tagText(c.text, { themes: input.themes, competitors: input.competitors }),
@@ -150,9 +151,9 @@ export async function run({
                 dateFromMs: input.dateFromMs, dateToMs: input.dateToMs,
                 maxPages: Math.min(3, Math.max(1, Math.ceil(input.maxThreadsPerSubreddit / 20))),
                 shouldStop: budgetStop,
+                beforeRequest: reserveRequest,
                 log: (m) => log.info(m),
             });
-            totals.requestsMade += fallback.attempts.length;
             fallbackSucceeded = fallback.attempts.some((a) => a.status === 200);
             problems.push(...fallback.attempts.map((a) => ({ source: 'public_search', ...a })));
             if (fallback.rateLimited) totals.itemsBlocked++;
@@ -184,7 +185,7 @@ export async function run({
             let commentsStatus = input.includeComments ? 'skipped_limit' : 'not_requested';
             let commentsSource = null;
 
-            if (input.includeComments && withComments < input.maxThreadsWithComments && input.maxCommentsPerThread > 0) {
+            if (!budgetStop() && input.includeComments && withComments < input.maxThreadsWithComments && input.maxCommentsPerThread > 0) {
                 withComments += 1;
 
                 if (thread.discoverySource === 'reddit_rss') {
