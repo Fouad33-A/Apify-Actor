@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.16-alternate-public-json';
+const VERSION = '2026-11-07-v2.17-remove-dead-routes';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -122,27 +122,6 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     let owner = null;
     for (const root of roots) { owner ||= findOwner(root); add(harvest(root, postUrl, owner)); }
     diag.ssrRows = rows.size;
-    // Some public post representations return JSON rather than HTML. These
-    // routes are opportunistic; never assume they expose full pagination.
-    if (rows.size < cap) {
-        for (const suffix of ['?__a=1&__d=dis', '?__a=1']) {
-            const alternate = await requestJson(client, postUrl + suffix, {
-                accept: 'application/json, text/plain, */*',
-                referer: postUrl,
-                'x-ig-app-id': '936619743392459',
-            });
-            const found = alternate.json ? harvest(alternate.json, postUrl, owner) : [];
-            const before = rows.size;
-            add(found);
-            diag.alternateSources.push({
-                suffix, status: alternate.status ?? null, type: alternate.type ?? null,
-                harvested: found.length, added: rows.size - before,
-                error: alternate.error ?? null,
-                jsonResponse: Boolean(alternate.json),
-            });
-            if (rows.size >= cap) break;
-        }
-    }
     diag.sourceCoverage = rows.size >= cap ? 'requested_cap_reached_from_html' : 'embedded_html_only_or_api_unverified';
 
     const mediaId = shortcodeToMediaId(shortcodeFromUrl(postUrl));
@@ -181,7 +160,6 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
         diag.contracts.push(cd);
     }
     if (diag.paginationVerified) diag.sourceCoverage = 'api_comments_accessible';
-    else if (diag.alternateSources.some(x => x.added > 0)) diag.sourceCoverage = 'html_plus_alternate_public_json';
     return { rows: [...rows.values()].slice(0, cap), diag, dateExcluded };
 }
 
