@@ -37,6 +37,7 @@ export function readInput(raw) {
     if (!hashtags.length) throw new Error('Give at least one hashtag in "hashtags" (with or without #).');
     if (input.runLabel != null && typeof input.runLabel !== 'string') throw new Error('runLabel must be a string.');
     if (input.maxItems != null && (!Number.isInteger(input.maxItems) || input.maxItems < 1)) throw new Error('maxItems must be a positive whole number.');
+    if (input.sinceDate != null && (typeof input.sinceDate !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(input.sinceDate) || !Number.isFinite(Date.parse(input.sinceDate)) || new Date(Date.parse(input.sinceDate)).toISOString().slice(0, 10) !== input.sinceDate)) throw new Error('sinceDate must be a valid YYYY-MM-DD date.');
     for (const k of ['maxVideosPerHashtag', 'recentDays', 'maxSearchPages'])
         if (!Number.isInteger(input[k]) || input[k] < 1)
             throw new Error(`Input "${k}" must be a whole number of 1 or more.`);
@@ -69,12 +70,12 @@ export async function fetchVideoPage(url) {
     return { status: res.statusCode, html: res.body };
 }
 
-export function keepVideo(video, { tag, recentDays, regions, now }) {
+export function keepVideo(video, { tag, recentDays, regions, now, sinceDate = null }) {
     const hasTag = video.hashtags.includes(tag) || new RegExp(`#${tag}(?![\\w])`, 'i').test(video.description);
     if (!hasTag) return 'notTagged';
     const published = video.createdAt ? Date.parse(video.createdAt) : NaN;
     if (!Number.isFinite(published)) return 'unknownDate';
-    if (published > now + 86_400_000 || now - published > recentDays * 86_400_000) return 'tooOld';
+    if (published > now + 86_400_000 || now - published > recentDays * 86_400_000 || (sinceDate && published < Date.parse(sinceDate))) return 'tooOld';
     if (regions.length && !regions.includes(String(video.region ?? '').toUpperCase())) return 'otherRegion';
     return null;
 }
@@ -143,7 +144,7 @@ export async function run({
         // the video id carries the post time, so old videos are skipped without reading their pages
         const eligible = found.urls.filter((u) => {
             const posted = postedAtFromId(u.split('/video/')[1]);
-            if (posted != null && now() - posted > input.recentDays * 86_400_000) {
+            if (posted != null && (now() - posted > input.recentDays * 86_400_000 || (input.sinceDate && posted < Date.parse(input.sinceDate)))) {
                 dropped.tooOld += 1;
                 return false;
             }
@@ -172,6 +173,7 @@ export async function run({
                     const why = keepVideo(parsed.video, {
                         tag,
                         recentDays: input.recentDays,
+                        sinceDate: input.sinceDate ?? null,
                         regions: input.regions,
                         now: now(),
                     });
@@ -220,6 +222,7 @@ export async function run({
                             : `only ${kept.length} video(s) matched; treat the numbers as a rough guide`,
             regionsWanted: input.regions,
             recentDays: input.recentDays,
+            sinceDate: input.sinceDate ?? null,
             videoAddressesFound: found.urls.length,
             videoPageReadLimit: input.maxVideoPageReads,
             candidateLimitReached,
