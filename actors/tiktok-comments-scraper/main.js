@@ -446,12 +446,27 @@ try {
     log.info(`[QUESTION SCREEN] ${repeatedQuestions.length} clusters met ${minAskers} distinct askers on ${minVideos} distinct videos.`);
     for (const cluster of repeatedQuestions) await Actor.pushData(cluster);
 
+    // Emit a machine-readable no-results row only when all requested videos were
+    // processed without a fatal per-video error and no comments were returned.
+    if (totalComments === 0 && failedVideos === 0) {
+        await Actor.pushData({
+            recordType: 'no_data',
+            status: 'no_data',
+            reason: 'No public top-level comments were returned for the requested videos.',
+            scrapedAt: new Date().toISOString(),
+            sourceUrl: inputUrls[0] ?? null,
+            runLabel,
+            videosRequested: inputUrls.length,
+            commentsSaved: 0,
+        });
+    }
+
     const summary = {
         recordType: 'RUN_SUMMARY',
         runLabel,
         scrapedAt: new Date().toISOString(),
         sourceUrl: inputUrls[0] ?? null,
-        status: maxItems !== null && globalCommentsSaved >= maxItems && successfulVideos + failedVideos < inputUrls.length ? 'partial' : (failedVideos === inputUrls.length ? 'failed' : (failedVideos ? 'partial' : 'completed')),
+        status: failedVideos === inputUrls.length ? 'failed' : (failedVideos ? 'partial' : (totalComments === 0 ? 'no_data' : (maxItems !== null && globalCommentsSaved >= maxItems && successfulVideos + failedVideos < inputUrls.length ? 'partial' : 'completed'))),
         version: VERSION,
         videosRequested: inputUrls.length,
         successfulVideos,
