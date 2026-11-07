@@ -35,6 +35,7 @@ export function readInput(raw) {
         ),
     ];
     if (!hashtags.length) throw new Error('Give at least one hashtag in "hashtags" (with or without #).');
+    if (input.runLabel != null && typeof input.runLabel !== 'string') throw new Error('runLabel must be a string.');
     for (const k of ['maxVideosPerHashtag', 'recentDays', 'maxSearchPages'])
         if (!Number.isInteger(input[k]) || input[k] < 1)
             throw new Error(`Input "${k}" must be a whole number of 1 or more.`);
@@ -176,7 +177,7 @@ export async function run({
         await Promise.all(Array.from({ length: input.concurrency }, () => worker()));
         const scrapedAt = new Date(now()).toISOString();
         if (input.includeVideos)
-            for (const v of kept) await pushData({ recordType: 'video', hashtag: tag, status: 'ok', ...v, scrapedAt });
+            for (const v of kept) await pushData({ recordType: 'video', hashtag: tag, status: 'ok', ...v, scrapedAt, runLabel: input.runLabel ?? null, sourceUrl: v.url ?? null });
         totals.videosKept += kept.length;
         const stats = summariseVideos(kept);
         const status =
@@ -194,6 +195,8 @@ export async function run({
         await pushData({
             recordType: 'benchmark',
             hashtag: tag,
+            runLabel: input.runLabel ?? null,
+            sourceUrl: null,
             status,
             statusDetail:
                 status === 'ok'
