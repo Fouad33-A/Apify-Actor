@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.17-remove-dead-routes';
+const VERSION = '2026-11-07-v2.18-guest-query-discovery';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -104,7 +104,7 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     });
     const rows = new Map();
     let dateExcluded = 0;
-    const diag = { bootstrap: null, ssrRows: 0, alternateSources: [], contracts: [], sourceCoverage: 'unknown', paginationVerified: false };
+    const diag = { bootstrap: null, ssrRows: 0, guestQueryDiscovery: null, contracts: [], sourceCoverage: 'unknown', paginationVerified: false };
     const add = (list) => {
         for (const r of list) {
             if (!includeReplies && r.isReply) continue;
@@ -118,7 +118,21 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
     const boot = await client.get(postUrl, { throwHttpErrors: false, timeout: { request: 25000 } });
     diag.bootstrap = { status: boot.statusCode, type: boot.headers['content-type'] ?? null, bytes: boot.body?.length ?? 0 };
     if (boot.statusCode >= 400) throw new Error(`Bootstrap HTTP ${boot.statusCode}`);
-    const roots = embeddedJson(boot.body || '');
+    // Passive discovery only: collect public GraphQL/query hints without
+    // guessing document IDs or submitting undocumented GraphQL mutations.
+    const html = boot.body || '';
+    const scriptSources = [...html.matchAll(/<script\\b[^>]*\\bsrc=["']([^"']+)["']/gi)].map(m => m[1]);
+    const queryHints = [...new Set([
+        ...[...html.matchAll(/(?:doc_id|query_id|query_hash)["'\\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)].map(m => m[1]),
+    ])];
+    diag.guestQueryDiscovery = {
+        scriptCount: scriptSources.length,
+        instagramStaticScripts: scriptSources.filter(x => /instagram|cdninstagram|\\/static\\//i.test(x)).length,
+        candidateQueryIds: queryHints.slice(0, 20),
+        queryHintCount: queryHints.length,
+        note: 'Passive public HTML discovery; query IDs are not verified as comment-pagination operations.',
+    };
+    const roots = embeddedJson(html);
     let owner = null;
     for (const root of roots) { owner ||= findOwner(root); add(harvest(root, postUrl, owner)); }
     diag.ssrRows = rows.size;
@@ -227,7 +241,7 @@ try {
         exactInput: { ...input, maxItems, maxCommentsPerPost: maxPer, maxVideosPerCreator: maxVPC },
         seconds: Number(((Date.now() - started) / 1000).toFixed(2)), publicDataOnly: true, loginUsed: false,
         externalProviderUsed: false, source: 'instagram_public_got_scraping_v213', residentialProxyRequested: useResidentialProxy,
-        residentialProxyUsed: Boolean(pUrl), includeRepliesRequested: includeReplies,
+        residentialProxyUsed: Boolean(pUrl) && proxyMode === 'residential', includeRepliesRequested: includeReplies,
         coverageNote: 'Public Instagram only; no Instagram credentials, supplied cookies, browser, external scraper/provider, or database.',
     };
     await Actor.setValue('SUMMARY', summary); log.info(`[FINAL] ${JSON.stringify(summary)}`);
