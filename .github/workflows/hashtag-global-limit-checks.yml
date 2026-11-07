@@ -1,0 +1,23 @@
+name: Hashtag Global Limit Checks
+on:
+  push:
+    branches: [fix/hashtag-global-maxitems-safe-nov7]
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and schema
+        working-directory: actors/tiktok-hashtag-benchmark
+        run: |
+          node --check src/main.js
+          node -e "const s=require('./.actor/input_schema.json');if(s.properties.maxItems.type!=='integer')process.exit(1)"
+      - name: Existing regression tests
+        working-directory: actors/tiktok-hashtag-benchmark
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
