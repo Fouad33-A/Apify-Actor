@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.24-guest-graphql-pagination';
+const VERSION = '2026-11-07-v2.25-graphql-validated';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -248,7 +248,7 @@ await Actor.init();
 const started = Date.now();
 try {
     const input = await Actor.getInput() || {};
-    const allowed = new Set(['postUrls','maxCommentsPerPost','includeReplies','minLikes','maxItems','maxVideosPerCreator','useResidentialProxy','runLabel','sinceDate','proxyMode','debugGraphqlPageSize']);
+    const allowed = new Set(['postUrls','maxCommentsPerPost','includeReplies','minLikes','maxItems','maxVideosPerCreator','useResidentialProxy','runLabel','sinceDate','proxyMode']);
     const unknown = Object.keys(input).filter((k) => !allowed.has(k));
     if (unknown.length) throw new Error(`Unknown input field(s): ${unknown.join(', ')}`);
     if (!Array.isArray(input.postUrls) || !input.postUrls.length) throw new Error('postUrls is required and must be a non-empty array.');
@@ -262,7 +262,7 @@ try {
     const proxyMode = input.proxyMode ?? (useResidentialProxy ? 'residential' : 'none');
     if (!['residential','datacenter','none'].includes(proxyMode)) throw new Error('proxyMode must be residential, datacenter or none');
     const sinceMs = dateCutoff(input.sinceDate);
-    const graphqlPageSize = input.debugGraphqlPageSize === 10 ? 10 : 24;
+    const graphqlPageSize = 24;
     const normalized = input.postUrls.map(raw => ({ raw: String(raw), url: normalizeUrl(raw) }));
     const urls = [...new Set(normalized.map(x => x.url).filter(Boolean))];
     let skipped = normalized.filter(x => !x.url).length, returned = 0, noData = 0, dateExcluded = 0, postsWithComments = 0, blockedPosts = 0;
