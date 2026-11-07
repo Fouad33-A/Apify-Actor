@@ -3,6 +3,7 @@ import { Actor, log } from 'apify';
 import { normalizeChannel } from './parse.js';
 import { buildChannelRow, buildPostRow, summarise } from './rows.js';
 import { readChannel } from './scrape.js';
+import { channelMetrics } from './metrics.js';
 
 const DEFAULTS = {
     maxPostsPerChannel: 100,
@@ -14,6 +15,9 @@ const DEFAULTS = {
     maxChannels: 50,
     delayBetweenRequestsMs: 600,
     concurrency: 2,
+    maxItems: null,
+    runLabel: null,
+    sinceDate: null,
 };
 
 export function readInput(raw) {
@@ -27,7 +31,15 @@ export function readInput(raw) {
     }
     input.maxPostsPerChannel = Math.min(input.maxPostsPerChannel, 1000);
     input.concurrency = Math.min(input.concurrency, 4);
-    return { ...input, channels };
+    if (input.maxItems != null && (!Number.isInteger(input.maxItems) || input.maxItems < 1)) {
+        throw new Error('"maxItems" must be a positive whole number.');
+    }
+    if (input.sinceDate != null && (!/^\d{4}-\d{2}-\d{2}$/.test(input.sinceDate)
+        || Number.isNaN(Date.parse(input.sinceDate))
+        || new Date(input.sinceDate).toISOString().slice(0, 10) !== input.sinceDate)) {
+        throw new Error('"sinceDate" must be a valid YYYY-MM-DD date.');
+    }
+    return { ...input, channels, sinceMs: input.sinceDate ? Date.parse(input.sinceDate) : null };
 }
 
 export async function run({
@@ -43,6 +55,17 @@ export async function run({
     const queued = new Set();
     const rows = [];
     const invalid = [];
+    let emitted = 0;
+    let dateExcluded = 0;
+    let noData = 0;
+    const emit = async (row) => {
+        if (input.maxItems != null && emitted >= input.maxItems) return false;
+        const enriched = { ...row, sourceUrl: row.sourceUrl ?? row.url ?? (row.username ? `https://t.me/${row.username}` : null), runLabel: input.runLabel ?? null, scrapedAt: row.scrapedAt ?? new Date(now).toISOString(), status: row.status ?? 'ok' };
+        await pushData(enriched);
+        emitted++;
+        return true;
+    };
+    const atCap = () => input.maxItems != null && emitted >= input.maxItems;
 
     for (const raw of input.channels) {
         const parsed = normalizeChannel(raw);
@@ -69,7 +92,7 @@ export async function run({
             scrapedAt: new Date().toISOString(),
         };
         rows.push(row);
-        await pushData(row);
+        if (!await emit(row)) break;
     }
 
     let processed = 0;
@@ -77,6 +100,10 @@ export async function run({
     const mentionedPool = new Map();
 
     const next = () => {
+        if (atCap()) {
+            stoppedBecause = 'maxItems';
+            return null;
+        }
         if (shouldStop()) {
             stoppedBecause = 'aborted';
             return null;
@@ -113,11 +140,36 @@ export async function run({
                     posts: [],
                 };
             }
+            if (result.status === 'ok' && input.sinceMs != null) {
+                const before = result.posts.length;
+                result.posts = result.posts.filter((post) => post.date && Date.parse(post.date) >= input.sinceMs);
+                dateExcluded += before - result.posts.length;
+                if (result.posts.length) {
+                    result.metrics = channelMetrics(result.posts, {
+                        members: result.members, windowDays: input.windowDays, freshHours: input.freshHours,
+                        exhausted: false, now, self: item.username.toLowerCase(),
+                    });
+                } else {
+                    result.metrics = null;
+                    result.status = 'no_matching_posts';
+                    result.statusDetail = `No publicly sampled posts matched sinceDate ${input.sinceDate}; ${before} older post(s) excluded.`;
+                }
+            }
             const row = buildChannelRow(result, { discoveredFrom: item.discoveredFrom, now });
             rows.push(row);
-            await pushData(row);
+            await emit(row);
             if (input.includePosts && result.status === 'ok') {
-                for (const post of result.posts) await pushData(buildPostRow(post, result));
+                for (const post of result.posts) {
+                    if (!await emit(buildPostRow(post, result))) break;
+                }
+            }
+            if (result.status !== 'ok' && result.status !== 'filtered' || result.status === 'ok' && result.posts.length === 0) {
+                if (await emit({
+                    recordType: 'no_data', username: item.username, status: 'no_data',
+                    reason: result.status === 'ok' ? 'no_posts_exposed' : result.status,
+                    sourceUrl: `https://t.me/${item.username}`,
+                    scrapedAt: new Date(now).toISOString(),
+                })) noData++;
             }
             log.info(
                 `${item.username}: ${result.status}${result.members != null ? `, ${result.members} members` : ''}`,
@@ -136,11 +188,12 @@ export async function run({
         }
     };
 
-    await Promise.all(Array.from({ length: input.concurrency }, worker));
+    await Promise.all(Array.from({ length: input.maxItems == null ? input.concurrency : 1 }, worker));
+    if (atCap() && (queue.length || rows.some((r) => r.status === 'ok' && input.includePosts))) stoppedBecause = 'maxItems';
     return {
         started,
         rows,
-        summary: summarise(rows, { started, stoppedBecause, queuedLeft: queue.length, invalid: invalid.length }),
+        summary: { ...summarise(rows, { started, stoppedBecause, queuedLeft: queue.length, invalid: invalid.length }), status: stoppedBecause !== 'completed' || rows.some((r) => !['ok', 'filtered', 'no_matching_posts'].includes(r.status)) ? 'partial' : 'completed', itemsEmitted: emitted, noData, dateExcluded, runLabel: input.runLabel ?? null, sinceDate: input.sinceDate ?? null },
     };
 }
 
@@ -167,6 +220,7 @@ async function main() {
             shouldStop: () => stop,
         });
         await Actor.setValue('OUTPUT', summary);
+        await Actor.setValue('SUMMARY', { ...summary, exactInput: await Actor.getInput(), scrapedAt: new Date().toISOString() });
         log.info(`Done: ${summary.channelsOk} channels read, ${summary.channelsFailed} not readable.`);
     } catch (error) {
         log.error(String(error?.message ?? error));
