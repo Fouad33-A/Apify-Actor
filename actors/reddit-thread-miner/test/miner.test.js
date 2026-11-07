@@ -142,6 +142,7 @@ describe('run', () => {
             pushData: async (r) => void rows.push(r),
             fetch: async () => ({ status: 403, body: 'Blocked' }),
             // Brave search is the fallback when Reddit refuses; here it finds nothing
+            discoverArchive: async () => ({ threads: [], attempts: [], rateLimited: false }),
             discover: async () => ({ threads: [], attempts: [], rateLimited: false }),
             readArchive: async () => ({ status: 'ok', comments: [] }),
         });
@@ -161,6 +162,7 @@ describe('run', () => {
                 return { status: 429, body: '' };
             },
             backoffMs: 0,
+            discoverArchive: async () => ({ threads: [], attempts: [], rateLimited: false }),
             discover: async () => ({ threads: [], attempts: [], rateLimited: true }),
         });
         expect(calls).toBe(3);
