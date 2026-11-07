@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
 import { CookieJar } from 'tough-cookie';
 
-const VERSION = '2026-11-07-v2.18-guest-query-discovery';
+const VERSION = '2026-11-07-v2.19-bundle-inspection';
 const dateCutoff = (value) => {
     if (value == null || value === '') return null;
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw new Error('sinceDate must be a valid YYYY-MM-DD date');
@@ -132,6 +132,33 @@ async function scrapePost(postUrl, cap, minLikes, includeReplies, pUrl, sinceMs 
         queryHintCount: queryHints.length,
         note: 'Passive public HTML discovery; query IDs are not verified as comment-pagination operations.',
     };
+    // Inspect a small bounded sample of first-party public JS bundles. This is
+    // diagnostic discovery, not proof that any candidate query paginates.
+    const bundleUrls = [...new Set(scriptSources.map(src => {
+        try {
+            const u = new URL(src, postUrl);
+            return u.protocol === 'https:' && /(^|\.)((cdn)?instagram\.com|fbcdn\.net)$/i.test(u.hostname) && /\.js(?:$|\?)/i.test(u.pathname + u.search) ? u.href : null;
+        } catch { return null; }
+    }).filter(Boolean))].slice(0, 4);
+    const bundleDiagnostics = [];
+    for (const url of bundleUrls) {
+        try {
+            const response = await client.get(url, { throwHttpErrors: false, timeout: { request: 12000 } });
+            const body = String(response.body || '');
+            const markers = [...body.matchAll(/(?:comment(?:s|_list|_connection)?|pagination|page_info)/gi)].slice(0, 40);
+            const ids = [...new Set([...body.matchAll(/(?:doc_id|query_id|query_hash)["'\s:=]+([0-9]{8,24}|[a-f0-9]{32})/gi)].map(m => m[1]))];
+            bundleDiagnostics.push({
+                status: response.statusCode, bytes: body.length,
+                path: new URL(url).pathname.slice(-100),
+                commentMarkerCountSample: markers.length,
+                markerContexts: markers.slice(0, 5).map(m => body.slice(Math.max(0, m.index - 90), m.index + 120).slice(0, 210)),
+                candidateQueryIds: ids.slice(0, 10),
+            });
+        } catch (error) {
+            bundleDiagnostics.push({ path: new URL(url).pathname.slice(-100), error: String(error?.message ?? error).slice(0, 160) });
+        }
+    }
+    diag.guestQueryDiscovery.bundles = bundleDiagnostics;
     const roots = embeddedJson(html);
     let owner = null;
     for (const root of roots) { owner ||= findOwner(root); add(harvest(root, postUrl, owner)); }
